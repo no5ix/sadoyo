@@ -324,8 +324,8 @@ struct NotchView: View {
     }
 
     @ViewBuilder private var page: some View {
-        if service.showingSections {
-            NotchSectionsView(service: service)
+        if service.showsStackedSections {
+            stacked
         } else if scrollsVertically {
             ScrollView {
                 content
@@ -338,6 +338,76 @@ struct NotchView: View {
             .notchScrollEdgeFade()
         } else {
             content
+        }
+    }
+
+    /// The parts the open island shows at once, in their order: a song's
+    /// player, a running timer, the monitoring detail chosen from a menu bar
+    /// indicator, and Explore under them. Each part is the page it has on its
+    /// own, so its controls and its interactions stay where they are.
+    @ViewBuilder private var stacked: some View {
+        if scrollsStacked {
+            ScrollView {
+                stackedBody
+                    .padding(.bottom, 4)
+                    .contentShape(Rectangle())
+            }
+            .scrollIndicators(.automatic)
+            .notchScrollEdgeFade()
+        } else {
+            stackedBody
+        }
+    }
+
+    /// A detail is taller than the island keeps for it, as it was on its own
+    /// page, so the stack scrolls there; elsewhere it scrolls only when the
+    /// parts do not fit above the island's own edge.
+    private var scrollsStacked: Bool {
+        service.selectedMetric != nil || service.stackedContentHeight > service.contentSize.height
+    }
+
+    private var stackedBody: some View {
+        VStack(alignment: .leading, spacing: NotchLayout.spacing) {
+            ForEach(service.stackedParts) { part in
+                stackedSection(part)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .environment(\.notchBand, stackedBand)
+    }
+
+    /// The stacked parts sit below the island's row instead of around its
+    /// camera, so each draws its own controls where the row would put them.
+    private var stackedBand: NotchBand {
+        var band = NotchBand(geometry: service.expandedGeometry, contentWidth: service.contentSize.width)
+        band.besideCamera = false
+        band.side = service.contentSize.width
+        band.trailingSectionsButton = false
+        band.pageSectionsButton = false
+        return band
+    }
+
+    @ViewBuilder private func stackedSection(_ part: NotchStackedPart) -> some View {
+        let size = CGSize(width: service.contentSize.width, height: part.height)
+        switch part.section {
+        case .music:
+            NotchMusicView(size: size, extrasHeight: service.geometry.musicExtrasHeight)
+        case .timer:
+            NotchTimerView(size: size)
+        case .detail:
+            if let metric = service.selectedMetric { metricDetail(metric) }
+        case .explore:
+            NotchSectionsView(service: service)
+        }
+    }
+
+    /// A monitoring detail, as the island's page and its stack draw it.
+    @ViewBuilder private func metricDetail(_ metric: MetricDetailKind) -> some View {
+        if metric == .fan {
+            NotchFanControlView()
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { service.updateFanDetailHeight($0) }
+        } else {
+            MetricDetailView(kind: metric)
         }
     }
 
@@ -504,7 +574,9 @@ struct NotchView: View {
 
     private var scrollsVertically: Bool {
         guard !service.showingAppPanel else { return false }
-        return contentOverflows || service.selectedMetric != nil
+        // A chosen detail belongs to the stacked surface, which decides for
+        // itself whether its parts fit.
+        return contentOverflows
             || (service.selected == .captures && service.captureContent != nil)
             || (service.selected == .tools && launcher.isEditing && launcher.activeUtility == nil)
     }
@@ -556,13 +628,6 @@ struct NotchView: View {
     @ViewBuilder private var content: some View {
         if service.showingAppPanel {
             MenuPanelView(notchSize: pageSize)
-        } else if let metric = service.selectedMetric {
-            if metric == .fan {
-                NotchFanControlView()
-                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { service.updateFanDetailHeight($0) }
-            } else {
-                MetricDetailView(kind: metric)
-            }
         } else if service.modules.isEmpty {
             NotchEmptyView(symbol: "slider.horizontal.3", message: text.empty) {
                 NotchPillButton(title: l10n.s.menuSettings, prominent: true, action: service.openSettings)

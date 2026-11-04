@@ -3,6 +3,9 @@
 Agent-assisted contributions follow the same [contribution guide](../CONTRIBUTING.md)
 as any other change. You do not need to declare the tools you used. The contributor
 remains responsible for understanding the change and answering review questions.
+[AGENTS.md](../AGENTS.md) collects the repository's build, test and reuse
+instructions for the agent itself, and [docs/ARCHITECTURE.md](ARCHITECTURE.md)
+maps where a change usually belongs.
 
 Give the agent the issue, the intended outcome and the scope. Have it inspect the
 existing implementation and related work before implementing a substantial change.

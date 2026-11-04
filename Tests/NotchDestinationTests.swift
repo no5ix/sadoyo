@@ -49,10 +49,15 @@ enum NotchDestinationContract {
         var running = true
         var syncs = 0
         var suspensions = 0
+        var session = NotchTimerSession()
         func syncWithPreferences() { running = true; syncs += 1 }
         func suspend() { running = false; suspensions += 1 }
     }
     enum NotchTimerService { static var shared = Timer() }
+    /// Only whether a song is known matters to the parts the island stacks.
+    struct Playback {}
+    final class Player { var playback: Playback? }
+    enum NotchMusicService { static var shared = Player() }
     enum PreciseVolumeRollerService {
         static let shared = Service()
         struct Service { func syncWithPreferences() {} }
@@ -172,6 +177,7 @@ enum NotchDestinationContract {
         reopeningContracts(defaults: defaults, suite: suite)
         countdownContracts(defaults: defaults, suite: suite)
         stepBackContracts(suite)
+        detailStackContracts(suite: suite)
         // A page opened while the Command Bar is in the island takes its place.
         let barHost = Service()
         barHost.expanded = true
@@ -391,6 +397,76 @@ enum NotchDestinationContract {
             suite.expect(held.expanded && held.selectedMetric == .cpu,
                          "Escape leaves the island as it is during a \(blocker), like closing does")
         }
+    }
+
+    /// A click on a menu bar indicator opens its detail in the island, and the
+    /// parts already there stay where they are: the song, the running timer,
+    /// the detail, and Explore under all of them.
+    private static func detailStackContracts(suite: TestSuite) {
+        let previousPlayback = NotchMusicService.shared.playback
+        let previousSession = NotchTimerService.shared.session
+        NotchMusicService.shared.playback = Playback()
+        NotchTimerService.shared.session = NotchTimerSession()
+        NotchTimerService.shared.session.start(mode: .timer, minutes: 5, now: 1_000)
+        defer {
+            NotchMusicService.shared.playback = previousPlayback
+            NotchTimerService.shared.session = previousSession
+        }
+        let indicator = Service()
+        indicator.compactActivity = .timer
+        indicator.open(.music)
+        suite.expect(indicator.stackedSections.isEmpty && indicator.selected == .music,
+                     "a page of its own still fills the island by itself")
+        indicator.showMetric(.memory, toggle: true)
+        suite.expect(indicator.expanded && indicator.selectedMetric == .memory,
+                     "a click on the RAM indicator opens the memory detail in the open island")
+        suite.expect(indicator.stackedSections == [.music, .timer, .detail, .explore],
+                     "the memory detail joins the song and the timer, and Explore stays under them")
+        indicator.showMetric(.disk, toggle: true)
+        suite.expect(indicator.expanded && indicator.selectedMetric == .disk
+                     && indicator.stackedSections == [.music, .timer, .detail, .explore],
+                     "the disk indicator takes the one detail's place without moving the other parts")
+        suite.expect(indicator.selected == .system && indicator.compactActivity == .timer,
+                     "the detail takes the island's page and leaves its running timer alone")
+        indicator.showMetric(.disk, toggle: true)
+        suite.expect(!indicator.expanded,
+                     "the same indicator clicked again closes the island, as the menu panel does")
+        for kind in [MetricDetailKind.cpu, .gpu, .memory, .network, .disk, .battery, .power, .fan,
+                     .connectedDevices] {
+            let every = Service()
+            every.open(.system, metric: kind)
+            suite.expect(every.stackedSections == [.music, .timer, .detail, .explore],
+                         "a \(kind) detail opens among the island's parts, with Explore under it")
+        }
+
+        let gallery = Service()
+        gallery.open(.music)
+        gallery.toggleSections()
+        suite.expect(gallery.stackedSections == [.music, .timer, .explore],
+                     "Explore keeps the song and the timer above it")
+        gallery.showMetric(.memory)
+        suite.expect(gallery.stackedSections == [.music, .timer, .detail, .explore],
+                     "a detail opened under Explore's parts is another part, not a replacement")
+        NotchMusicService.shared.playback = nil
+        suite.expect(gallery.stackedSections == [.timer, .detail, .explore],
+                     "a song with nothing to show leaves the rest of the stack in place")
+        NotchTimerService.shared.session = NotchTimerSession()
+        suite.expect(gallery.stackedSections == [.detail, .explore],
+                     "a timer that ends takes nothing else with it")
+        gallery.goBack()
+        suite.expect(gallery.stackedSections.isEmpty && gallery.selected == .system && gallery.selectedMetric == nil,
+                     "closing the detail steps back to the System page, which is a page of its own")
+        gallery.toggleSections()
+        suite.expect(gallery.stackedSections == [.explore],
+                     "with nothing running Explore is the island's own page again")
+        // A detail opened inside the island, from the System page's card, steps
+        // back to that page rather than closing.
+        let card = Service()
+        card.open(.system)
+        card.showMetric(.cpu)
+        card.stepBack()
+        suite.expect(card.expanded && card.selected == .system && card.selectedMetric == nil,
+                     "a detail opened from its card steps back to the System page, stack and all")
     }
 
     /// The island resigns by hand while it stays on screen. The keyboard goes

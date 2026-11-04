@@ -806,9 +806,72 @@ final class NotchService: ObservableObject {
 
     var musicShowsVolume: Bool { NotchSupport.showsMusicVolume() }
 
+    /// Whether the open island stacks its parts instead of showing one page.
+    var showsStackedSections: Bool {
+        NotchStackedSections.stacks(gallery: showingSections, detail: selectedMetric != nil,
+                                    appPanel: showingAppPanel, commandBar: showingCommandBar)
+    }
+
+    /// The song's player, a running timer, the monitoring detail chosen from a
+    /// menu bar indicator and Explore, in the order the island draws them.
+    var stackedSections: [NotchStackedSection] {
+        NotchStackedSections.visible(stacks: showsStackedSections, music: showsMusicSection,
+                                     timer: showsTimerSection, detail: selectedMetric != nil)
+    }
+
+    /// The parts with the height each keeps, so the island and its page agree
+    /// on what the stack measures.
+    var stackedParts: [NotchStackedPart] {
+        NotchStackedSections.parts(stackedSections, music: musicSectionHeight, timer: timerSectionHeight,
+                                   detail: detailSectionHeight, gallery: gallerySectionHeight)
+    }
+
+    /// The stack as the island's page sees it, which the island grows to hold
+    /// and scrolls when the display will not.
+    var stackedContentHeight: CGFloat { NotchStackedSections.contentHeight(parts: stackedParts) }
+
+    /// The player holds its place while the island is allowed to show music and
+    /// its information is available, playing or paused, as its page shows it;
+    /// with no song there is nothing to stack. The same gate the closed island
+    /// uses decides, so hiding music on the island hides it here too.
+    var showsMusicSection: Bool {
+        NotchSupport.watchesMusicActivity() && NotchMusicService.shared.playback != nil
+    }
+
+    /// A timer holds its place while a session runs or waits. Setting a new
+    /// one stays on the timer's page, which is where the ruler is; an idle
+    /// ruler is not an activity.
+    var showsTimerSection: Bool {
+        modules.contains(.timer) && NotchTimerService.shared.session.hasSession
+    }
+
+    /// The player at the height it keeps on its own page, with the lyrics or
+    /// the queue the page has open under it.
+    private var musicSectionHeight: CGFloat {
+        let player = NotchLayout.musicPlayerHeight(band: 0, playing: NotchMusicService.shared.playback != nil,
+                                                   showVolume: musicShowsVolume)
+        let extras = NotchLyricsSupport.isEnabled() || NotchQueueSupport.isEnabled()
+        return player + (musicDetailVisible && extras ? geometry.musicExtrasHeight : 0)
+    }
+
+    private var timerSectionHeight: CGFloat {
+        let session = NotchTimerService.shared.session
+        guard session.hasSession else { return 0 }
+        return NotchLayout.timer(mode: session.mode, hasSession: true, height: geometry.pageBudget)
+    }
+
+    /// A detail keeps the page a detail gets, or the Fan Control card's own
+    /// measured height.
+    private var detailSectionHeight: CGFloat {
+        guard selectedMetric == .fan, let measured = fanDetailHeight else { return geometry.pageBudget }
+        return min(geometry.pageBudget, max(0, measured) + 4)
+    }
+
+    private var gallerySectionHeight: CGFloat { geometry.gallerySectionHeight(count: filteredSections.count) }
+
     var expandedSize: CGSize {
-        if showingSections {
-            return geometry.sectionPickerSize(count: filteredSections.count)
+        if showsStackedSections {
+            return geometry.stackedSize(content: stackedContentHeight)
         }
         let musicExtras = NotchLyricsSupport.isEnabled() || NotchQueueSupport.isEnabled()
         let launcher = QuickLauncherService.shared
@@ -1966,7 +2029,7 @@ final class NotchService: ObservableObject {
     /// Fan Control is a single card, so its detail fits the card instead of
     /// opening a tall, mostly empty page. A taller card still scrolls in it.
     func updateFanDetailHeight(_ height: CGFloat) {
-        guard expanded, selectedMetric == .fan, !showingAppPanel, !showingSections,
+        guard expanded, selectedMetric == .fan, !showingAppPanel,
               height.isFinite, height > 0 else { return }
         let measured = ceil(height)
         guard fanDetailHeight != measured else { return }
@@ -4452,12 +4515,17 @@ final class NotchService: ObservableObject {
         }
         let musicWanted = modules.contains(.music) && ((expanded && (selected == .music || (selected == .controls && NotchSupport.controls().contains(.music)))
             && !showingAppPanel && !showingSections && !showingCommandBar)
+            // The stack shows the player among the parts it holds, so it reads
+            // playback there too, as the player's own page does.
+            || (expanded && showsStackedSections && NotchSupport.watchesMusicActivity())
             || ((!hiddenUntilHover || NotchSupport.hiddenShowsActivity())
                 && (NotchSupport.watchesMusicActivity() || NotchSupport.routes(.track))))
         if musicWanted { NotchMusicService.shared.start() } else { NotchMusicService.shared.stop() }
         let needs = expanded && selected == .system && selectedMetric == nil && modules.contains(.system) && !showingAppPanel
             && !showingSections && !showingCommandBar
-        var detailNeeds = expanded && !showingSections ? selectedMetric?.monitorNeeds ?? .none : .none
+        // A detail is sampled while the island draws it, whether or not the
+        // gallery shows under it in the same stack.
+        var detailNeeds = expanded && !showingAppPanel && !showingCommandBar ? selectedMetric?.monitorNeeds ?? .none : .none
         if needs, AppFeature.monitorDisk.isAvailable { detailNeeds.disk = true }
         if needs, AppFeature.fanControl.isAvailable { detailNeeds.fanSpeed = true }
         if needs, AppFeature.connectedDevices.isAvailable { detailNeeds.connectedDevices = true }

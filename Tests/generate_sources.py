@@ -1362,7 +1362,8 @@ def main():
         "    var compactCompanion:",
         "    var surfaceSize:", "    var surfaceShift:", "    func collapse(",
         "    private func detachCaptureIfClosingOnCollapse(", "    func endCaptureControls(",
-        "    private func syncVisibleConsumers(", "    private func releaseMonitor("])
+        "    private func syncVisibleConsumers(", "    private func releaseMonitor(",
+        "    var showsStackedSections:"])
     for call in ["NotchSupport.controls", "NotchSupport.watchesMusicActivity", "NotchSupport.idleContent",
                  "NotchSupport.hiddenShowsActivity"]:
         music_visibility = music_visibility.replace(call + "()", call + "(in: ReviewDefaults.current)")
@@ -1581,6 +1582,12 @@ def main():
               .replace("UserDefaults.standard", "ReviewDefaults.current!")
           + declaration(notch, "    func openCountdownEvent()")
           + declaration(notch, "    var reopeningModule:")
+          + declaration(notch, "    var showsStackedSections:")
+          + declaration(notch, "    var showsMusicSection:")
+              .replace("NotchSupport.watchesMusicActivity()",
+                       "NotchSupport.watchesMusicActivity(in: ReviewDefaults.current)")
+          + declaration(notch, "    var showsTimerSection:")
+          + declaration(notch, "    var stackedSections:")
           + declaration(notch, "    private func updateSession(").replace("private func", "func", 1)
               .replace("AppFeature.mixer.isAvailable", "AppFeature.mixer.isAvailable(in: ReviewDefaults.current)")
               .replace("NotchLockScreenSupport.playsSounds()", "NotchLockScreenSupport.playsSounds(in: ReviewDefaults.current)")

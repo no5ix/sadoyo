@@ -2817,9 +2817,24 @@ struct NotchGeometry: Equatable {
     }
 
     func sectionPickerSize(count: Int) -> CGSize {
-        let content = min(pageBudget, count == 0 ? NotchLayout.emptyHeight
-            : NotchLayout.railHeight(rows: sectionRows(count: count), rowHeight: NotchLayout.sectionTileHeight, spacing: NotchLayout.sectionSpacing))
-        let desiredHeight = headerTopInset + headerChromeHeight + content
+        let desiredHeight = headerTopInset + headerChromeHeight + gallerySectionHeight(count: count)
+        return CGSize(width: expandedWidth, height: min(desiredHeight, screen.height - 48 - quickAccessBottomInset))
+    }
+
+    /// What the Explore gallery keeps on its own, whether it is the island's
+    /// only page or the last part of its stack.
+    func gallerySectionHeight(count: Int) -> CGFloat {
+        min(pageBudget, count == 0 ? NotchLayout.emptyHeight
+            : NotchLayout.railHeight(rows: sectionRows(count: count), rowHeight: NotchLayout.sectionTileHeight,
+                                     spacing: NotchLayout.sectionSpacing))
+    }
+
+    /// The open island that stacks its parts: its row, then the parts at the
+    /// height they need with the island's spacing between them. The display
+    /// still bounds the island, and the page scrolls where the stack does not
+    /// fit, as a page taller than the island does.
+    func stackedSize(content: CGFloat) -> CGSize {
+        let desiredHeight = headerTopInset + headerChromeHeight + max(0, content)
         return CGSize(width: expandedWidth, height: min(desiredHeight, screen.height - 48 - quickAccessBottomInset))
     }
 
