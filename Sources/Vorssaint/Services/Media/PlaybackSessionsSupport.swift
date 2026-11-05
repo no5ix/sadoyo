@@ -15,6 +15,14 @@ struct NotchPlaybackSession: Identifiable, Equatable {
         case playing, paused, stopped, unknown
     }
 
+    /// How the player is read and driven. A player that installs a scripting
+    /// dictionary answers its state, its song and its transport to events sent
+    /// at its process; a player that installs none is read from, and driven by,
+    /// the transport control in the window it draws.
+    enum Source: Equatable {
+        case scripting, window
+    }
+
     let pid: Int32
     let bundleIdentifier: String
     let appName: String
@@ -25,6 +33,9 @@ struct NotchPlaybackSession: Identifiable, Equatable {
     var duration: TimeInterval?
     /// Whether this process may be sent its own play, previous and next events.
     var access: NotchMusicAutomation.Access = .unavailable
+    /// Which of the two ways this session is read, so the card drives it the way
+    /// that player answers to, and offers only the controls that player has.
+    var source: Source = .scripting
     /// What the player's dictionary declares. A player that does not declare
     /// skipping gets no skip button, rather than a button that does nothing.
     var canSkipPrevious = false
@@ -135,6 +146,14 @@ enum PlaybackSessionsSupport {
             .map { Int($0.pid) }
             .filter { $0 != primary }
         return ids
+    }
+
+    /// The buttons a card offers for this player: the scripted player declares
+    /// its skips and answers them; a player read through its window has the one
+    /// control its window carries, and a card does not offer a button that
+    /// player has no way to answer.
+    static func cardCommands(for session: NotchPlaybackSession) -> [NotchPlaybackCommand] {
+        session.source == .window ? [.toggle] : [.previous, .toggle, .next]
     }
 
     /// The first name a player's dictionary declares among `names`.

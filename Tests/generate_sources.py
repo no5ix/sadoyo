@@ -199,9 +199,11 @@ def main():
                     for prefix in ["    private var resultsState:", "    private var resultsGroups:",
                                    "    private func section("])
           + "}\n")
+    # The activity picker's own page is gone: the dashboard shows every activity
+    # at once, so nothing asks which to open or which two to combine. The shape
+    # the island is drawn from and the strip's layout are still measured here.
     write("NotchActivityPicker.swift", "import SwiftUI\n"
-          + declaration("Sources/Vorssaint/UI/Notch/NotchView.swift", "struct NotchShape: Shape {")
-          + declaration("Sources/Vorssaint/UI/Notch/NotchView.swift", "struct NotchActivityPicker: View {"))
+          + declaration("Sources/Vorssaint/UI/Notch/NotchView.swift", "struct NotchShape: Shape {"))
     write("NotchModuleTitle.swift", "import Foundation\nextension NotchModule {\n"
           + declaration("Sources/Vorssaint/UI/Notch/NotchView.swift", "    func title(_ language: AppLanguage)",
                         scope="extension NotchModule: PanelOrderItem {")

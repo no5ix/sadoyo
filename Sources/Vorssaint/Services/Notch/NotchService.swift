@@ -558,10 +558,12 @@ final class NotchService: ObservableObject {
                                       music: hasMusicActivity, keepAwake: hasKeepAwakeActivity)
     }
 
+    /// The page shows every activity at once, so the island never asks which
+    /// ones to combine. The strip at rest keeps its mark of what runs, and the
+    /// choice it used to offer — an activity, and the pairing of two — is gone:
+    /// the dashboard is the answer to all of it, in one place.
     var showsCompactActivityPicker: Bool {
-        (inside || activityPickerMenuOpen) && !hiddenInFullscreen && !hiddenUntilHover && !expanded && !peeking
-            && !dragPlaceholder && notice == nil && captureControls == nil
-            && compactActivities.count > 1
+        false
     }
 
     var compactActivityPickerLayout: NotchActivityPickerLayout {
@@ -660,12 +662,7 @@ final class NotchService: ObservableObject {
     /// On the island's own display unless `base` is another display's.
     private func compactGeometry(for activity: NotchCompactActivity?, companion: NotchCompactActivity? = nil,
                                  base: NotchGeometry? = nil) -> NotchGeometry {
-        var geometry = base ?? self.geometry
-        if base == nil, showsCompactActivityPicker {
-            let room = max(0, (geometry.screen.width - 24 - NotchActivityPickerLayout.horizontalInset * 2
-                               - geometry.cameraWidth) / 2)
-            geometry.compactSideRoom = min(geometry.compactSideRoom ?? 0, room)
-        }
+        let geometry = base ?? self.geometry
         switch activity {
         case .music: return geometry.compactMusicGeometry
         case .timer:
@@ -841,6 +838,43 @@ final class NotchService: ObservableObject {
         NotchDashboardSupport.activities(players: dashboardPlayerIDs, timer: showsDashboardTimer)
     }
 
+    /// Whether the page shows the calendar's card: the section is in the
+    /// island's list and the page is wide enough for a week of days beside the
+    /// day's appointments. What the card does when calendar access is not given
+    /// is the card's own answer, asked of EventKit the way the page asks it.
+    var showsDashboardCalendar: Bool {
+        NotchDashboardSupport.showsCalendar(section: modules.contains(.calendar),
+                                            width: dashboardContentWidth)
+    }
+
+    /// The dashboard lies under every page the island opens, so the way back
+    /// from a section opened from the page, from a detail, or from the gallery
+    /// is one click. The app panel is a surface of its own and keeps its own
+    /// way out.
+    var canReturnToDashboard: Bool {
+        NotchDashboardSupport.returnsToDashboard(sectionPage: expanded, appPanel: showingAppPanel,
+                                                 dashboard: showsDashboard)
+    }
+
+    /// Back to the one page, from anywhere under it: the detail, the section,
+    /// the gallery. The dashboard is the island's root, so this is the way
+    /// every page returns, and the sections page never becomes the destination
+    /// a person just left.
+    func showDashboard() {
+        guard expanded, !showsDashboard else { return }
+        let changesPresentation = selectedMetric != nil || showingAppPanel || showingSections
+        mutatePresentation(transitionContent: changesPresentation ? .replace : .none) {
+            selectedMetric = nil
+            showingAppPanel = false
+            showingSections = false
+            showingCommandBar = false
+            forgetDetailHeight()
+            dashboardRequested = true
+        }
+        syncVisibleConsumers()
+        if changesPresentation { provideHapticFeedback() }
+    }
+
     private var showsDashboardNowPlaying: Bool {
         modules.contains(.music) && NotchSupport.watchesMusicActivity() && NotchMusicService.shared.playback != nil
     }
@@ -860,6 +894,7 @@ final class NotchService: ObservableObject {
     /// tiles without the service reading the monitor's snapshot twice.
     var dashboardContentHeight: CGFloat {
         NotchDashboardLayout.contentHeight(activities: dashboardActivities,
+                                           calendar: showsDashboardCalendar,
                                            metrics: NotchSupport.systemCardCount(
                                             hasBattery: PowerSampler.hasInternalBattery,
                                             fans: SystemMonitor.shared.snapshot.fanSpeeds.count),
@@ -1030,7 +1065,6 @@ final class NotchService: ObservableObject {
                 contentHeight: notice.previewContentHeight(width: geometry.notificationPreviewContentWidth))
         }
         if peeking { return geometry.peek }
-        if showsCompactActivityPicker { return compactActivityPickerLayout.size }
         if compactActivity != nil {
             var resting = compactActivityGeometry.compactActivitySize
             // A strip naming its song reaches further on its cover's side,
@@ -1070,7 +1104,7 @@ final class NotchService: ObservableObject {
         guard geometry.floats, !fullscreenCompact, !expanded, !dragPlaceholder else { return nil }
         if captureControls != nil { return captureControlsCollapsed ? NotchCapsuleLayout.captureSurface(geometry: geometry) : nil }
         if let notice { return noticeExpanded ? nil : capsuleNoticeSize(notice) }
-        if peeking || showsCompactActivityPicker { return nil }
+        if peeking { return nil }
         // At rest the charge or the allowance fits inside the bare capsule.
         let resting = compactActivity.map { capsuleStripSize(for: $0, companion: compactCompanion) }
             ?? geometry.restingSize(showsContent: false)
@@ -1638,7 +1672,6 @@ final class NotchService: ObservableObject {
         guard running, !suspended, !hiddenAtRestInFullscreen || watchesHiddenHover else { removeHoverExitMonitors(); return }
         let point = NSEvent.mouseLocation
         let wasInside = inside
-        let showedPicker = showsCompactActivityPicker
         inside = watchesHiddenHover ? geometry.contains(point, in: geometry.collapsed)
             && windowHost?.isConcealedForMissionControl == false
             : windowHost?.containsHover(point) == true || pointerOverChildWindow(point)
@@ -1646,14 +1679,14 @@ final class NotchService: ObservableObject {
         // The music strip names its song only while the pointer stays on the
         // island: leaving ends it, and a name left from before goes on return.
         let unnamesMusic = inside != wasInside && endMusicStripHover(leaving: !inside)
-        // A full hover opening goes straight from its resting size to the page.
-        // The activity picker replaces that opening and keeps its hover response.
+        // A full hover opening goes straight from its resting size to the page,
+        // which is the whole dashboard: nothing asks which activity to open.
         let opensOnHover = hoverOpeningEnabled
-            && UserDefaults.standard.bool(forKey: DefaultsKey.notchHoverExpands) && !showsCompactActivityPicker
+            && UserDefaults.standard.bool(forKey: DefaultsKey.notchHoverExpands)
         let emphasize = inside && !hiddenInFullscreen && !hiddenUntilHover && !expanded && !peeking && !dragPlaceholder
             && notice == nil && captureControls == nil && !opensOnHover
             && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-        if hoverEmphasized != emphasize || showedPicker != showsCompactActivityPicker || unnamesMusic {
+        if hoverEmphasized != emphasize || unnamesMusic {
             hoverEmphasized = emphasize
             // A song held on the island goes as the pointer leaves.
             if unnamesMusic { syncMenuSpaceMonitoring() }
@@ -1681,9 +1714,6 @@ final class NotchService: ObservableObject {
         // Keep the first deadline until the pointer actually crosses the boundary.
         if inside == wasInside, let hoverWork, !hoverWork.isCancelled { return }
         hoverWork?.cancel(); hoverWork = nil
-        // The visible choices replace automatic opening while several
-        // activities compete. Clicking the strip still opens its full page.
-        if showsCompactActivityPicker { return }
         if inside {
             if holdsNotification, let id = notice?.notificationID { holdNotification(id); return }
             guard !hoverState.suppressed, (notice == nil || hiddenUntilHover), !expanded, !peeking, !dragPlaceholder,
@@ -1694,11 +1724,10 @@ final class NotchService: ObservableObject {
                 guard let self else { return }
                 self.hoverWork = nil
                 // An opening that is no longer eligible keeps any following:
-                // an emphasis or a picker may still show, and the next move
+                // an emphasis may still show, and the next move
                 // decides whether it is still needed.
                 guard self.running, !self.suspended, self.inside, !self.hoverState.suppressed,
                       !self.expanded, !self.peeking, !self.pinned, !self.heldDrag, !self.keepsWorkingSurface,
-                      !self.showsCompactActivityPicker,
                       self.captureControls == nil, (self.notice == nil || self.hiddenUntilHover), !self.dragPlaceholder,
                       self.hoverOpeningEnabled,
                       self.windowHost?.blocksHoverReveal() == false,
@@ -2830,11 +2859,6 @@ final class NotchService: ObservableObject {
             activationRect = captureControlsCollapsed ? CGRect(origin: .zero, size: size) : .zero
         } else if notice != nil || dragPlaceholder {
             activationRect = .zero
-        } else if showsCompactActivityPicker {
-            let strip = compactActivityGeometry.compactActivitySize
-            activationRect = compactActivityGeometry.activationArea(
-                in: strip, hasHeader: false, compactActivity: true)
-                .offsetBy(dx: (size.width - strip.width) / 2, dy: 0)
         } else {
             activationRect = (expanded ? expandedGeometry : compactActivityIsVisible ? compactActivityGeometry : geometry)
                 .activationArea(in: size, hasHeader: expanded || peeking, compactActivity: compactActivityIsVisible, expandedHeader: expanded)
@@ -3096,12 +3120,10 @@ final class NotchService: ObservableObject {
 
     /// Whether the closed music strip answers the pointer on `part` itself.
     /// Hovering must not open the island over it, which would show the song
-    /// and its buttons anyway. The activity picker, which takes the place of
-    /// that opening while several activities run, keeps the bars' button, but
-    /// the strip at its top has no room to name the song.
+    /// and its buttons anyway. The strip at rest keeps the bars' button, and
+    /// names its song from the cover's side.
     func musicStripAnswers(_ part: NotchMusicStripPart) -> Bool {
         guard compactMusicIsVisible, !hiddenUntilHover else { return false }
-        if showsCompactActivityPicker { return part == .bars }
         guard UserDefaults.standard.bool(forKey: DefaultsKey.notchOpenOnHover) else { return true }
         // A preview opens over a strip without wings, as a capsule's is where
         // the menus leave it little room.

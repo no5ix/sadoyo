@@ -133,6 +133,73 @@ enum PlaybackSessionsTests {
                              && PlaybackSessionsSupport.positionNames.contains("player position"),
                          "the words are the Standard Suites' own, not invented names")
         }
+        suite.run("a player that installs no dictionary is read from its own window") {
+            // The control's own words are the state: a control that would pause
+            // the player means the player is playing, and the reverse.
+            expect(suite, AccessibilityPlayerSupport.state(controlWords: ["Pause"]), .playing,
+                   "a control that pauses means a player that plays")
+            expect(suite, AccessibilityPlayerSupport.state(controlWords: ["Play"]), .paused,
+                   "a control that plays means a player that is held")
+            expect(suite, AccessibilityPlayerSupport.state(controlWords: ["暂停"]), .playing,
+                   "the words are the player's own language too")
+            expect(suite, AccessibilityPlayerSupport.state(controlWords: ["播放"]), .paused,
+                   "and its other half reads as held")
+            expect(suite, AccessibilityPlayerSupport.state(controlWords: ["Play", "Pause"]), .unknown,
+                   "a control that says both is not a state the page shows")
+            expect(suite, AccessibilityPlayerSupport.state(controlWords: []), .unknown,
+                   "no control is no state")
+            // The window's words for what it plays.
+            let credit = AccessibilityPlayerSupport.credit(in: ["Settings", "Bohemian Rhapsody - Queen", "0:31"])
+            suite.expect(credit?.title == "Bohemian Rhapsody" && credit?.artist == "Queen",
+                         "the line that names the song and its artist is the card's title and artist")
+            suite.expect(AccessibilityPlayerSupport.credit(in: ["Settings", "Only one word"]) == nil,
+                         "a window that names no song shows no song")
+            // Which applications are walked at all.
+            suite.expect(AccessibilityPlayerSupport.isWindowPlayer(category: "public.app-category.music",
+                                                                   scripted: false, isPrimary: false),
+                         "a music application with no dictionary is asked through its window")
+            suite.expect(!AccessibilityPlayerSupport.isWindowPlayer(category: "public.app-category.music",
+                                                                    scripted: true, isPrimary: false),
+                         "a player with a dictionary is read by that, which answers more")
+            suite.expect(!AccessibilityPlayerSupport.isWindowPlayer(category: "public.app-category.productivity",
+                                                                    scripted: false, isPrimary: false),
+                         "an application that is not a music application is not walked")
+            suite.expect(!AccessibilityPlayerSupport.isWindowPlayer(category: nil, scripted: false,
+                                                                    isPrimary: false),
+                         "an application that declares no category is not walked")
+        }
+
+        suite.run("each card offers what its own player answers to") {
+            var scripted = NotchPlaybackSession(pid: 700, bundleIdentifier: "a.player", appName: "A Player",
+                                                state: .playing, access: .granted, source: .scripting)
+            var window = NotchPlaybackSession(pid: 900, bundleIdentifier: "b.player", appName: "B Player",
+                                              state: .playing, access: .granted, source: .window)
+            scripted.updated = Date()
+            window.updated = Date()
+            expect(suite, PlaybackSessionsSupport.cardCommands(for: scripted), [.previous, .toggle, .next],
+                   "a scripted player declares its skips, so its card offers them")
+            expect(suite, PlaybackSessionsSupport.cardCommands(for: window), [.toggle],
+                   "a player read through its window has its one control, and no button it cannot answer")
+            // The two ways keep their own process: what one card sends drives
+            // one process, and a player's card does not speak for another.
+            let both = [scripted, window]
+            expect(suite, PlaybackSessionsSupport.cardPlayerIDs(primary: nil, sessions: both, now: Date()),
+                   [700, 900], "two players playing at once are two cards, in the order they were found")
+            let stopped = NotchPlaybackSession(pid: 700, bundleIdentifier: "a.player", appName: "A Player",
+                                               state: .stopped, access: .granted, source: .scripting)
+            let oneStopped = [stopped, window]
+            expect(suite, PlaybackSessionsSupport.cardPlayerIDs(primary: nil, sessions: oneStopped, now: Date()),
+                   [900], "one player stopping takes its own card away and leaves the other's")
+            expect(suite, PlaybackSessionsSupport.cardPlayerIDs(primary: 700, sessions: both, now: Date()),
+                   [700, 900], "the system's own player keeps the first card and the other keeps its own")
+            suite.expect(window.canSend(.toggle) && !window.canSend(.next) && !window.canSend(.previous),
+                         "the window card drives its transport and asks nothing else of the player")
+            // A card read from a window is dropped on the same terms as the rest.
+            var stale = window
+            stale.updated = Date(timeIntervalSinceNow: -30)
+            suite.expect(PlaybackSessionsSupport.isStale(updated: stale.updated, now: Date()),
+                         "a player that stopped answering loses its card")
+        }
     }
 
     private static func expect(_ suite: TestSuite, _ actual: NotchPlaybackSession.State,
@@ -141,6 +208,11 @@ enum PlaybackSessionsTests {
     }
 
     private static func expect(_ suite: TestSuite, _ actual: [Int], _ expected: [Int], _ message: String) {
+        suite.expect(actual == expected, "\(message): got \(actual)")
+    }
+
+    private static func expect(_ suite: TestSuite, _ actual: [NotchPlaybackCommand],
+                               _ expected: [NotchPlaybackCommand], _ message: String) {
         suite.expect(actual == expected, "\(message): got \(actual)")
     }
 }

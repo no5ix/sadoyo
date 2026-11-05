@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Vorssaint
 
 import AppKit
+import ApplicationServices
 import Combine
 import Foundation
 
@@ -29,13 +30,15 @@ final class PlaybackSessionsService: ObservableObject {
     /// A consent request is in flight, so its card shows that and asks once.
     @Published private(set) var requesting = false
 
-    /// One application being watched, with what its dictionary declared.
+    /// One application being watched, with what its dictionary declared, and
+    /// how it will be read.
     private struct Player {
         let pid: Int32
         let bundleIdentifier: String
         let name: String
-        let capabilities: NotchMusicAutomationCapabilities
-        let state: UInt32
+        let source: NotchPlaybackSession.Source
+        let capabilities: NotchMusicAutomationCapabilities?
+        let state: UInt32?
         let title: UInt32?
         let artist: UInt32?
         let position: UInt32?
@@ -59,6 +62,11 @@ final class PlaybackSessionsService: ObservableObject {
     /// the other players that say they are playing.
     static func cardPlayerIDs(primary: Int?, sessions: [NotchPlaybackSession]) -> [Int] {
         PlaybackSessionsSupport.cardPlayerIDs(primary: primary, sessions: sessions)
+    }
+
+    /// The buttons one card offers, which is what that player can answer.
+    static func cardCommands(for session: NotchPlaybackSession) -> [NotchPlaybackCommand] {
+        PlaybackSessionsSupport.cardCommands(for: session)
     }
 
     func session(id: Int32) -> NotchPlaybackSession? {
@@ -90,8 +98,12 @@ final class PlaybackSessionsService: ObservableObject {
     private func poll() {
         generation &+= 1
         let now = Date()
+        // A player with no scripting dictionary is read from its window, which
+        // is the Accessibility API's work, and the permission for that belongs
+        // to this application.
+        let trusted = AXIsProcessTrusted()
         let frontmost = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
-        let candidates = runningPlayers(in: frontmost)
+        let candidates = runningPlayers(in: frontmost, accessibility: trusted)
         DispatchQueue.main.async { [weak self] in self?.players = candidates }
         var readings: [NotchPlaybackSession] = []
         for player in candidates {
@@ -107,41 +119,51 @@ final class PlaybackSessionsService: ObservableObject {
         queue.asyncAfter(deadline: .now() + PlaybackSessionsSupport.pollInterval, execute: next)
     }
 
-    /// The applications that declare a player, as few as the page can show at
-    /// once. The application in front is kept even when it has not agreed to
-    /// be read, because its card is the way to ask.
-    private func runningPlayers(in frontmost: String?) -> [Player] {
+    /// The applications that play, as few as the page can show at once: the
+    /// ones that declare a player in their own scripting dictionary, and the
+    /// music applications that declare no dictionary and are read from the
+    /// window they draw. The application in front is kept even when it has not
+    /// agreed to be read, because its card is the way to ask.
+    private func runningPlayers(in frontmost: String?, accessibility: Bool) -> [Player] {
         let own = ProcessInfo.processInfo.processIdentifier
+        let primary = NotchMusicService.shared.playback?.track.appPID
         var found: [Player] = []
+        var scripted: Set<String> = []
         for app in NSWorkspace.shared.runningApplications where app.activationPolicy == .regular {
             let pid = app.processIdentifier
             guard pid != own, !app.isTerminated, let bundleID = app.bundleIdentifier,
                   let url = app.bundleURL else { continue }
-            if pid == NotchMusicService.shared.playback?.track.appPID { continue }
+            if pid == primary { continue }
             let capabilities = dictionary(for: bundleID, url: url)
-            guard let capabilities,
-                  let state = PlaybackSessionsSupport.firstProperty(PlaybackSessionsSupport.stateNames,
-                                                                    in: capabilities.properties),
-                  capabilities.canToggle else { continue }
-            let player = Player(
-                pid: pid, bundleIdentifier: bundleID, name: app.localizedName ?? bundleID,
-                capabilities: capabilities, state: state,
-                title: PlaybackSessionsSupport.firstProperty(PlaybackSessionsSupport.titleNames,
-                                                             in: capabilities.properties),
-                artist: PlaybackSessionsSupport.firstProperty(PlaybackSessionsSupport.artistNames,
-                                                              in: capabilities.properties),
-                position: PlaybackSessionsSupport.firstProperty(PlaybackSessionsSupport.positionNames,
+            if let capabilities, capabilities.canToggle,
+               let state = PlaybackSessionsSupport.firstProperty(PlaybackSessionsSupport.stateNames,
+                                                                in: capabilities.properties) {
+                scripted.insert(bundleID)
+                found.append(Player(
+                    pid: pid, bundleIdentifier: bundleID, name: app.localizedName ?? bundleID,
+                    source: .scripting, capabilities: capabilities, state: state,
+                    title: PlaybackSessionsSupport.firstProperty(PlaybackSessionsSupport.titleNames,
                                                                 in: capabilities.properties),
-                duration: PlaybackSessionsSupport.firstProperty(PlaybackSessionsSupport.durationNames,
-                                                                in: capabilities.properties))
-            // The frontmost player leads the list, so the card the person is
-            // most likely to use is the first one the page asks about.
-            if bundleID == frontmost {
-                found.insert(player, at: 0)
-            } else if found.count < PlaybackSessionsSupport.maxPlayers {
-                found.append(player)
+                    artist: PlaybackSessionsSupport.firstProperty(PlaybackSessionsSupport.artistNames,
+                                                                in: capabilities.properties),
+                    position: PlaybackSessionsSupport.firstProperty(PlaybackSessionsSupport.positionNames,
+                                                                    in: capabilities.properties),
+                    duration: PlaybackSessionsSupport.firstProperty(PlaybackSessionsSupport.durationNames,
+                                                                    in: capabilities.properties)))
+            } else if accessibility,
+                      AccessibilityPlayerSupport.isWindowPlayer(
+                        category: AccessibilityPlayerSupport.category(bundleURL: url),
+                        scripted: scripted.contains(bundleID), isPrimary: false) {
+                // A player with no dictionary is read through its window: the
+                // control that plays and pauses, and the words beside it.
+                found.append(Player(pid: pid, bundleIdentifier: bundleID, name: app.localizedName ?? bundleID,
+                                    source: .window, capabilities: nil, state: nil, title: nil,
+                                    artist: nil, position: nil, duration: nil))
             }
         }
+        // The frontmost player leads the list, so the card the person is most
+        // likely to use is the first one the page asks about.
+        found.sort { ($0.bundleIdentifier == frontmost ? 0 : 1) < ($1.bundleIdentifier == frontmost ? 0 : 1) }
         return Array(found.prefix(PlaybackSessionsSupport.maxPlayers))
     }
 
@@ -157,35 +179,60 @@ final class PlaybackSessionsService: ObservableObject {
     /// card asks, when the person presses its button.
     private func reading(for player: Player) -> NotchPlaybackSession {
         var session = NotchPlaybackSession(pid: player.pid, bundleIdentifier: player.bundleIdentifier,
-                                           appName: player.name, updated: Date())
+                                           appName: player.name, source: player.source)
+        session.updated = Date()
         guard NSRunningApplication(processIdentifier: player.pid) != nil else {
             session.state = .unknown
             return session
         }
-        let access = NotchMusicAutomation.access(pid: player.pid, bundleIdentifier: player.bundleIdentifier)
-        session.access = access
-        switch access {
-        case .granted:
-            guard let state = NotchMusicAutomation.textProperty(player.state, pid: player.pid) else {
+        switch player.source {
+        case .window:
+            // The player's own window: its transport control and the words it
+            // carries. What the window does not say, the card does not show.
+            guard let reading = AccessibilityPlayerReader.read(pid: player.pid) else {
                 session.state = .unknown
                 return session
             }
-            session.state = PlaybackSessionsSupport.state(for: state)
-            session.canSkipPrevious = player.capabilities.commands["previous track"] != nil
-            session.canSkipNext = player.capabilities.commands["next track"] != nil
-            // A player that is not playing has no card, so its song is not
-            // asked for; the next pass asks about the state again.
-            guard session.isPlaying else { return session }
-            if let title = player.title { session.title = NotchMusicAutomation.textProperty(title, pid: player.pid) }
-            if let artist = player.artist { session.artist = NotchMusicAutomation.textProperty(artist, pid: player.pid) }
-            if let position = player.position {
-                session.elapsed = NotchMusicAutomation.numberProperty(position, pid: player.pid)
+            session.state = reading.state
+            session.title = reading.title
+            session.artist = reading.artist
+            // The control is the whole of what this card may drive, and driving
+            // it needs the Accessibility permission the read itself used.
+            session.access = reading.canToggle ? .granted : .unavailable
+        case .scripting:
+            guard let capabilities = player.capabilities, let state = player.state else {
+                session.state = .unknown
+                return session
             }
-            if let duration = player.duration {
-                session.duration = NotchMusicAutomation.numberProperty(duration, pid: player.pid)
+            let access = NotchMusicAutomation.access(pid: player.pid, bundleIdentifier: player.bundleIdentifier)
+            session.access = access
+            switch access {
+            case .granted:
+                guard let answer = NotchMusicAutomation.textProperty(state, pid: player.pid) else {
+                    session.state = .unknown
+                    return session
+                }
+                session.state = PlaybackSessionsSupport.state(for: answer)
+                session.canSkipPrevious = capabilities.commands["previous track"] != nil
+                session.canSkipNext = capabilities.commands["next track"] != nil
+                // A player that is not playing has no card, so its song is not
+                // asked for; the next pass asks about the state again.
+                guard session.isPlaying else { return session }
+                if let title = player.title {
+                    session.title = NotchMusicAutomation.textProperty(title, pid: player.pid)
+                }
+                if let artist = player.artist {
+                    session.artist = NotchMusicAutomation.textProperty(artist, pid: player.pid)
+                }
+                if let position = player.position {
+                    session.elapsed = NotchMusicAutomation.numberProperty(position, pid: player.pid)
+                }
+                if let duration = player.duration {
+                    session.duration = NotchMusicAutomation.numberProperty(duration, pid: player.pid)
+                }
+            case .consent, .denied, .unavailable:
+                session.state = .unknown
             }
-        case .consent, .denied, .unavailable:
-            session.state = .unknown
         }
         return session
     }
@@ -195,7 +242,7 @@ final class PlaybackSessionsService: ObservableObject {
     /// Asks the system for permission to control that player, in the words the
     /// player's own page uses. The system remembers the answer.
     func requestConsent(_ session: NotchPlaybackSession) {
-        guard !requesting else { return }
+        guard !requesting, session.source == .scripting else { return }
         requesting = true
         let bundleID = session.bundleIdentifier
         let pid = session.pid
@@ -218,13 +265,23 @@ final class PlaybackSessionsService: ObservableObject {
     /// take the song back.
     func send(_ command: NotchPlaybackCommand, to session: NotchPlaybackSession) {
         guard session.access == .granted, session.canSend(command),
-              let player = players.first(where: { $0.pid == session.pid }),
               NSRunningApplication(processIdentifier: session.pid) != nil else { return }
-        // The state the card shows is what the transport's play/pause toggles.
-        let isPlaying = session.isPlaying
-        queue.async {
-            _ = NotchMusicAutomation.sendToPlayer(command, isPlaying: isPlaying,
-                                                 capabilities: player.capabilities, pid: player.pid)
+        let pid = session.pid
+        switch session.source {
+        case .window:
+            // Press the control in that player's own window. The system's media
+            // keys go to whichever player the system is listening to, so they
+            // are not used here: two players stay two controls.
+            queue.async { _ = AccessibilityPlayerReader.toggle(pid: pid) }
+        case .scripting:
+            guard let player = players.first(where: { $0.pid == session.pid }),
+                  let capabilities = player.capabilities else { return }
+            // The state the card shows is what the transport's play/pause toggles.
+            let isPlaying = session.isPlaying
+            queue.async {
+                _ = NotchMusicAutomation.sendToPlayer(command, isPlaying: isPlaying,
+                                                     capabilities: capabilities, pid: pid)
+            }
         }
     }
 }

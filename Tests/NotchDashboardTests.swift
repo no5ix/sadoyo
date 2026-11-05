@@ -15,20 +15,76 @@ import Foundation
 enum NotchDashboardTests {
     static func run(_ suite: TestSuite) {
         suite.run("dashboard sections stay and keep their order") {
-            let idle = NotchDashboardSupport.sections(activities: [])
+            let idle = NotchDashboardSupport.sections(activities: [], calendar: false)
             expect(suite, idle, [.quickControls, .systemMonitoring, .explore],
                    "an island with nothing running shows the levels, the grid and the sections")
-            let busy = NotchDashboardSupport.sections(activities: [.player(id: 7), .timer])
-            expect(suite, busy, [.quickControls, .liveActivities, .systemMonitoring, .explore],
-                   "a player and a timer go between the levels and the grid")
+            let busy = NotchDashboardSupport.sections(activities: [.player(id: 7), .timer], calendar: true)
+            expect(suite, busy, [.quickControls, .calendar, .liveActivities, .systemMonitoring, .explore],
+                   "the month, then a player and a timer, go between the levels and the grid")
+            // The order is the reference's: levels, calendar, activities, grid,
+            // sections. Nothing runs between the levels and the calendar.
+            suite.expect(busy.first == .quickControls && busy[1] == .calendar
+                             && busy[2] == .liveActivities && busy[3] == .systemMonitoring
+                             && busy.last == .explore,
+                         "the calendar sits under the levels and above the activities")
             for activities in [[NotchDashboardActivity](), [.player(id: 7)], [.timer],
                                [.player(id: 7), .player(id: 9), .timer]] {
-                let sections = NotchDashboardSupport.sections(activities: activities)
+                let sections = NotchDashboardSupport.sections(activities: activities, calendar: true)
                 suite.expect(sections.first == .quickControls
+                                 && sections.contains(.calendar)
                                  && sections.contains(.systemMonitoring)
                                  && sections.last == .explore,
-                             "the levels, the grid and the sections stay whatever runs: \(activities.count) cards")
+                             "the levels, the calendar, the grid and the sections stay whatever runs: \(activities.count) cards")
             }
+        }
+
+        suite.run("the calendar card has its place, and a page wide enough to hold it") {
+            // The card is the page's, so it is measured as one shape: the grid
+            // at the rows the grid draws itself, with the month's name above it.
+            suite.expect(NotchDashboardLayout.calendarCardHeight
+                             == NotchDashboardLayout.calendarHeaderHeight + 6 + NotchDashboardLayout.calendarGridHeight,
+                         "the card is the grid, its header and their gap, and nothing else")
+            suite.expect(NotchDashboardLayout.calendarGridHeight
+                             >= NotchDashboardLayout.calendarMonthMinimumHeight,
+                         "the grid keeps a row for every week of the month")
+            // The page the reference draws - two players, a timer, eight
+            // readings, fourteen marks and the month - is read at once, at the
+            // island's tallest preset, so the sections do not need a screen each.
+            let drawn = NotchDashboardLayout.contentHeight(
+                activities: [.player(id: 7), .player(id: 9), .timer],
+                calendar: true, metrics: 8, exploreCount: 14,
+                width: NotchDashboardLayout.naturalContentWidth)
+            suite.expect(drawn <= 630,
+                         "the page the reference draws fits the island's tallest preset: \(Int(drawn))pt")
+            // What runs is not capped to make that true: more cards make the page
+            // taller, and the page scrolls in the island instead of hiding a card.
+            let crowded = NotchDashboardLayout.contentHeight(
+                activities: [.player(id: 7), .player(id: 9), .player(id: 11), .player(id: 13), .timer],
+                calendar: true, metrics: 8, exploreCount: 14,
+                width: NotchDashboardLayout.naturalContentWidth)
+            suite.expect(crowded > drawn, "each player that starts adds its own card to the page")
+            // A page narrower than a week of days beside the day's appointments
+            // keeps its other sections instead of squeezing the calendar.
+            suite.expect(NotchDashboardSupport.showsCalendar(section: true,
+                                                             width: NotchDashboardLayout.naturalContentWidth),
+                         "the page at its own width shows the calendar")
+            suite.expect(!NotchDashboardSupport.showsCalendar(section: true, width: 300),
+                         "a page too narrow for a week and an agenda shows no calendar card")
+            suite.expect(!NotchDashboardSupport.showsCalendar(section: false,
+                                                              width: NotchDashboardLayout.naturalContentWidth),
+                         "the section switched off takes its card away from the page")
+            // The card belongs between the levels and the activities, so the
+            // page's height counts it in that place.
+            let withCard = NotchDashboardLayout.sectionHeights(activities: [.player(id: 7)], calendar: true,
+                                                               metrics: 8, exploreCount: 7,
+                                                               width: NotchDashboardLayout.naturalContentWidth)
+            let without = NotchDashboardLayout.sectionHeights(activities: [.player(id: 7)], calendar: false,
+                                                              metrics: 8, exploreCount: 7,
+                                                              width: NotchDashboardLayout.naturalContentWidth)
+            suite.expect(withCard.count == without.count + 1
+                             && withCard[1] == NotchDashboardLayout.calendarCardHeight
+                             && without.count == 4,
+                         "the calendar is the page's second section, between the levels and the activities")
         }
 
         suite.run("every player playing gets a card, and the timer has its own") {
@@ -94,22 +150,80 @@ enum NotchDashboardTests {
             suite.expect(ids.count == expected.count, "no two tiles share a destination")
         }
 
+        suite.run("the two levels sit at the two ends of the page") {
+            // One row, the first level at the leading edge, the last at the
+            // trailing edge, the page's empty middle between them: the row the
+            // reference draws, and the Controls page's own controls in it.
+            suite.expect(NotchDashboardLayout.hasTrailingGap(levels: 2),
+                         "volume and brightness share the row with the page's middle between them")
+            suite.expect(!NotchDashboardLayout.hasTrailingGap(levels: 1),
+                         "one level takes the leading end, and nothing is pushed to the far side")
+            suite.expect(!NotchDashboardLayout.hasTrailingGap(levels: 0),
+                         "no level takes no row, and the page does not grow one")
+            suite.expect(NotchDashboardLayout.quickControlLeadingCount == 1
+                             && NotchDashboardLayout.quickControlsHeight == 28,
+                         "the row is one row of the Controls page's compact sliders")
+        }
+
         suite.run("menu bar indicators open their detail directly") {
-            suite.expect(NotchDashboardSupport.menuBarOpensDetail(islandRuns: true, routesPanel: true,
-                                                                  systemPage: true, metricAvailable: true),
+            // A reading in the menu bar is a reading, so its indicator leads to
+            // that reading's detail. What the app's panel is set to open at the
+            // app's own icon is a separate question and does not answer this one.
+            suite.expect(NotchDashboardSupport.menuBarOpensDetail(islandRuns: true, systemPage: true,
+                                                                  metricAvailable: true),
                          "an indicator's click opens the island at its detail")
-            suite.expect(!NotchDashboardSupport.menuBarOpensDetail(islandRuns: false, routesPanel: true,
-                                                                   systemPage: true, metricAvailable: true),
+            suite.expect(!NotchDashboardSupport.menuBarOpensDetail(islandRuns: false, systemPage: true,
+                                                                   metricAvailable: true),
                          "an island that is off leaves the click to the menu panel")
-            suite.expect(!NotchDashboardSupport.menuBarOpensDetail(islandRuns: true, routesPanel: false,
-                                                                   systemPage: true, metricAvailable: true),
-                         "an island that does not take the panel leaves the click to the menu panel")
-            suite.expect(!NotchDashboardSupport.menuBarOpensDetail(islandRuns: true, routesPanel: true,
-                                                                   systemPage: false, metricAvailable: true),
+            suite.expect(!NotchDashboardSupport.menuBarOpensDetail(islandRuns: true, systemPage: false,
+                                                                   metricAvailable: true),
                          "an island with no System page leaves the click to the menu panel")
-            suite.expect(!NotchDashboardSupport.menuBarOpensDetail(islandRuns: true, routesPanel: true,
-                                                                   systemPage: true, metricAvailable: false),
+            suite.expect(!NotchDashboardSupport.menuBarOpensDetail(islandRuns: true, systemPage: true,
+                                                                   metricAvailable: false),
                          "a metric the island will not show opens no detail")
+            for metric in NotchDashboardMetric.allCases {
+                suite.expect(!metric.detailID.isEmpty, "\(metric.rawValue) leads somewhere")
+            }
+        }
+
+        suite.run("every page leads back to the page it sits on") {
+            // A section opened from the page's marks, a detail, and the gallery
+            // all return to the dashboard, and the marks the person tapped their
+            // way out of are not the destination's way back.
+            suite.expect(NotchDashboardSupport.returnsToDashboard(sectionPage: true, appPanel: false, dashboard: false),
+                         "a section opened from the marks leads back to the dashboard")
+            suite.expect(NotchDashboardSupport.returnsToDashboard(sectionPage: true, appPanel: false, dashboard: true)
+                             == false,
+                         "the dashboard needs no way back to itself")
+            suite.expect(NotchDashboardSupport.returnsToDashboard(sectionPage: true, appPanel: true, dashboard: false)
+                             == false,
+                         "the app panel keeps its own way out")
+            suite.expect(!NotchDashboardSupport.returnsToDashboard(sectionPage: false, appPanel: false,
+                                                                   dashboard: false),
+                         "a closed island leads nowhere")
+            suite.expect(NotchDashboardSupport.returnsToDashboard(sectionPage: true, appPanel: false, dashboard: false)
+                             && NotchDashboardSupport.returnsToDashboard(fromDetail: true),
+                         "the section and the detail share one way back")
+        }
+
+        suite.run("closing the timer's card leaves every player's card") {
+            // The card's close ends the timer's session. The players' cards are
+            // decided by what plays, so the close touches none of them.
+            let both = NotchDashboardSupport.activities(players: [7, 9], timer: true)
+            let closed = NotchDashboardSupport.activities(players: [7, 9], timer: false)
+            expect(suite, both, [.player(id: 7), .player(id: 9), .timer], "two players and a timer, three cards")
+            expect(suite, closed, [.player(id: 7), .player(id: 9)],
+                   "the timer closed, the players keep their cards and their order")
+            suite.expect(NotchDashboardLayout.liveActivitiesHeight(both)
+                             - NotchDashboardLayout.liveActivitiesHeight(closed)
+                             == NotchDashboardLayout.activityCardHeight + NotchDashboardLayout.cardSpacing,
+                         "the page loses the timer's card and its gap, and nothing else")
+            suite.expect(NotchDashboardSupport.sections(activities: closed, calendar: true).contains(.liveActivities),
+                         "the section stays while the players run")
+            let empty = NotchDashboardSupport.activities(players: [], timer: false)
+            suite.expect(empty.isEmpty
+                             && !NotchDashboardSupport.sections(activities: empty, calendar: true).contains(.liveActivities),
+                         "the last card closing takes the empty section away from the page")
         }
 
         suite.run("the page and the way back") {
@@ -153,8 +267,10 @@ enum NotchDashboardTests {
         suite.run("the island's height is what the page measures, with no headings") {
             let width = NotchDashboardLayout.naturalContentWidth
             let cards: [NotchDashboardActivity] = [.player(id: 7), .player(id: 9), .timer]
-            let idle = NotchDashboardLayout.sectionHeights(activities: [], metrics: 8, exploreCount: 7, width: width)
-            let busy = NotchDashboardLayout.sectionHeights(activities: cards, metrics: 8, exploreCount: 7, width: width)
+            let idle = NotchDashboardLayout.sectionHeights(activities: [], calendar: false, metrics: 8,
+                                                            exploreCount: 7, width: width)
+            let busy = NotchDashboardLayout.sectionHeights(activities: cards, calendar: false, metrics: 8,
+                                                            exploreCount: 7, width: width)
             suite.expect(idle.count == 3 && busy.count == 4,
                          "one height per section, the activity cards measured only when something runs")
             // A section is its content and nothing else: no label line, no
@@ -168,7 +284,8 @@ enum NotchDashboardTests {
                          "the sections' marks are measured at their rows")
             suite.expect(busy[1] == NotchDashboardLayout.liveActivitiesHeight(cards),
                          "the activity section is measured at its three cards")
-            suite.expect(NotchDashboardLayout.contentHeight(activities: cards, metrics: 8, exploreCount: 7, width: width)
+            suite.expect(NotchDashboardLayout.contentHeight(activities: cards, calendar: false, metrics: 8,
+                                                             exploreCount: 7, width: width)
                              == busy.reduce(0, +) + NotchDashboardLayout.sectionSpacing * 3,
                          "the page is its sections and the gaps between them")
             // Each card, player or timer, adds exactly its own height.
@@ -186,7 +303,7 @@ enum NotchDashboardTests {
             // labels of the content they stand over: every language has them and
             // no two sections answer to the same name.
             for activities in [[NotchDashboardActivity](), [.player(id: 7), .timer]] {
-                let drawn = NotchDashboardSupport.sections(activities: activities)
+                let drawn = NotchDashboardSupport.sections(activities: activities, calendar: true)
                 for language in AppLanguage.allCases {
                     let titles = drawn.map { $0.title(language) }
                     suite.expect(titles.allSatisfy {

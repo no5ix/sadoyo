@@ -524,7 +524,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         // The island answers for its own metric availability, as it always did:
         // a metric it will not show leaves the island closed.
         if NotchDashboardSupport.menuBarOpensDetail(islandRuns: NotchService.shared.acceptsSystemFeedback,
-                                                    routesPanel: NotchSupport.routesAppPanel(),
                                                     systemPage: NotchSupport.modules().contains(.system),
                                                     metricAvailable: true) {
             NotchService.shared.showMetric(detailKind, toggle: true); return

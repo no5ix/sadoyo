@@ -19,6 +19,7 @@ import Foundation
 /// is spoken, not printed: it is the accessibility label of its content.
 enum NotchDashboardSection: String, CaseIterable, Identifiable {
     case quickControls
+    case calendar
     case liveActivities
     case systemMonitoring
     case explore
@@ -32,6 +33,9 @@ enum NotchDashboardSection: String, CaseIterable, Identifiable {
         let strings = FeatureStrings.notch(language)
         switch self {
         case .quickControls: return strings.quickControlsTitle
+        // The calendar's name is the section page's own, so the card on the
+        // page and the page it opens answer to one word.
+        case .calendar: return NotchModule.calendar.title(language)
         case .liveActivities: return strings.liveActivitiesTitle
         case .systemMonitoring: return strings.systemMonitoringTitle
         case .explore: return strings.sectionsTitle
@@ -99,6 +103,37 @@ enum NotchDashboardLayout {
     /// mark that leads it keeps the width the mute button and the sun have.
     static let quickControlBarWidth: CGFloat = 122
     static let quickControlMarkWidth: CGFloat = 18
+    /// How many levels sit at the page's leading edge. The first is volume and
+    /// the last is brightness, and the row's middle is the page's own empty
+    /// space, which is what puts the two levels at the two ends of the page.
+    static let quickControlLeadingCount = 1
+    static let quickControlGap: CGFloat = 24
+
+    /// Whether the row's middle is empty: with one level there is nothing to
+    /// push to the far side, and the row is that one control at the leading end.
+    static func hasTrailingGap(levels: Int) -> Bool {
+        levels > quickControlLeadingCount
+    }
+
+    // MARK: Calendar
+
+    /// The month's grid at its shortest rows, the Calendar page's own grid, and
+    /// the day's appointments read beside it. Six weeks and the names of the
+    /// weekdays is what the grid needs; keeping it at that leaves the island
+    /// room for the players, the readings and the sections below it.
+    static let calendarGridHeight: CGFloat = NotchDashboardLayout.calendarMonthMinimumHeight
+    /// Six weeks of days above the names of the weekdays: the shortest grid the
+    /// Calendar page draws itself, so the card's grid is the page's grid and not
+    /// a squashed copy of it.
+    static let calendarMonthMinimumHeight: CGFloat = 110
+    /// A week of days, not the page's whole width: the appointments of the day
+    /// take the rest of the card.
+    static let calendarGridWidth: CGFloat = 176
+    static let calendarColumnSpacing: CGFloat = 14
+    static let calendarHeaderHeight: CGFloat = 16
+    /// The card's height: the grid, with the month and the day named above it
+    /// in a row that also carries the way through the months.
+    static var calendarCardHeight: CGFloat { calendarHeaderHeight + 6 + calendarGridHeight }
 
     // MARK: Live Activities
 
@@ -113,7 +148,7 @@ enum NotchDashboardLayout {
     static let metricColumns: Int = 4
     /// A tile is a label, a value and a meter, so it is taller than a row of
     /// text: the reading is the tile's own, and a tap opens it.
-    static let metricTileHeight: CGFloat = 54
+    static let metricTileHeight: CGFloat = 50
     static let metricSpacing: CGFloat = 8
 
     // MARK: Explore
@@ -187,9 +222,10 @@ enum NotchDashboardLayout {
     /// The whole dashboard: every section it shows, its content height, the
     /// gaps between them. The island sizes itself to this, so the page never
     /// scrolls for content that fits the display.
-    static func sectionHeights(activities: [NotchDashboardActivity], metrics: Int,
-                               exploreCount: Int, width: CGFloat) -> [CGFloat] {
+    static func sectionHeights(activities: [NotchDashboardActivity], calendar: Bool,
+                               metrics: Int, exploreCount: Int, width: CGFloat) -> [CGFloat] {
         var heights: [CGFloat] = [quickControlsHeight]
+        if calendar { heights.append(calendarCardHeight) }
         let live = liveActivitiesHeight(activities)
         if live > 0 { heights.append(live) }
         heights.append(metricsHeight(tiles: metrics, columns: metricColumns))
@@ -197,9 +233,9 @@ enum NotchDashboardLayout {
         return heights
     }
 
-    static func contentHeight(activities: [NotchDashboardActivity], metrics: Int,
+    static func contentHeight(activities: [NotchDashboardActivity], calendar: Bool, metrics: Int,
                               exploreCount: Int, width: CGFloat) -> CGFloat {
-        let sections = sectionHeights(activities: activities, metrics: metrics,
+        let sections = sectionHeights(activities: activities, calendar: calendar, metrics: metrics,
                                       exploreCount: exploreCount, width: width)
         guard !sections.isEmpty else { return 0 }
         return sections.reduce(0, +) + sectionSpacing * CGFloat(sections.count - 1)
@@ -231,16 +267,25 @@ enum NotchDashboardSupport {
         return visible
     }
 
-    /// The sections in the order the page draws them. The levels, the grid and
-    /// the way to the sections are always there; the activity section is only
-    /// there when something runs, so an idle island is three sections and not
-    /// an empty card.
-    static func sections(activities: [NotchDashboardActivity]) -> [NotchDashboardSection] {
+    /// The sections in the order the page draws them. The levels, the calendar,
+    /// the grid and the way to the sections are the page's own; the activity
+    /// section is only there when something runs, so an idle island is four
+    /// sections and not an empty card.
+    static func sections(activities: [NotchDashboardActivity], calendar: Bool) -> [NotchDashboardSection] {
         var sections: [NotchDashboardSection] = [.quickControls]
+        if calendar { sections.append(.calendar) }
         if !activities.isEmpty { sections.append(.liveActivities) }
         sections.append(.systemMonitoring)
         sections.append(.explore)
         return sections
+    }
+
+    /// The calendar card belongs to a page that is wide enough to set a week of
+    /// days and the day's appointments side by side. Narrower than that the
+    /// page keeps its other sections, as it does when the section is off.
+    static func showsCalendar(section: Bool, width: CGFloat) -> Bool {
+        section && width >= NotchDashboardLayout.calendarGridWidth
+            + NotchDashboardLayout.calendarColumnSpacing + 150
     }
 
     /// The tiles in the grid, in reading order, with only the ones the Mac can
@@ -268,17 +313,27 @@ enum NotchDashboardSupport {
 
     /// A menu bar indicator's click leads straight to its detail, with the
     /// island collapsed, closed, or showing something else: one click, one
-    /// detail. It leads to the panel's detail instead when the island does not
-    /// run, is off, has no System page, or takes the panel; and nowhere when
-    /// the metric itself is off, which is how the menu bar item already behaves.
-    static func menuBarOpensDetail(islandRuns: Bool, routesPanel: Bool, systemPage: Bool,
-                                   metricAvailable: Bool) -> Bool {
-        metricAvailable && islandRuns && routesPanel && systemPage
+    /// detail. A metric in the menu bar is a reading, so its indicator leads
+    /// to that reading's detail and not to the app's panel, whatever the panel
+    /// is set to open at. It leads to the panel instead when the island does
+    /// not run or has no System page, and nowhere when the metric itself is
+    /// off, which is how the menu bar item already behaves.
+    static func menuBarOpensDetail(islandRuns: Bool, systemPage: Bool, metricAvailable: Bool) -> Bool {
+        metricAvailable && islandRuns && systemPage
     }
 
     /// Where the way back from a detail leads: always the dashboard, which is
     /// what the grid sits on.
     static func returnsToDashboard(fromDetail: Bool) -> Bool { fromDetail }
+
+    /// The way back from a page the person reached through the page's own marks,
+    /// and from the gallery the marks open, is the dashboard under them. The app
+    /// panel is a surface of its own with its own way out, and the dashboard
+    /// needs no way back to itself. The sections page is never the destination
+    /// a page leads back to, because it is the page the person just left.
+    static func returnsToDashboard(sectionPage: Bool, appPanel: Bool, dashboard: Bool) -> Bool {
+        sectionPage && !appPanel && !dashboard
+    }
 
     /// `count` items in rows of at most `columns`, read left to right. The
     /// rows are filled from the left and the last row keeps its items at the

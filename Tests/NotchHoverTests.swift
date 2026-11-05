@@ -209,6 +209,11 @@ enum NotchHoverTests {
             NSEvent.mouseLocation = CGPoint(x: service.geometry.screen.minX, y: service.geometry.screen.minY)
             service.hover(false)
         }
+        // The island's entry asks nothing: the page it opens holds every
+        // activity at once, so no state of a resting island - two activities
+        // running, a menu left open, an open page, capture controls, a notice,
+        // full-screen hiding, Reduce Motion - brings back the old panel of
+        // named choices and the way to combine two of them.
         for physical in [false, true] {
             for reduced in [false, true] {
                 let picker = fixture(physical: physical)
@@ -216,19 +221,19 @@ enum NotchHoverTests {
                 picker.compactActivities = [.agents, .music]
                 NSWorkspace.shared.accessibilityDisplayShouldReduceMotion = reduced
                 picker.hover(true)
-                suite.expect(picker.showsCompactActivityPicker && picker.hoverWork == nil,
-                             "hover exposes named choices without an automatic opening deadline, including Reduce Motion")
+                suite.expect(!picker.showsCompactActivityPicker,
+                             "hovering an island with two activities running shows no chooser, including Reduce Motion")
                 DispatchQueue.main.advance(2)
-                suite.expect(picker.openings == 0, "the activity chooser stays available while the person decides")
+                suite.expect(picker.openings == 1 && !picker.showsCompactActivityPicker,
+                             "the hover goes on to the island itself, and nothing is asked about the activities")
                 picker.activityPickerMenuOpen = true
-                leave(picker)
-                suite.expect(picker.showsCompactActivityPicker, "moving into the combination menu keeps its picker visible")
+                suite.expect(!picker.showsCompactActivityPicker, "an open combination menu shows no chooser")
                 picker.activityPickerMenuOpen = false
                 leave(picker)
-                suite.expect(!picker.showsCompactActivityPicker, "leaving hides the activity chooser")
+                suite.expect(!picker.showsCompactActivityPicker, "leaving shows no chooser")
                 picker.expanded = true
                 picker.inside = true
-                suite.expect(!picker.showsCompactActivityPicker, "the chooser does not cover an open page")
+                suite.expect(!picker.showsCompactActivityPicker, "an open page shows no chooser")
                 picker.expanded = false
                 picker.captureControls = true
                 suite.expect(!picker.showsCompactActivityPicker, "capture controls retain priority")
@@ -703,12 +708,11 @@ enum NotchHoverTests {
             joined.hover(true)
             joined.compactActivities = [.agents, .music]
             DispatchQueue.main.advance(1)
-            suite.expect(joined.openings == 0 && joined.showsCompactActivityPicker
-                         && NSEvent.global.count == 1 && NSEvent.local.count == 1,
-                         "a picker that appears during a hover opening keeps following the pointer")
+            suite.expect(joined.openings == 1 && !joined.showsCompactActivityPicker,
+                         "a hover that gains a second activity goes on to the island, and offers no chooser")
             follow(to: CGPoint(x: top.midX, y: top.maxY + 300))
             suite.expect(!joined.showsCompactActivityPicker && NSEvent.global.isEmpty && NSEvent.local.isEmpty,
-                         "an unreported exit to the display above still hides that picker and releases its observers")
+                         "an unreported exit to the display above still releases the hover's observers")
         }
         // A full opening has no hover emphasis, but still needs an uninterrupted
         // stay. Leaving without a tracking exit must discard the old deadline.
@@ -1506,11 +1510,18 @@ enum NotchHoverTests {
             picking.hover(true)
             picking.hoverMusicStrip(.cover, entered: true)
             DispatchQueue.main.advance(1)
-            expect(picking.showsCompactActivityPicker && !picking.musicStripNamed && picking.musicStripPointer == nil,
-                   "the strip at the top of the activity picker has no room to name the song")
+            // No chooser sits above the strip, so the strip keeps its own
+            // answers: its cover names the song and its bars are the button,
+            // except where opening the island on hover covers a strip that has
+            // no wings of its own.
+            expect(!picking.showsCompactActivityPicker, "the island's entry offers no chooser over the strip")
+            expect(picking.musicStripAnswers(.cover) == !opens,
+                   "the strip at rest answers its cover, with no chooser above it")
             picking.hoverMusicStrip(.bars, entered: true)
-            expect(picking.musicStripPointer == .bars && picking.musicStripAnswers(.bars),
-                   "but its bars still become the button, even where hover would otherwise open the island")
+            expect(picking.musicStripAnswers(.bars) == !opens,
+                   "its bars answer the way its cover does, with no chooser narrowing the strip")
+            expect(picking.musicStripPointer == (opens ? nil : .bars),
+                   "the pointer takes the bars where they answer, and nowhere they do not")
         }
 
         // Where the menus leave a capsule no wings, a preview opens on hover.

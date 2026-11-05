@@ -172,38 +172,15 @@ struct NotchView: View {
             }
             .padding(.horizontal, NotchLayout.horizontalInset).padding(.top, service.geometry.safeContentTop)
         } else if let activity = service.compactActivity {
-            if service.showsCompactActivityPicker {
-                let layout = service.compactActivityPickerLayout
-                VStack(spacing: 0) {
-                    let strip = service.compactStripSize(for: activity, companion: service.compactCompanion)
-                    ZStack(alignment: .top) {
-                        activityStrip(activity, size: strip)
-                            .frame(width: strip.width, height: layout.headerHeight, alignment: .top)
-                            .id(NotchPickedStrip(activity: activity, companion: service.compactCompanion))
-                            .transition(.blurReplace)
-                    }
-                    .frame(height: layout.headerHeight, alignment: .top)
-                    NotchActivityPicker(activities: service.compactActivities, selected: activity,
-                                        combinations: service.compactActivityCombinations,
-                                        combination: service.compactCompanion.map {
-                                            NotchActivityCombination(primary: activity, companion: $0)
-                                        },
-                                        columns: layout.columns, language: l10n.language,
-                                        select: service.selectCompactActivity, combine: service.selectCompactCombination)
-                        .padding(.horizontal, NotchActivityPickerLayout.horizontalInset)
-                        .padding(.vertical, NotchActivityPickerLayout.verticalInset)
-                }
-            } else {
-                // Hover grows the capsule around its strip, as it grows the
-                // notch around its wings. Drawn at the grown size, a song's
-                // cover and bars jumped out at once while the shape still grew.
-                let strip = service.compactStripSize(for: activity, companion: service.compactCompanion)
-                activityStrip(activity, size: strip)
-                    .modifier(NotchMascotActivityVisit(service: service,
-                                                       track: service.mascotTrack(overActivityStrip: strip),
-                                                       ownStrip: true))
-                    .transition(companionSwap)
-            }
+            // Hover grows the capsule around its strip, as it grows the
+            // notch around its wings. Drawn at the grown size, a song's
+            // cover and bars jumped out at once while the shape still grew.
+            let strip = service.compactStripSize(for: activity, companion: service.compactCompanion)
+            activityStrip(activity, size: strip)
+                .modifier(NotchMascotActivityVisit(service: service,
+                                                   track: service.mascotTrack(overActivityStrip: strip),
+                                                   ownStrip: true))
+                .transition(companionSwap)
         } else if let departingMusic = service.departingMusic ?? service.lingeringMusic {
             Group {
                 if floats { NotchCapsuleMusicStrip(service: service, snapshot: departingMusic) }
@@ -448,6 +425,11 @@ struct NotchView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
         } else if showsDetail {
             NotchBandBackButton(title: service.detailTitle, action: service.goBack)
+        } else if service.canReturnToDashboard {
+            // A page opened from the dashboard's marks returns to the dashboard.
+            // The sections the person just tapped their way out of are not the
+            // destination's way back, so the grid's marks do not lead the row.
+            NotchBandBackButton(title: service.selected.title(l10n.language), action: service.showDashboard)
         } else if band.sectionsButton {
             // Without the floating button, the sections stay one click away;
             // the row keeps it room before the page's own controls.
@@ -877,83 +859,5 @@ private struct NotchPageClip: Shape {
         Path(CGRect(x: rect.minX - NotchLayout.horizontalInset, y: rect.minY - top,
                     width: rect.width + NotchLayout.horizontalInset * 2,
                     height: rect.height + top + NotchLayout.bottomInset))
-    }
-}
-
-/// The strip the picker shows, a new one for each choice.
-private struct NotchPickedStrip: Hashable {
-    let activity: NotchCompactActivity
-    let companion: NotchCompactActivity?
-}
-
-/// Named choices appear below the camera, with the current activity highlighted.
-struct NotchActivityPicker: View {
-    @Namespace private var choice
-    let activities: [NotchCompactActivity]
-    let selected: NotchCompactActivity
-    let combinations: [NotchActivityCombination]
-    let combination: NotchActivityCombination?
-    let columns: Int
-    let language: AppLanguage
-    let select: (NotchCompactActivity) -> Void
-    let combine: (NotchActivityCombination) -> Void
-
-    var body: some View {
-        VStack(spacing: NotchActivityPickerLayout.spacing) {
-            individualChoices
-            if !combinations.isEmpty {
-                Menu {
-                    ForEach(combinations) { pair in
-                        Button { combine(pair) } label: {
-                            Label(pair.title(language),
-                                  systemImage: combination == pair ? "checkmark" : pair.companion.symbol)
-                        }
-                    }
-                } label: {
-                    Label(combination?.title(language) ?? FeatureStrings.notch(language).combineActivities,
-                          systemImage: combination == nil ? "plus" : "checkmark")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(.white.opacity(combination == nil ? 0.75 : 1))
-                        .frame(height: NotchActivityPickerLayout.combinationHeight)
-                }
-                .menuStyle(.borderlessButton)
-                .fixedSize()
-                .accessibilityIdentifier("notch.activity.combine")
-            }
-        }
-    }
-
-    private var individualChoices: some View {
-        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: NotchActivityPickerLayout.spacing),
-                                 count: columns), spacing: NotchActivityPickerLayout.spacing) {
-            ForEach(activities) { activity in
-                let chosen = activity == selected && combination == nil
-                Button { select(activity) } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: activity.symbol)
-                        Text(activity.title(language)).lineLimit(1).minimumScaleFactor(0.8)
-                    }
-                    .font(.system(size: 12, weight: .medium))
-                    .padding(.horizontal, 10)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: NotchActivityPickerLayout.rowHeight)
-                    .foregroundStyle(chosen ? Color.black : Color.white)
-                    .background {
-                        ZStack {
-                            RoundedRectangle(cornerRadius: 8).fill(Color.white.opacity(0.12))
-                            if chosen {
-                                RoundedRectangle(cornerRadius: 8).fill(Color.white)
-                                    .matchedGeometryEffect(id: "choice", in: choice)
-                            }
-                        }
-                    }
-                    .contentShape(RoundedRectangle(cornerRadius: 8))
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(activity.title(language))
-                .accessibilityAddTraits(chosen ? .isSelected : [])
-                .accessibilityIdentifier("notch.activity.\(activity.rawValue)")
-            }
-        }
     }
 }

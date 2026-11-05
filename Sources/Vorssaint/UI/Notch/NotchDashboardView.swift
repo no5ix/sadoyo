@@ -61,6 +61,9 @@ struct NotchDashboardView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: NotchDashboardLayout.sectionSpacing) {
             quickControls
+            if service.showsDashboardCalendar {
+                calendar
+            }
             if !activities.isEmpty {
                 liveActivities
             }
@@ -78,16 +81,35 @@ struct NotchDashboardView: View {
     /// controls drawn narrow — a mark and a bar each, no chooser, no headings —
     /// with the rest of the row left empty.
     private var quickControls: some View {
-        HStack(spacing: NotchDashboardLayout.quickControlsSpacing) {
-            ForEach(NotchSupport.controls().filter(\.isLevel)) { item in
+        // The levels are the Controls page's own controls, drawn narrow. Volume
+        // sits at the page's leading edge and the last level - brightness where
+        // a Mac can set it - at its trailing edge, with the page's empty middle
+        // between them.
+        let levels = NotchSupport.controls().filter(\.isLevel)
+        return HStack(spacing: NotchDashboardLayout.quickControlsSpacing) {
+            ForEach(Array(levels.enumerated()), id: \.offset) { index, item in
                 NotchLevelControls(item: item, compact: true, service: service)
+                if index == NotchDashboardLayout.quickControlLeadingCount - 1
+                    && NotchDashboardLayout.hasTrailingGap(levels: levels.count) {
+                    Spacer(minLength: NotchDashboardLayout.quickControlGap)
+                }
             }
-            Spacer(minLength: 0)
         }
         .frame(height: NotchDashboardLayout.quickControlsHeight)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(NotchDashboardSection.quickControls.title(l10n.language))
         .accessibilityIdentifier("notch.dashboard.controls")
+    }
+
+    // MARK: - Calendar
+
+    /// The month, the day it is on, and that day's appointments, in a card of
+    /// its own: the Calendar page's grid and the Calendar page's events, at the
+    /// shortest rows the grid draws itself. The card opens the Calendar page,
+    /// where the month has room and the whole week is read.
+    private var calendar: some View {
+        NotchDashboardCalendarCard(service: service)
+            .accessibilityIdentifier("notch.dashboard.calendar")
     }
 
     // MARK: - Live Activities
@@ -115,23 +137,12 @@ struct NotchDashboardView: View {
         .accessibilityIdentifier("notch.dashboard.activities")
     }
 
-    /// A card of the section: the page's charcoal, its own corners, its own
-    /// hairline, and the height the layout measured for it.
-    private func card<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
-        content()
-            .padding(.horizontal, 8)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .frame(height: NotchDashboardLayout.activityCardHeight)
-            .modifier(NotchControlSurface(cornerRadius: NotchDashboardLayout.cornerRadius,
-                                          fillOpacity: NotchDashboardLayout.fillOpacity))
-    }
-
     /// The system's player as a card: its cover, the song beside it with its
     /// position and the two times, and the transport at the card's end. The
     /// card opens the player's page, where the queue, the lyrics and the
     /// output are.
     private func nowPlayingCard(_ playback: NotchPlayback) -> some View {
-        card {
+        NotchDashboardCard {
             HStack(spacing: 8) {
                 Button { service.select(.music) } label: {
                     HStack(spacing: 8) {
@@ -168,7 +179,7 @@ struct NotchDashboardView: View {
     /// transport that drives that process and no other. A player that has not
     /// agreed to be automated shows its name and the way to ask it.
     private func playerCard(_ session: NotchPlaybackSession) -> some View {
-        card {
+        NotchDashboardCard {
             HStack(spacing: 8) {
                 appMark(session)
                 VStack(alignment: .leading, spacing: 1) {
@@ -230,9 +241,12 @@ struct NotchDashboardView: View {
     @ViewBuilder private func playerTransport(_ session: NotchPlaybackSession) -> some View {
         switch session.access {
         case .granted:
+            // Only the commands this player answers to: a player driven through
+            // its window has the one control its window carries.
             HStack(spacing: 2) {
-                ForEach(PlaybackSessionsService.cardCommands.indices, id: \.self) { index in
-                    transportButton(session, PlaybackSessionsService.cardCommands[index])
+                ForEach(Array(PlaybackSessionsService.cardCommands(for: session).enumerated()),
+                        id: \.offset) { _, command in
+                    transportButton(session, command)
                 }
             }
         case .consent:
@@ -267,7 +281,7 @@ struct NotchDashboardView: View {
     /// holds it. The clock and the phase open the timer's page, where the way
     /// to start another one is.
     private var timerCard: some View {
-        card {
+        NotchDashboardCard {
             HStack(spacing: 8) {
                 Button { service.select(.timer) } label: {
                     HStack(spacing: 7) {
@@ -287,6 +301,11 @@ struct NotchDashboardView: View {
                 .accessibilityHint(text.open)
                 Spacer(minLength: 0)
                 timerPauseButton
+                // The card's own way out: it ends the session, and asks nothing
+                // of the players, whose cards stay as they are.
+                NotchIconButton(symbol: "xmark",
+                                title: timer.session.completed ? l10n.s.supportIntroDoneButton : l10n.s.mediaCancel) { timer.cancel() }
+                    .accessibilityIdentifier("notch.dashboard.timer.close")
             }
         }
         .tint(.orange)
@@ -509,5 +528,262 @@ private extension NotchPlaybackCommand {
         case .next: return text.mediaNext
         default: return text.mediaPlayPause
         }
+    }
+}
+
+/// One card of the page, with the hover of its own. The whole card is the
+/// region the pointer lights — the padding and the empty end of the row count
+/// as the card, not only the words in it — and the state belongs to this view,
+/// so lighting one card cannot light its neighbours. The controls placed inside
+/// keep their own clicks: the highlight is the card's background, drawn under
+/// them, and the shape that catches the pointer is the card's own outline.
+private struct NotchDashboardCard<Content: View>: View {
+    @ViewBuilder var content: () -> Content
+    var height: CGFloat = NotchDashboardLayout.activityCardHeight
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var hover = false
+
+    var body: some View {
+        content()
+            .padding(.horizontal, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(height: height)
+            .modifier(NotchControlSurface(cornerRadius: NotchDashboardLayout.cornerRadius,
+                                          selected: hover, fillOpacity: NotchDashboardLayout.fillOpacity))
+            .contentShape(RoundedRectangle(cornerRadius: NotchDashboardLayout.cornerRadius, style: .continuous))
+            .onHover { hover = $0 }
+            .animation(reduceMotion ? nil : .smooth(duration: 0.2), value: hover)
+    }
+}
+
+/// The calendar as the page shows it: the month's grid at the rows the grid
+/// draws itself, the day's appointments beside it in the page's own colours,
+/// and the month's name with the way through the months above. It is the
+/// Calendar page's data, read by the Calendar page's own service — no second
+/// calendar, no second event list — drawn at the height of six weeks, and the
+/// card opens the page, where the month has room.
+private struct NotchDashboardCalendarCard: View {
+    @ObservedObject var service: NotchService
+    @ObservedObject private var calendar = NotchCalendarService.shared
+    @ObservedObject private var permissions = Permissions.shared
+    @ObservedObject private var l10n = L10n.shared
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// The month the grid is built around, and the day the appointments are read
+    /// for: the page's own two questions, asked here of the same grid.
+    @State private var focus = Date()
+    @State private var selectedDay: Date?
+    @State private var hover = false
+
+    private var text: NotchCalendarStrings { FeatureStrings.notchCalendar(l10n.language) }
+    private var now: Date { Date() }
+    private var selected: Date { selectedDay ?? Calendar.current.startOfDay(for: now) }
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            // The card is the way to the page. Everything in front of this
+            // button keeps its own click: a day picks a day, a chevron moves a
+            // month, an appointment opens the page at that appointment.
+            Button(action: open) {
+                Color.clear.contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityHidden(true)
+            Group {
+                if permissions.calendarAccess == .fullAccess {
+                    content
+                } else {
+                    permission
+                }
+            }
+            .padding(EdgeInsets(top: 5, leading: 8, bottom: 5, trailing: 8))
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .frame(height: NotchDashboardLayout.calendarCardHeight)
+        .modifier(NotchControlSurface(cornerRadius: NotchDashboardLayout.cornerRadius,
+                                      selected: hover, fillOpacity: NotchDashboardLayout.fillOpacity))
+        .contentShape(RoundedRectangle(cornerRadius: NotchDashboardLayout.cornerRadius, style: .continuous))
+        .onHover { hover = $0 }
+        .animation(reduceMotion ? nil : .smooth(duration: 0.2), value: hover)
+        // Day, month and clock follow the app's language and the user's region,
+        // as the Calendar page does.
+        .environment(\.locale, l10n.language.formattingLocale())
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(NotchDashboardSection.calendar.title(l10n.language))
+    }
+
+    private var content: some View {
+        HStack(alignment: .top, spacing: NotchDashboardLayout.calendarColumnSpacing) {
+            VStack(alignment: .leading, spacing: 1) {
+                header
+                NotchCalendarMonthGrid(month: focus, selectedDay: selectedDay, now: now,
+                                       height: NotchDashboardLayout.calendarGridHeight,
+                                       events: calendar.events, text: text) { date in
+                    selectedDay = Calendar.current.startOfDay(for: date)
+                }
+                .frame(width: NotchDashboardLayout.calendarGridWidth)
+            }
+            Rectangle().fill(.white.opacity(0.12)).frame(width: 1)
+                .padding(.vertical, 2)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(selected, format: .dateTime.weekday(.wide).day().month(.abbreviated))
+                    .font(.system(size: 9.5, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.7))
+                    .lineLimit(1)
+                events
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+        }
+    }
+
+    /// The month's name and the way through it, and the way back to today when
+    /// the grid has wandered off. The row is a header, not a heading: it moves
+    /// the grid the Calendar page's grid moves.
+    private var header: some View {
+        HStack(spacing: 3) {
+            Text(focus, format: .dateTime.month(.wide).year())
+                .font(.system(size: 10.5, weight: .semibold))
+                .lineLimit(1)
+                .layoutPriority(1)
+            monthButton("chevron.left", text.previousMonth, -1)
+            monthButton("chevron.right", text.nextMonth, 1)
+            if !Calendar.current.isDate(focus, equalTo: now, toGranularity: .month) {
+                Button(text.today) { focus = now; selectedDay = nil }
+                    .buttonStyle(.borderless)
+                    .font(.system(size: 9, weight: .medium))
+            }
+            Spacer(minLength: 0)
+        }
+        .frame(height: NotchDashboardLayout.calendarHeaderHeight)
+    }
+
+    private func monthButton(_ symbol: String, _ title: String, _ offset: Int) -> some View {
+        Button { moveMonth(offset) } label: {
+            Image(systemName: symbol)
+                .font(.system(size: 9, weight: .semibold))
+                .frame(width: 16, height: 14)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(NotchButtonStyle(cornerRadius: 5, lifts: false))
+        .accessibilityLabel(title)
+        .help(title)
+    }
+
+    private func moveMonth(_ offset: Int) {
+        guard let next = Calendar.current.date(byAdding: .month, value: offset, to: focus) else { return }
+        focus = next
+        // The appointments follow the month being read, so the card never shows
+        // a day the grid no longer holds.
+        if let selectedDay, !Calendar.current.isDate(selectedDay, equalTo: next, toGranularity: .month) {
+            self.selectedDay = nil
+        }
+    }
+
+    /// The chosen day's appointments, in the page's order, with the page's
+    /// colours. The card has room for a few; the page has room for all of them.
+    @ViewBuilder private var events: some View {
+        let day = NotchCalendarSupport.events(calendar.events, on: selected)
+        let next = NotchCalendarSupport.next(calendar.events, now: now)
+        if calendar.loading {
+            ProgressView().controlSize(.mini)
+        } else if day.isEmpty {
+            Text(text.emptyDay)
+                .font(.system(size: 9.5))
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+        } else {
+            ForEach(day.prefix(3)) { event in
+                eventRow(event, isNext: event.id == next?.id)
+            }
+            if day.count > 3 {
+                Text("+\(day.count - 3)")
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func eventRow(_ event: NotchCalendarEvent, isNext: Bool) -> some View {
+        Button(action: open) {
+            HStack(alignment: .top, spacing: 5) {
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(event.color.color)
+                    .frame(width: 3)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack(spacing: 4) {
+                        Text(event.title.isEmpty ? text.untitled : event.title)
+                            .font(.system(size: 10, weight: .medium))
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                        if isNext {
+                            Text(text.next)
+                                .font(.system(size: 8, weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.7))
+                                .lineLimit(1)
+                        }
+                    }
+                    Text(eventTime(event))
+                        .font(.system(size: 9))
+                        .monospacedDigit()
+                        .foregroundStyle(.white.opacity(0.6))
+                        .lineLimit(1)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(NotchButtonStyle(cornerRadius: 6, lifts: false))
+        .accessibilityLabel(event.title.isEmpty ? text.untitled : event.title)
+        .accessibilityValue(eventTime(event))
+        .accessibilityHint(text.openCalendar)
+    }
+
+    /// The same span the page's card spells for the same appointment.
+    private func eventTime(_ event: NotchCalendarEvent) -> String {
+        if event.allDay { return text.allDay }
+        let formatter = DateFormatter()
+        formatter.locale = l10n.language.formattingLocale()
+        formatter.dateStyle = .none
+        formatter.timeStyle = .short
+        return "\(formatter.string(from: event.start)) – \(formatter.string(from: event.end))"
+    }
+
+    /// The page's own way of asking: the card says what is missing and offers
+    /// the setting, as the Calendar page does when it has no access to read.
+    private var permission: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "calendar.badge.clock")
+                .font(.system(size: 20, weight: .light))
+                .foregroundStyle(.white.opacity(0.45))
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 5) {
+                Text(permissions.calendarAccess == .denied || permissions.calendarAccess == .restricted
+                     ? text.denied : text.permission)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.white.opacity(0.7))
+                    .fixedSize(horizontal: false, vertical: true)
+                if permissions.calendarAccess == .denied || permissions.calendarAccess == .restricted {
+                    Button(text.settings) { Permissions.shared.openCalendarSettings() }
+                        .buttonStyle(.borderless).font(.system(size: 10, weight: .medium))
+                } else {
+                    Button(text.allow) {
+                        NotchService.shared.open(.calendar)
+                        Permissions.shared.requestCalendar()
+                    }
+                    .buttonStyle(.borderless).font(.system(size: 10, weight: .medium))
+                    .disabled(permissions.requestingCalendar)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 4)
+    }
+
+    private func open() {
+        service.select(.calendar)
     }
 }
