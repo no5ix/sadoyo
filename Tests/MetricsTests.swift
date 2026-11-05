@@ -123,6 +123,7 @@ struct MetricsTests {
                 NotchTests.run(suite)
                 NotchCompactTests.run(suite)
                 NotchDashboardTests.run(suite)
+                PlaybackSessionsTests.run(suite)
                 NotchCapsuleTests.run(suite)
                 PlainTextLineMoverTests.run(suite)
                 NotchVolumeKeyTests.run(suite)

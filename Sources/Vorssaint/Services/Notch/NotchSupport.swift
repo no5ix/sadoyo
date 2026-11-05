@@ -2823,14 +2823,17 @@ struct NotchGeometry: Equatable {
         return CGSize(width: expandedWidth, height: min(desiredHeight, screen.height - 48 - quickAccessBottomInset))
     }
 
-    /// The open island holding the one-page dashboard: its row, then the
-    /// sections the page measures. A chosen height stays the island's limit and
+    /// The open island holding the one-page dashboard: the sections the page
+    /// measures, at the width the page lays them out at. A chosen height stays the island's limit and
     /// the display bounds it, as every page's height does; the page scrolls
     /// where the dashboard does not fit, as a page taller than the island does.
-    func dashboardSize(content: CGFloat) -> CGSize {
+    func dashboardSize(content: CGFloat, width: CGFloat) -> CGSize {
         var preferredHeight = headerTopInset + headerChromeHeight + max(0, content)
         if layout == .custom { preferredHeight = min(preferredHeight, customHeight) }
-        return CGSize(width: expandedWidth,
+        // The island is as wide as the page it holds, and never wider than the
+        // preset's own island: a narrow display narrows the page with it.
+        let pageWidth = min(expandedWidth, width + NotchLayout.horizontalInset * 2)
+        return CGSize(width: pageWidth,
                       height: min(preferredHeight, screen.height - 48 - quickAccessBottomInset))
     }
 

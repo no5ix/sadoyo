@@ -40,6 +40,21 @@ enum NotchMusicAutomation {
         return Availability(target: target, capabilities: capabilities, access: access(to: target))
     }
 
+    /// Consent for a running application by itself, for the players a card
+    /// reads that are not the system's own session. Addressing the process, and
+    /// checking its bundle, keeps the answer about that process.
+    static func access(pid: Int32, bundleIdentifier: String) -> Access {
+        guard pid > 0, let app = NSRunningApplication(processIdentifier: pid), !app.isTerminated,
+              app.bundleIdentifier == bundleIdentifier else { return .unavailable }
+        let address = NSAppleEventDescriptor(processIdentifier: pid)
+        switch AEDeterminePermissionToAutomateTarget(address.aeDesc, typeWildCard, typeWildCard, false) {
+        case noErr: return .granted
+        case OSStatus(errAEEventWouldRequireUserConsent): return .consent
+        case OSStatus(errAEEventNotPermitted): return .denied
+        default: return .unavailable
+        }
+    }
+
     static func access(to target: Target) -> Access {
         guard target.isCurrent else { return .unavailable }
         let address = NSAppleEventDescriptor(processIdentifier: target.pid)
@@ -118,8 +133,71 @@ enum NotchMusicAutomation {
         return (reply.paramDescriptor(forKeyword: keyErrorNumber)?.int32Value ?? 0) == 0
     }
 
+    /// Reads one property of the application as text, as a player's song name
+    /// answers. Only text is an answer; anything else leaves it unread.
+    static func textProperty(_ code: UInt32, pid: Int32) -> String? {
+        guard let reply = propertyReply(code, pid: pid) else { return nil }
+        return text(in: reply.paramDescriptor(forKeyword: keyDirectObject))
+    }
+
+    /// Reads one property as a number, as a player's position and length
+    /// answer. A player that answers a length with a clock ("4:01") is read by
+    /// the same rule as its text.
+    static func numberProperty(_ code: UInt32, pid: Int32) -> Double? {
+        guard let reply = propertyReply(code, pid: pid) else { return nil }
+        let value = reply.paramDescriptor(forKeyword: keyDirectObject)
+        if let number = value?.doubleValue, number.isFinite, number >= 0 { return number }
+        return text(in: value).flatMap(PlaybackSessionsSupport.seconds(from:))
+    }
+
+    /// A player's answer to a property: text, and a list of characters joined.
+    private static func text(in descriptor: NSAppleEventDescriptor?) -> String? {
+        guard let descriptor else { return nil }
+        if let value = descriptor.stringValue, !value.isEmpty { return value }
+        guard descriptor.numberOfItems > 0, descriptor.numberOfItems <= 4096 else { return nil }
+        var text = ""
+        for index in 1...max(1, descriptor.numberOfItems) {
+            guard let piece = descriptor.atIndex(index)?.stringValue, piece.utf8.count <= 1024 else { return nil }
+            text += piece
+        }
+        return text.isEmpty ? nil : text
+    }
+
+    /// One read of one property, addressed at the process that owns it. A reply
+    /// carrying an error number is no answer at all.
+    private static func propertyReply(_ code: UInt32, pid: Int32) -> NSAppleEventDescriptor? {
+        guard pid > 0, let event = propertyEvent(kAEGetData, code: code,
+                                                 address: NSAppleEventDescriptor(processIdentifier: pid)),
+              let reply = try? event.sendEvent(options: [.waitForReply, .neverInteract, .dontRecord], timeout: 1),
+              (reply.paramDescriptor(forKeyword: keyErrorNumber)?.int32Value ?? 0) == 0 else { return nil }
+        return reply
+    }
+
+    /// Sends one command to one process, for a card that is not the system's
+    /// own session. What the player's dictionary declares is what is sent.
+    static func sendToPlayer(_ command: NotchPlaybackCommand, isPlaying: Bool,
+                             capabilities: NotchMusicAutomationCapabilities, pid: Int32) -> Bool {
+        guard pid > 0, let event = event(command, isPlaying: isPlaying, capabilities: capabilities, pid: pid),
+              let reply = try? event.sendEvent(options: [.waitForReply, .neverInteract, .dontRecord], timeout: 1)
+        else { return false }
+        // A timeout may occur after delivery. Never retry a playback action.
+        return (reply.paramDescriptor(forKeyword: keyErrorNumber)?.int32Value ?? 0) == 0
+    }
+
+    /// The same command, addressed at a process by itself. The system's own
+    /// session spells its play/pause state in its playback; a card of its own
+    /// knows the state it read.
+    static func event(_ command: NotchPlaybackCommand, isPlaying: Bool,
+                      capabilities: NotchMusicAutomationCapabilities, pid: Int32) -> NSAppleEventDescriptor? {
+        guard pid > 0, let code = capabilities.event(for: command, isPlaying: isPlaying) else { return nil }
+        return NSAppleEventDescriptor(eventClass: code.eventClass, eventID: code.eventID,
+                                      targetDescriptor: NSAppleEventDescriptor(processIdentifier: pid),
+                                      returnID: AEReturnID(kAutoGenerateReturnID),
+                                      transactionID: AETransactionID(kAnyTransactionID))
+    }
+
     /// Gets or sets one property of the application itself.
-    private static func propertyEvent(_ eventID: AEEventID, code: UInt32,
+    static func propertyEvent(_ eventID: AEEventID, code: UInt32,
                                       address: NSAppleEventDescriptor) -> NSAppleEventDescriptor? {
         let specifier = NSAppleEventDescriptor.record()
         specifier.setDescriptor(NSAppleEventDescriptor(typeCode: typeProperty), forKeyword: AEKeyword(keyAEDesiredClass))

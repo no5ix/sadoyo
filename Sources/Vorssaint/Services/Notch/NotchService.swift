@@ -170,8 +170,11 @@ final class NotchService: ObservableObject {
     /// reach the app in front instead.
     @Published private(set) var panelIsKey = false
     @Published private var captureContentHeight: CGFloat?
-    /// Kept after closing, so the next Fan Control detail opens at its size.
-    @Published private var fanDetailHeight: CGFloat?
+    /// The height the detail on screen measures, so the island is as tall as
+    /// the reading it shows: no empty page under a short detail, and no last
+    /// row cut off above a long one, which scrolls instead. A new detail starts
+    /// unmeasured, because the last one's content says nothing about this one.
+    @Published private var detailContentHeight: CGFloat?
     @Published private(set) var power = PowerReading()
     @Published private var musicDetailVisible = false
 
@@ -825,12 +828,17 @@ final class NotchService: ObservableObject {
                                             modules: !modules.isEmpty)
     }
 
-    /// The player shows while a song is known and the island is allowed to
-    /// watch it; a timer shows while a session runs, waits, or has finished.
-    /// The two are decided apart, so a song and a timer share the page and
-    /// neither's ending takes the other's card away.
+    /// The players the page shows: the one the system names as playing, then
+    /// every other player whose own dictionary says it is playing. Nothing is
+    /// capped at one, and the timer is decided apart from all of them.
+    var dashboardPlayerIDs: [Int] {
+        PlaybackSessionsService.cardPlayerIDs(
+            primary: showsDashboardNowPlaying ? Int(NotchMusicService.shared.playback?.track.appPID ?? -1) : nil,
+            sessions: PlaybackSessionsService.shared.sessions)
+    }
+
     var dashboardActivities: [NotchDashboardActivity] {
-        NotchDashboardSupport.activities(music: showsDashboardNowPlaying, timer: showsDashboardTimer)
+        NotchDashboardSupport.activities(players: dashboardPlayerIDs, timer: showsDashboardTimer)
     }
 
     private var showsDashboardNowPlaying: Bool {
@@ -841,8 +849,11 @@ final class NotchService: ObservableObject {
         modules.contains(.timer) && NotchTimerService.shared.session.hasSession
     }
 
-    /// The width the page lays its sections out at.
-    var dashboardContentWidth: CGFloat { expandedGeometry.contentWidth }
+    /// The width the page lays its sections out at: the page's own, short of
+    /// what the preset on this display offers.
+    var dashboardContentWidth: CGFloat {
+        min(NotchDashboardLayout.naturalContentWidth, expandedGeometry.contentWidth)
+    }
 
     /// What the page measures, which the island grows to hold. The grid's count
     /// is the System page's own count, so the page and the island agree on the
@@ -861,13 +872,13 @@ final class NotchService: ObservableObject {
             return geometry.sectionPickerSize(count: filteredSections.count)
         }
         if showsDashboard {
-            return geometry.dashboardSize(content: dashboardContentHeight)
+            return geometry.dashboardSize(content: dashboardContentHeight, width: dashboardContentWidth)
         }
         let musicExtras = NotchLyricsSupport.isEnabled() || NotchQueueSupport.isEnabled()
         let launcher = QuickLauncherService.shared
         return pageSize(in: expandedGeometry, module: showingAppPanel ? .tools : selected,
                         detail: selectedMetric != nil, panel: showingAppPanel,
-                        detailHeight: selectedMetric == .fan ? fanDetailHeight : nil,
+                        detailHeight: detailContentHeight,
                         musicExtraHeight: musicExtras && musicDetailVisible ? geometry.musicExtrasHeight : 0,
                         fileMediaHeight: !choosingFileDropDestination && AppFeature.mediaTools.isAvailable
                             && NotchFileToolsService.shared.mediaPresented ? NotchFileToolsService.shared.mediaContentHeight : nil,
@@ -958,10 +969,11 @@ final class NotchService: ObservableObject {
         // width, and lead their row with their own way back instead of the
         // sections.
         if showsDashboard {
-            // The dashboard is one page of sections: a row above it, and a
-            // width it reads well at, short of the preset's own content.
-            result.pageTop = .row
+            // The dashboard is one page of sections and nothing above them:
+            // the sliders are the page's top, so no row of buttons is added.
+            result.pageTop = .none
             result.pageContentWidth = min(NotchDashboardLayout.naturalContentWidth, geometry.contentWidth)
+            result.sectionsButtonInRow = false
         } else if !showingSections, !showingAppPanel, selectedMetric == nil, !modules.isEmpty {
             result.pageContentWidth = NotchLayout.naturalContentWidth(selected, controls: homeControls,
                                                                       within: geometry.contentWidth)
@@ -1517,6 +1529,8 @@ final class NotchService: ObservableObject {
             showsKeyboardFocus = false
         }
         else if appPanel || metric != nil, !showingAppPanel, selectedMetric == nil { detailHasPage = true }
+        // Each detail measures its own content, so a new one starts unmeasured.
+        if metric != nil, metric != selectedMetric { forgetDetailHeight() }
         // Following the closed island ends the moment it opens, before a page
         // or a capture preview under the pointer can be told the pointer left.
         // An open page is followed again only from an exit report.
@@ -1562,6 +1576,7 @@ final class NotchService: ObservableObject {
             showingAppPanel = false
             showingSections = false
             showingCommandBar = false
+            forgetDetailHeight()
             dashboardRequested = true
             sectionQuery = ""
             highlightedSection = nil
@@ -2022,6 +2037,7 @@ final class NotchService: ObservableObject {
 
     func showMetric(_ metric: MetricDetailKind, toggle: Bool = false) {
         guard metricIsAvailable(metric) else { return }
+        if metric != selectedMetric { forgetDetailHeight() }
         if toggle, expanded, selectedMetric == metric, !showingSections, !showingCommandBar { collapse(); return }
         open(.system, metric: metric)
         // A metric opened from its menu bar item closes on Escape, like the popover.
@@ -2031,18 +2047,33 @@ final class NotchService: ObservableObject {
     /// Fan Control is a single card, so its detail fits the card instead of
     /// opening a tall, mostly empty page. A taller card still scrolls in it.
     func updateFanDetailHeight(_ height: CGFloat) {
-        guard expanded, selectedMetric == .fan, !showingAppPanel, !showingSections,
-              height.isFinite, height > 0 else { return }
+        guard selectedMetric == .fan, !showingAppPanel, !showingSections else { return }
+        updateDetailHeight(height)
+    }
+
+    /// What the detail on screen measures, in points. The island sizes itself
+    /// to that: a short detail gives a short page, and a long one scrolls
+    /// inside the page instead of losing its last row.
+    func updateDetailHeight(_ height: CGFloat) {
+        guard expanded, selectedMetric != nil, height.isFinite, height > 0 else { return }
         let measured = ceil(height)
-        guard fanDetailHeight != measured else { return }
-        fanDetailHeight = measured
+        guard detailContentHeight != measured else { return }
+        detailContentHeight = measured
         refreshPresentation()
+    }
+
+    /// A detail that has not been measured yet takes the page's own height, so
+    /// its first frame is never a blank one.
+    private func forgetDetailHeight() {
+        guard detailContentHeight != nil else { return }
+        detailContentHeight = nil
     }
 
     func goBack() {
         let changesPresentation = selectedMetric != nil || showingAppPanel
         mutatePresentation(transitionContent: changesPresentation ? .replace : .none) {
             selectedMetric = nil; showingAppPanel = false
+            forgetDetailHeight()
             // The way back from a detail is the dashboard the grid sits on.
             if changesPresentation { dashboardRequested = true }
         }
@@ -4527,6 +4558,10 @@ final class NotchService: ObservableObject {
             || ((!hiddenUntilHover || NotchSupport.hiddenShowsActivity())
                 && (NotchSupport.watchesMusicActivity() || NotchSupport.routes(.track))))
         if musicWanted { NotchMusicService.shared.start() } else { NotchMusicService.shared.stop() }
+        // The page's other players are asked only while the page draws them, and
+        // never when the island is not allowed to watch music at all.
+        PlaybackSessionsService.shared.setWatching(showsDashboard && modules.contains(.music)
+            && NotchSupport.watchesMusicActivity())
         // The grid is sampled while the island draws it, on its page and on the
         // dashboard alike.
         let needs = expanded && (selected == .system || showsDashboard) && selectedMetric == nil

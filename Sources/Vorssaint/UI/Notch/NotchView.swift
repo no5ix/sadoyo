@@ -332,6 +332,11 @@ struct NotchView: View {
         } else if scrollsVertically {
             ScrollView {
                 content
+                    // A detail measures itself before the page's frame, so the
+                    // island is as tall as the reading it shows and a long one
+                    // scrolls instead of losing its last row.
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height }
+                    action: { service.updateDetailHeight($0) }
                     .frame(height: contentOverflows ? pageSize.height : nil)
                     .frame(maxWidth: .infinity, alignment: .topLeading)
                     .padding(.bottom, 4)

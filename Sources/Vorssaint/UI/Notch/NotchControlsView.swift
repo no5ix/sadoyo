@@ -86,17 +86,20 @@ struct NotchControlsView: View {
 /// the same system level the volume and brightness keys move.
 struct NotchLevelControls: View {
     let item: NotchControlItem
+    /// Passed to the level's own control, which draws a narrow bar and leaves
+    /// out the choosers in the dashboard's row.
+    var compact = false
     @ObservedObject var service: NotchService = .shared
     @ObservedObject private var l10n = L10n.shared
     @AppStorage(DefaultsKey.brightnessControlEnabled) private var brightnessEnabled = false
 
     var body: some View {
         if item == .volume {
-            NotchAudioControls(notch: service)
+            NotchAudioControls(notch: service, compact: compact)
         } else if item == .keyboardLight {
             NotchKeyboardLightControls()
         } else if brightnessEnabled {
-            NotchBrightnessControls()
+            NotchBrightnessControls(compact: compact)
         } else {
             brightnessSetup
         }
@@ -156,6 +159,10 @@ extension NotchControlItem {
 
 struct NotchAudioControls: View {
     @ObservedObject var notch: NotchService = .shared
+    /// The dashboard's row is a control, not the Controls page: the output
+    /// chooser and the wide track are left out, and the bar is as narrow as
+    /// the row's mark and its bar in the layout.
+    var compact = false
     @ObservedObject private var mixer = AppVolumeMixer.shared
     @ObservedObject private var l10n = L10n.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -168,8 +175,10 @@ struct NotchAudioControls: View {
         HStack(spacing: 6) {
             mute
             slider
-            NotchLevelChooser(title: l10n.s.mixerSystemOutputTitle, items: outputItems)
-                .accessibilityValue(deviceName)
+            if !compact {
+                NotchLevelChooser(title: l10n.s.mixerSystemOutputTitle, items: outputItems)
+                    .accessibilityValue(deviceName)
+            }
         }
         .frame(height: 28)
         .help(mixer.outputSwitchError ?? deviceName)
@@ -205,7 +214,7 @@ struct NotchAudioControls: View {
             // position bar, keeping the full height to grab it by.
             NotchLevelSlider(value: Binding(get: { level }, set: { adjustOutput(volume: $0) }),
                              label: FeatureStrings.notch(l10n.language).volume, trackThickness: 8, easesChanges: true)
-                .frame(height: 24)
+                .frame(width: compact ? NotchDashboardLayout.quickControlBarWidth : nil, height: 24)
         } else {
             Text(l10n.s.mixerOutputUnavailable).font(.system(size: 10)).foregroundStyle(.secondary)
                 .lineLimit(1)
@@ -293,6 +302,8 @@ struct NotchLevelRow<Level: View>: View {
 
 private struct NotchBrightnessControls: View {
     @ObservedObject private var service = BrightnessService.shared
+    /// See `NotchAudioControls.compact`: the dashboard's row is a control.
+    var compact = false
     @ObservedObject private var l10n = L10n.shared
     private var displays: [BrightnessDisplay] { service.displays.filter { $0.isActive && $0.method != nil } }
     /// The display the brightness keys last moved, or the one picked here,
@@ -306,7 +317,7 @@ private struct NotchBrightnessControls: View {
             glyph
             slider
             // A single display leaves nothing to choose.
-            if let display, displays.count > 1 {
+            if !compact, let display, displays.count > 1 {
                 NotchLevelChooser(title: FeatureStrings.notch(l10n.language).brightness,
                                   items: displayItems(current: display))
                     .accessibilityValue(display.name)
@@ -336,7 +347,7 @@ private struct NotchBrightnessControls: View {
                 // the row nor the system's indicator repeats it.
                 service.setBrightness($0, for: display.id, announces: false)
             }), label: FeatureStrings.notch(l10n.language).brightness, trackThickness: 8, easesChanges: true)
-                .frame(height: 24)
+                .frame(width: compact ? NotchDashboardLayout.quickControlBarWidth : nil, height: 24)
         } else {
             Text(FeatureStrings.brightness(l10n.language).noDisplays)
                 .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(2)

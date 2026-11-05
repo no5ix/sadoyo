@@ -4,63 +4,73 @@
 import Foundation
 
 /// The one-page island's composition: which sections it shows, in which order,
-/// which activities share its middle, where a monitoring tile leads, and what
-/// the menu bar's indicators and the way back lead to.
+/// which players and timers share its middle, where a monitoring tile leads,
+/// how tall a detail is allowed to be, and what the menu bar's indicators and
+/// the way back lead to.
 ///
 /// These are the observable promises of the dashboard. A page that drops the
-/// levels, replaces the grid with one metric, lets a song's start hide a timer,
-/// or leaves no way to the sections fails here, whatever its views look like.
+/// levels, replaces the grid with one metric, caps the players at one, lets a
+/// song's start hide a timer, prints a heading over a section, or leaves no way
+/// to the sections fails here, whatever its views look like.
 enum NotchDashboardTests {
     static func run(_ suite: TestSuite) {
         suite.run("dashboard sections stay and keep their order") {
             let idle = NotchDashboardSupport.sections(activities: [])
             expect(suite, idle, [.quickControls, .systemMonitoring, .explore],
                    "an island with nothing running shows the levels, the grid and the sections")
-            let busy = NotchDashboardSupport.sections(activities: [.nowPlaying, .timer])
+            let busy = NotchDashboardSupport.sections(activities: [.player(id: 7), .timer])
             expect(suite, busy, [.quickControls, .liveActivities, .systemMonitoring, .explore],
-                   "a song and a timer go between the levels and the grid")
-            for activities in [[NotchDashboardActivity](), [.nowPlaying], [.timer], [.nowPlaying, .timer]] {
+                   "a player and a timer go between the levels and the grid")
+            for activities in [[NotchDashboardActivity](), [.player(id: 7)], [.timer],
+                               [.player(id: 7), .player(id: 9), .timer]] {
                 let sections = NotchDashboardSupport.sections(activities: activities)
                 suite.expect(sections.first == .quickControls
                                  && sections.contains(.systemMonitoring)
                                  && sections.last == .explore,
-                             "the levels, the grid and the sections stay whatever runs: \(activities)")
+                             "the levels, the grid and the sections stay whatever runs: \(activities.count) cards")
             }
         }
 
-        suite.run("activities coexist and end apart") {
-            expect(suite, NotchDashboardSupport.activities(music: false, timer: false), [],
+        suite.run("every player playing gets a card, and the timer has its own") {
+            expect(suite, NotchDashboardSupport.activities(players: [], timer: false), [],
                    "nothing running leaves no activity card")
-            expect(suite, NotchDashboardSupport.activities(music: true, timer: false), [.nowPlaying],
-                   "a song alone takes the section")
-            expect(suite, NotchDashboardSupport.activities(music: false, timer: true), [.timer],
+            expect(suite, NotchDashboardSupport.activities(players: [7], timer: false), [.player(id: 7)],
+                   "one player takes the section")
+            expect(suite, NotchDashboardSupport.activities(players: [], timer: true), [.timer],
                    "a timer alone takes the section")
-            expect(suite, NotchDashboardSupport.activities(music: true, timer: true), [.nowPlaying, .timer],
-                   "a song and a timer share the section, in order")
-            // The two are decided apart: every change of one leaves the other's
-            // card as it was, and both changes together leave the section empty.
-            let before = NotchDashboardSupport.activities(music: true, timer: true)
-            let songEnded = NotchDashboardSupport.activities(music: false, timer: true)
-            let timerEnded = NotchDashboardSupport.activities(music: true, timer: false)
-            suite.expect(songEnded == [.timer] && timerEnded == [.nowPlaying],
-                         "one activity ending keeps the other's card")
-            suite.expect(before.count == 2
-                             && NotchDashboardSupport.activities(music: false, timer: false).isEmpty,
-                         "both ending empties the section, which drops it from the page")
+            // Nothing caps the players at one: three at once are three cards, in
+            // the order they were found, with the timer last.
+            expect(suite, NotchDashboardSupport.activities(players: [7, 9, 11], timer: true),
+                   [.player(id: 7), .player(id: 9), .player(id: 11), .timer],
+                   "three players and a timer share one section as four cards")
+            suite.expect(Set(NotchDashboardSupport.activities(players: [7, 9, 11], timer: true).map(\.id)).count == 4,
+                         "each card is its own, so two players are not one card")
+            // The cards are decided apart: one ending leaves the others as they
+            // were, and the timer's ending leaves every player's card.
+            let many = NotchDashboardSupport.activities(players: [7, 9], timer: true)
+            let oneStopped = NotchDashboardSupport.activities(players: [9], timer: true)
+            let timerStopped = NotchDashboardSupport.activities(players: [7, 9], timer: false)
+            suite.expect(oneStopped == [.player(id: 9), .timer],
+                         "one player stopping leaves the other's card and the timer's")
+            suite.expect(timerStopped == [.player(id: 7), .player(id: 9)],
+                         "the timer ending leaves every player's card where it was")
+            suite.expect(NotchDashboardSupport.activities(players: [], timer: false).isEmpty,
+                         "all of them ending empties the section, which drops it from the page")
         }
 
         suite.run("grid shows every metric at once, in four columns") {
             let all = NotchDashboardSupport.tiles { _ in true }
             expect(suite, all, [.cpu, .gpu, .memory, .battery, .network, .disk, .power, .fan, .devices],
                    "the grid's order, read left to right")
-            let withoutFans = NotchDashboardSupport.tiles { $0 != .fan }
-            suite.expect(withoutFans.count == 8, "a Mac with no fan tile shows the eight the layout asks for")
-            let rows = NotchDashboardLayout.metricRowRanges(tiles: withoutFans.count)
+            let eight = NotchDashboardSupport.tiles { $0 != .fan }
+            suite.expect(eight.count == 8, "a Mac with no fan tile shows the eight the layout asks for")
+            suite.expect(NotchDashboardLayout.metricColumns == 4, "the grid is four columns wide")
+            let rows = NotchDashboardLayout.metricRowRanges(tiles: eight.count)
             suite.expect(rows.count == 2 && rows[0] == 0..<4 && rows[1] == 4..<8,
                          "eight tiles fill four columns in two rows: \(rows)")
             suite.expect(NotchDashboardLayout.metricRowRanges(tiles: all.count)
-                            .map { $0.count } == [3, 3, 3],
-                         "nine tiles fill three even rows, so none is a lone tile")
+                            .map { $0.count } == [4, 4, 1],
+                         "nine tiles fill the rows from the left, so the tiles keep one width")
             // Unavailable metrics leave no tile, so no tile opens an empty detail.
             expect(suite, NotchDashboardSupport.tiles { $0 == .cpu }, [.cpu], "a desktop Mac shows a CPU tile only")
             suite.expect(NotchDashboardLayout.metricRowRanges(tiles: 0).isEmpty
@@ -140,41 +150,42 @@ enum NotchDashboardTests {
                          "a closed island shows its strip, not the page")
         }
 
-        suite.run("the island's height is what the page measures") {
+        suite.run("the island's height is what the page measures, with no headings") {
             let width = NotchDashboardLayout.naturalContentWidth
-            let idle = NotchDashboardLayout.sectionHeights(activities: [], metrics: 8, exploreCount: 8, width: width)
-            let both = NotchDashboardLayout.sectionHeights(activities: [.nowPlaying, .timer], metrics: 8,
-                                                           exploreCount: 8, width: width)
-            suite.expect(idle.count == 3 && both.count == 4,
-                         "one height per section, the activity card measured only when something runs")
-            suite.expect(NotchDashboardLayout.contentHeight(activities: [.nowPlaying, .timer], metrics: 8,
-                                                            exploreCount: 8, width: width)
-                             > NotchDashboardLayout.contentHeight(activities: [], metrics: 8,
-                                                                  exploreCount: 8, width: width),
-                         "an activity grows the island; the sections under it do not move")
-            suite.expect(NotchDashboardLayout.contentHeight(activities: [.nowPlaying], metrics: 8,
-                                                            exploreCount: 8, width: width)
-                             > NotchDashboardLayout.contentHeight(activities: [.timer], metrics: 8,
-                                                                  exploreCount: 8, width: width),
-                         "the player's card is measured taller than the timer's")
-            suite.expect(idle[0] == NotchDashboardLayout.sectionHeight(NotchDashboardLayout.quickControlsHeight,
-                                                                      header: true),
-                         "the levels keep their row's height, plus the label above them")
-            suite.expect(idle[1] == NotchDashboardLayout.sectionHeight(NotchDashboardLayout.metricsHeight(tiles: 8),
-                                                                      header: true),
-                         "the grid is measured at its rows, so all eight tiles fit")
-            suite.expect(idle[2] == NotchDashboardLayout.sectionHeight(
-                NotchDashboardLayout.exploreHeight(count: 8, width: width), header: true),
+            let cards: [NotchDashboardActivity] = [.player(id: 7), .player(id: 9), .timer]
+            let idle = NotchDashboardLayout.sectionHeights(activities: [], metrics: 8, exploreCount: 7, width: width)
+            let busy = NotchDashboardLayout.sectionHeights(activities: cards, metrics: 8, exploreCount: 7, width: width)
+            suite.expect(idle.count == 3 && busy.count == 4,
+                         "one height per section, the activity cards measured only when something runs")
+            // A section is its content and nothing else: no label line, no
+            // card insets of its own. That is what keeps the island exactly as
+            // tall as the page it holds.
+            suite.expect(idle[0] == NotchDashboardLayout.quickControlsHeight,
+                         "the levels' row is a row, not a card with a caption")
+            suite.expect(idle[1] == NotchDashboardLayout.metricsHeight(tiles: 8),
+                         "the grid is measured at its rows")
+            suite.expect(idle[2] == NotchDashboardLayout.exploreHeight(count: 7, width: width),
                          "the sections' marks are measured at their rows")
-            suite.expect(idle.allSatisfy { height in
-                height >= NotchDashboardLayout.headerHeight + NotchDashboardLayout.headerSpacing
-            } && NotchDashboardLayout.contentHeight(activities: [], metrics: 8, exploreCount: 8, width: width)
-                > NotchDashboardLayout.contentHeight(activities: [], metrics: 8, exploreCount: 0, width: width),
-                         "every card leaves room for its label, and marks add height the page measures")
+            suite.expect(busy[1] == NotchDashboardLayout.liveActivitiesHeight(cards),
+                         "the activity section is measured at its three cards")
+            suite.expect(NotchDashboardLayout.contentHeight(activities: cards, metrics: 8, exploreCount: 7, width: width)
+                             == busy.reduce(0, +) + NotchDashboardLayout.sectionSpacing * 3,
+                         "the page is its sections and the gaps between them")
+            // Each card, player or timer, adds exactly its own height.
+            suite.expect(NotchDashboardLayout.liveActivitiesHeight([.player(id: 7)]) + NotchDashboardLayout.cardSpacing
+                             + NotchDashboardLayout.activityCardHeight
+                             == NotchDashboardLayout.liveActivitiesHeight([.player(id: 7), .player(id: 9)]),
+                         "a second player adds a card of its own, and the gap")
+            suite.expect(NotchDashboardLayout.liveActivitiesHeight(cards)
+                             > NotchDashboardLayout.liveActivitiesHeight([.player(id: 7)]),
+                         "more cards grow the page, which the island then measures")
         }
 
-        suite.run("every section the page draws names itself") {
-            for activities in [[NotchDashboardActivity](), [.nowPlaying, .timer]] {
+        suite.run("each section is known by shape, and named out loud") {
+            // The page prints no headings, so its labels are the accessibility
+            // labels of the content they stand over: every language has them and
+            // no two sections answer to the same name.
+            for activities in [[NotchDashboardActivity](), [.player(id: 7), .timer]] {
                 let drawn = NotchDashboardSupport.sections(activities: activities)
                 for language in AppLanguage.allCases {
                     let titles = drawn.map { $0.title(language) }
@@ -185,55 +196,74 @@ enum NotchDashboardTests {
                 let en = drawn.map { $0.title(.enUS) }
                 suite.expect(Set(en).count == en.count, "no two sections answer to the same name")
             }
-            // Explore's label is the title of the page the marks open, so the
-            // label above them and the page they lead to agree.
+            // Explore's label is the title of the page the marks open.
             for language in AppLanguage.allCases {
                 suite.expect(NotchDashboardSection.explore.title(language)
                                  == FeatureStrings.notch(language).sectionsTitle,
                              "\(language.rawValue): the Explore label is the sections page's own title")
             }
-            suite.expect(NotchDashboardLayout.headerHeight >= 9
-                             && NotchDashboardLayout.headerSpacing >= 3,
-                         "the label is a line that can be read, with a gap under it")
-            suite.expect(NotchDashboardLayout.sectionHeight(20, header: true)
-                             == NotchDashboardLayout.sectionHeight(20)
-                                + NotchDashboardLayout.headerHeight + NotchDashboardLayout.headerSpacing,
-                         "a card's height counts its label, so the island is as tall as the page")
-            suite.expect(NotchDashboardLayout.naturalContentWidth >= 400,
-                         "the page keeps the reference's width, where four columns and two levels fit")
         }
 
-        suite.run("the sections stay compact and separated") {
+        suite.run("the sections are laid out as the page was drawn") {
             let width = NotchDashboardLayout.naturalContentWidth
-            // Quick Controls: one row, the two levels sharing it.
-            suite.expect(NotchDashboardLayout.quickControlWidth(width: width) > 120,
-                         "a level keeps a usable slider in half the row")
-            suite.expect(NotchDashboardLayout.quickControlsHeight >= 24,
-                         "the slider keeps a height a pointer can hold")
-            // Monitoring: four columns of tiles, each tall enough for its reading.
-            suite.expect(NotchDashboardLayout.metricColumns == 4
-                             && NotchDashboardLayout.metricTileHeight >= 24,
-                         "eight readings in four columns of readable tiles")
+            // Quick Controls: a compact row of two levels, leading the page,
+            // each a mark and a narrow bar, with room to spare beside them.
+            suite.expect(NotchDashboardLayout.quickControlsHeight >= 24
+                             && NotchDashboardLayout.quickControlsHeight <= 34,
+                         "the row is tall enough for a slider a pointer can hold, and no taller")
+            suite.expect(NotchDashboardLayout.quickControlBarWidth <= 140,
+                         "a level's bar stays compact: \(NotchDashboardLayout.quickControlBarWidth)")
+            suite.expect(2 * NotchDashboardLayout.quickControlWidth(width: width)
+                             + NotchDashboardLayout.quickControlsSpacing <= width,
+                         "both levels fit the row side by side, with the row's end left empty")
+            // Monitoring: four columns, two rows, each tile a label, a reading
+            // and a meter.
+            suite.expect(NotchDashboardLayout.metricTileHeight >= 44,
+                         "a tile has room for its label, its reading and its meter")
             suite.expect(NotchDashboardLayout.metricsHeight(tiles: 8)
                              == NotchDashboardLayout.gridHeight(rows: 2,
                                                                 tileHeight: NotchDashboardLayout.metricTileHeight,
                                                                 spacing: NotchDashboardLayout.metricSpacing),
                          "the grid's height is its two rows")
-            // Explore: round marks, no words, as many as fit, spreading sideways.
-            let columns = NotchDashboardLayout.exploreColumns(width: width - NotchDashboardLayout.sectionInset * 2)
-            suite.expect(columns >= 10, "the marks fit a row on a wide island: \(columns)")
+            // Explore: round marks, seven in a row, so the sections sit on the
+            // page in two rows and none of them is cut off.
+            suite.expect(NotchDashboardLayout.exploreColumns(width: width) == 7,
+                         "seven marks in a row at the page's width")
+            suite.expect(NotchDashboardLayout.exploreButton >= 36,
+                         "a mark is a circle a pointer aims at, not a dot")
+            suite.expect(NotchDashboardLayout.exploreRows(count: 14, width: width) == 2,
+                         "fourteen sections fill the row and one more")
             suite.expect(NotchDashboardLayout.exploreHeight(count: 14, width: width)
-                             == NotchDashboardLayout.exploreHeight(count: 10, width: width)
+                             == NotchDashboardLayout.exploreHeight(count: 7, width: width)
                              + NotchDashboardLayout.exploreSpacing + NotchDashboardLayout.exploreButton,
                          "marks past the row add a row, so none is cut off")
-            suite.expect(NotchDashboardSupport.rows(count: 0, columns: columns).isEmpty
+            suite.expect(NotchDashboardSupport.rows(count: 0, columns: 7).isEmpty
                              && NotchDashboardSupport.rows(count: 5, columns: 4) == [0..<4, 4..<5],
                          "rows cover every mark exactly once")
-            // Separation: the cards are inset from each other, not flush.
-            suite.expect(NotchDashboardLayout.sectionSpacing >= 6
-                             && NotchDashboardLayout.cornerRadius > 0
-                             && NotchDashboardLayout.fillOpacity > 0.06,
-                         "cards are rounded and lighter than the island's black, with a gap between them")
+            // The page keeps the reference's width, where four columns of tiles,
+            // two levels and seven marks all fit.
+            suite.expect(width >= 520 && width <= 620, "the page keeps the reference's width: \(width)")
+            // Shapes, not headings, separate the sections: filled, rounded and
+            // gapped, on the island's black.
+            suite.expect(NotchDashboardLayout.sectionSpacing >= 8
+                             && NotchDashboardLayout.cornerRadius >= 10
+                             && NotchDashboardLayout.fillOpacity >= 0.08,
+                         "cards are rounded, lighter than the island's black, and gapped")
+        }
+
+        suite.run("a detail is as tall as what it shows, and scrolls when it is taller") {
+            let geometry = NotchGeometry(screen: CGRect(x: 0, y: 0, width: 1470, height: 956),
+                                         safeAreaTop: 32, cameraWidth: 180)
+            let unmeasured = geometry.expandedSize(module: .system, detail: true, panel: false, detailHeight: nil)
+            let short = geometry.expandedSize(module: .system, detail: true, panel: false, detailHeight: 120)
+            let long = geometry.expandedSize(module: .system, detail: true, panel: false, detailHeight: 10_000)
+            suite.expect(short.height < unmeasured.height,
+                         "a detail measured short gives a short island, not a page of empty space")
+            suite.expect(long.height <= unmeasured.height,
+                         "a detail taller than the display is capped by the page, which scrolls inside it")
+            suite.expect(long.height < 10_000, "the island never grows past the display for a long detail")
+            let page = geometry.contentSize(for: long)
+            suite.expect(page.height > 0 && page.height < 956, "the detail's page stays on the display")
         }
     }
 
@@ -244,7 +274,7 @@ enum NotchDashboardTests {
 
     private static func expect(_ suite: TestSuite, _ actual: [NotchDashboardActivity],
                                _ expected: [NotchDashboardActivity], _ message: String) {
-        suite.expect(actual == expected, "\(message): got \(actual)")
+        suite.expect(actual == expected, "\(message): got \(actual.map(\.id))")
     }
 
     private static func expect(_ suite: TestSuite, _ actual: [NotchDashboardMetric],

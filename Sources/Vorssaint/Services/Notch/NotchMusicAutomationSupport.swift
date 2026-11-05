@@ -15,6 +15,15 @@ struct NotchMusicAutomationCapabilities: Equatable {
     /// Some players' read-only answer to whether the songs playing can be
     /// shuffled at all. Players that do not declare it always can.
     var shuffleAllowed: UInt32?
+    /// The properties the player declares for its own song: its state, its
+    /// name, its artist, its position and its length, as the player spells
+    /// them. A player that declares no state cannot be read, so it gets no
+    /// card of its own.
+    var properties: [String: UInt32] = [:]
+    /// The player's state property, the one its card is built on.
+    var stateProperty: UInt32? {
+        PlaybackSessionsSupport.stateNames.compactMap { properties[$0] }.first
+    }
 
     var canToggle: Bool { commands["playpause"] != nil || (commands["play"] != nil && commands["pause"] != nil) }
 
@@ -76,6 +85,12 @@ private final class MusicDictionaryReader: NSObject, XMLParserDelegate {
     /// Players call it "shuffling" or "shuffle enabled". A read-only
     /// "shuffling enabled" says whether shuffle is offered at all.
     private let shuffleNames: Set<String> = ["shuffling", "shuffle enabled"]
+    /// The words a card reads, as the Standard Suites and the common players
+    /// spell them.
+    private let propertyNames: Set<String> = Set(PlaybackSessionsSupport.stateNames
+        + PlaybackSessionsSupport.titleNames + PlaybackSessionsSupport.artistNames
+        + PlaybackSessionsSupport.positionNames + PlaybackSessionsSupport.durationNames)
+    private let propertyTypes: Set<String> = ["text", "unicode_text", "integer", "real", "number", "boolean"]
 
     private func code(_ value: String?) -> UInt32? {
         guard let value, value.utf8.count == 4,
@@ -118,6 +133,12 @@ private final class MusicDictionaryReader: NSObject, XMLParserDelegate {
             guard !seenShuffle, attributes["access"] == nil || attributes["access"] == "rw",
                   let property = code(attributes["code"]), attributes["type"] == "boolean" else { result.shuffle = nil; return }
             result.shuffle = property
+        }
+        if element == "property", let name = attributes["name"], propertyNames.contains(name),
+           let depth = applicationDepth, path.count == depth + 1, result.properties[name] == nil,
+           let property = code(attributes["code"]), let type = attributes["type"],
+           propertyTypes.contains(type) {
+            result.properties[name] = property
         }
         if element == "property", attributes["name"] == "shuffling enabled",
            let depth = applicationDepth, path.count == depth + 1 {

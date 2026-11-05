@@ -134,6 +134,23 @@ enum NotchMusicAutomationTests {
                "event codes come from the installed dictionary instead of a product-specific table")
         suite.expect(result?.canToggle == true && result?.position?.code == 0x74696D65,
                "declared playback controls and a writable application position are discoverable")
+        let reading = dictionary.replacingOccurrences(
+            of: "<property name=\"player position\" code=\"time\" type=\"real\"/>",
+            with: "<property name=\"player state\" code=\"pStt\" type=\"text\"/>"
+                + "<property name=\"name\" code=\"pNam\" type=\"text\"/>"
+                + "<property name=\"artist\" code=\"pArt\" type=\"text\"/>"
+                + "<property name=\"duration\" code=\"pDur\" type=\"integer\"/>"
+                + "<property name=\"player position\" code=\"time\" type=\"real\"/>")
+        suite.expect(parse(reading)?.stateProperty == 0x70537474,
+               "a player's own state property is what a card of its own is built on")
+        suite.expect(parse(reading)?.properties["name"] == 0x704E616D
+                       && parse(reading)?.properties["artist"] == 0x70417274,
+               "the song a card shows is read from the installed dictionary, not a product table")
+        suite.expect(parse(reading)?.position?.code == 0x74696D65
+                       && parse(reading)?.properties["duration"] == 0x70447572,
+               "the position and the length a card draws are declared properties")
+        suite.expect(parse(dictionary)?.stateProperty == nil,
+               "a player that declares no state has no card, rather than a card that guesses")
         let required = dictionary.replacingOccurrences(of: "<command name=\"next track\" code=\"EFGHnext\"/>",
             with: "<command name=\"next track\" code=\"EFGHnext\"><direct-parameter type=\"file\"/></command>")
         suite.expect(parse(required)?.commands["next track"] == nil, "commands requiring an argument cannot receive an incomplete playback action")

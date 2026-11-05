@@ -7,11 +7,16 @@ import Foundation
 /// One part of the island's one-page dashboard.
 ///
 /// The open island shows these parts together instead of one page at a time:
-/// the levels, the activities that are running, the monitoring grid and the
-/// way to the sections. A part is a section of one surface, not a destination,
-/// so a song starting does not replace the dashboard any more than a slider
-/// moving does. The order is fixed by `allCases` and the view draws it in the
-/// same order, so a test can read the composition without drawing it.
+/// the levels, the players and the timer that are running, the monitoring
+/// grid, and the way to the sections. A part is a section of one surface, not
+/// a destination, so a song starting does not replace the dashboard any more
+/// than a slider moving does. The order is fixed by `allCases` and the view
+/// draws it in the same order, so a test can read the composition without
+/// drawing it.
+///
+/// The page draws no headings. Each section is known by the shape it is made
+/// of — the sliders, the cards, the grid, the circles — and a section's name
+/// is spoken, not printed: it is the accessibility label of its content.
 enum NotchDashboardSection: String, CaseIterable, Identifiable {
     case quickControls
     case liveActivities
@@ -20,9 +25,9 @@ enum NotchDashboardSection: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
-    /// The name the page shows above the section. Explore reuses the sections
-    /// page's own title, so the label above the tiles and the page they open
-    /// say the same thing.
+    /// The name of the section, used to label its content for the screen
+    /// reader. Explore reuses the sections page's own title, so the label of
+    /// the tiles and the page they open say the same thing.
     func title(_ language: AppLanguage) -> String {
         let strings = FeatureStrings.notch(language)
         switch self {
@@ -34,12 +39,21 @@ enum NotchDashboardSection: String, CaseIterable, Identifiable {
     }
 }
 
-/// An activity card inside the Live Activities section.
-enum NotchDashboardActivity: String, CaseIterable, Identifiable {
-    case nowPlaying
+/// A card inside the Live Activities section.
+///
+/// A player is a card of its own, named by the process that plays, so two
+/// players at once are two cards and neither is the other's owner. The timer
+/// is the section's other kind of card and keeps its own place.
+enum NotchDashboardActivity: Hashable, Identifiable {
+    case player(id: Int)
     case timer
 
-    var id: String { rawValue }
+    var id: String {
+        switch self {
+        case .player(let id): return "player.\(id)"
+        case .timer: return "timer"
+        }
+    }
 }
 
 /// What one monitoring tile stands for. Kept apart from `MetricDetailKind`,
@@ -58,103 +72,105 @@ enum NotchDashboardMetric: String, CaseIterable, Identifiable {
 /// The dashboard's measurements, in points, shared by the page, the island's
 /// size and the tests that check the size agrees with the page.
 ///
-/// The sections are cards of one shape on the island's black: a charcoal fill
-/// (the island's black under white at `fillOpacity`), the same corner radius,
-/// the same insets, and an even gap that keeps two cards from reading as one
-/// surface. Heights are the content's own height, so a section's card is
-/// `sectionHeight(_:)` — the page and the island's height always agree because
-/// both add the insets here.
+/// The page is the island's black surface with shapes on it: the sliders, each
+/// activity in a card of its own, the monitoring tiles in four columns, the
+/// sections as circles. Nothing is framed by a heading and no shape is nested
+/// in a card of its own, which is what keeps a page of eight tiles and seven
+/// circles from reading as one flat panel.
 enum NotchDashboardLayout {
-    static let cornerRadius: CGFloat = 14
-    static let sectionSpacing: CGFloat = 8
-    /// Top and bottom inside a card; the sides sit a little wider, as the
-    /// controls in them need the room a slider's thumb reaches.
-    static let sectionPadding: CGFloat = 8
-    static let sectionInset: CGFloat = 10
-    /// The island's black under this much white: a charcoal card that separates
-    /// from the surface and from the card above and below it.
-    static let fillOpacity = 0.13
-    static let hairlineOpacity = 0.07
-    /// A card this wide reads like the reference layout at every preset, and
-    /// the island narrows to it under a preset that offers more.
-    static let naturalContentWidth: CGFloat = 430
+    /// A card of the page's own charcoal: the island's black under this much
+    /// white, with the corners that make it one shape.
+    static let cornerRadius: CGFloat = 12
+    static let fillOpacity = 0.10
+    /// The gap between sections, and between the cards of one section.
+    static let sectionSpacing: CGFloat = 10
+    static let cardSpacing: CGFloat = 8
+    /// The page reads at this width at every preset, and narrows when a preset
+    /// on a small display offers less.
+    static let naturalContentWidth: CGFloat = 568
 
-    /// A section names itself above its content, so four cards stacked read as
-    /// four parts of one page. The label's line and its gap are part of the
-    /// card's height, which is why the island sizes itself through this file.
-    static let headerHeight: CGFloat = 11
-    static let headerSpacing: CGFloat = 5
+    // MARK: Quick Controls
+
+    /// One row of the two levels, each a mark and a bar: the sliders the
+    /// Controls page draws, made compact, and nothing else above the page.
     static let quickControlsHeight: CGFloat = 28
-    static let activityCardSpacing: CGFloat = 6
-    /// The Now Playing card is as tall as its cover, which holds the title,
-    /// the artist and the song's position beside it, and the transport at its end.
-    static let nowPlayingArtwork: CGFloat = 36
-    static let nowPlayingHeight: CGFloat = 40
-    static let timerHeight: CGFloat = 24
+    static let quickControlsSpacing: CGFloat = 14
+    /// A level's bar is narrow: the row is a control, not a meter to read. The
+    /// mark that leads it keeps the width the mute button and the sun have.
+    static let quickControlBarWidth: CGFloat = 122
+    static let quickControlMarkWidth: CGFloat = 18
+
+    // MARK: Live Activities
+
+    /// A player's card holds its cover, its title, its position and its
+    /// transport; a timer's card holds its mark, its phase, its clock and its
+    /// pause. Both are the same height, so two cards of the section line up.
+    static let activityCardHeight: CGFloat = 50
+    static let activityArtwork: CGFloat = 34
+
+    // MARK: System Monitoring
+
     static let metricColumns: Int = 4
-    static let metricTileHeight: CGFloat = 30
-    static let metricSpacing: CGFloat = 6
-    static let exploreButton: CGFloat = 30
-    static let exploreSpacing: CGFloat = 8
+    /// A tile is a label, a value and a meter, so it is taller than a row of
+    /// text: the reading is the tile's own, and a tap opens it.
+    static let metricTileHeight: CGFloat = 54
+    static let metricSpacing: CGFloat = 8
 
-    /// A card around content of `content` points.
-    static func sectionHeight(_ content: CGFloat) -> CGFloat {
-        max(0, content) + sectionPadding * 2
-    }
+    // MARK: Explore
 
-    /// A card that names its section: the label's line and its gap join the
-    /// content the card has to hold.
-    static func sectionHeight(_ content: CGFloat, header: Bool) -> CGFloat {
-        sectionHeight(content + (header ? headerHeight + headerSpacing : 0))
+    /// The sections as circles. Seven in a row puts every section on the page
+    /// at once, in two rows for the sections a Mac usually has.
+    static let exploreColumns: Int = 7
+    static let exploreButton: CGFloat = 40
+    static let exploreSpacing: CGFloat = 10
+
+    /// The gap between the page's sections is the page's own; the cards inside
+    /// a section sit closer, so a section reads as one group.
+    static func stackHeight(_ cards: Int, cardHeight: CGFloat, spacing: CGFloat) -> CGFloat {
+        guard cards > 0 else { return 0 }
+        return CGFloat(cards) * cardHeight + CGFloat(cards - 1) * spacing
     }
 
     /// Rows of a grid of `tileHeight` cells with `spacing` between the rows.
     static func gridHeight(rows: Int, tileHeight: CGFloat, spacing: CGFloat) -> CGFloat {
-        guard rows > 0 else { return 0 }
-        return CGFloat(rows) * tileHeight + CGFloat(rows - 1) * spacing
+        stackHeight(rows, cardHeight: tileHeight, spacing: spacing)
     }
 
-    /// The metrics grid at its columns. Tiles of one width share the section,
-    /// so its height is the rows' height.
+    /// The metrics grid at its columns: four tiles in a row, two rows for the
+    /// eight readings a Mac reports.
     static func metricsHeight(tiles: Int, columns: Int = metricColumns) -> CGFloat {
         gridHeight(rows: metricRows(tiles: tiles, columns: columns),
                    tileHeight: metricTileHeight, spacing: metricSpacing)
     }
 
-    /// Rows as even as they can be: nine tiles at four columns are three rows
-    /// of three, not a full row and a single tile, so a section with an extra
-    /// tile stays balanced.
     static func metricRows(tiles: Int, columns: Int = metricColumns) -> Int {
         guard tiles > 0 else { return 0 }
         let capacity = max(1, columns)
-        let rows = (tiles + capacity - 1) / capacity
-        return rows
+        return (tiles + capacity - 1) / capacity
     }
 
-    /// The tiles split into rows, read left to right.
+    /// The tiles split into rows, read left to right. The last row keeps its
+    /// tiles at the width of the others and leaves the rest of the row empty,
+    /// so an odd number of readings does not stretch a tile across the grid.
     static func metricRowRanges(tiles: Int, columns: Int = metricColumns) -> [Range<Int>] {
-        let rows = metricRows(tiles: tiles, columns: columns)
-        guard tiles > 0, rows > 0 else { return [] }
-        let base = tiles / rows
-        let remainder = tiles % rows
-        return (0..<rows).map { row in
-            let start = row * base + min(row, remainder)
-            return start..<(start + base + (row < remainder ? 1 : 0))
+        guard tiles > 0 else { return [] }
+        let capacity = max(1, columns)
+        return (0..<metricRows(tiles: tiles, columns: capacity)).map { row in
+            let start = row * capacity
+            return start..<min(start + capacity, tiles)
         }
     }
 
-    /// The activity cards, in order, with the gap between them.
+    /// The activity cards, in order, with the gap between them. Every player
+    /// has its own card; the timer has its own.
     static func liveActivitiesHeight(_ activities: [NotchDashboardActivity]) -> CGFloat {
-        guard !activities.isEmpty else { return 0 }
-        let card = activities.reduce(CGFloat(0)) { total, activity in
-            total + (activity == .nowPlaying ? nowPlayingHeight : timerHeight)
-        }
-        return card + activityCardSpacing * CGFloat(activities.count - 1)
+        stackHeight(activities.count, cardHeight: activityCardHeight, spacing: cardSpacing)
     }
 
-    /// How many circular Explore buttons fit in `width`.
+    /// The Explore circles at their columns, which is seven whenever the page
+    /// is as wide as it wants to be.
     static func exploreColumns(width: CGFloat) -> Int {
-        max(1, Int(((width + exploreSpacing) / (exploreButton + exploreSpacing)).rounded(.down)))
+        min(exploreColumns, max(1, Int(((width + exploreSpacing) / (exploreButton + exploreSpacing)).rounded(.down))))
     }
 
     static func exploreRows(count: Int, width: CGFloat) -> Int {
@@ -168,9 +184,19 @@ enum NotchDashboardLayout {
                    tileHeight: exploreButton, spacing: exploreSpacing)
     }
 
-    /// The whole dashboard: every section it shows, its content heights, the
-    /// gap between sections. The island sizes itself to this, so the page never
-    /// has to scroll for content that fits the display.
+    /// The whole dashboard: every section it shows, its content height, the
+    /// gaps between them. The island sizes itself to this, so the page never
+    /// scrolls for content that fits the display.
+    static func sectionHeights(activities: [NotchDashboardActivity], metrics: Int,
+                               exploreCount: Int, width: CGFloat) -> [CGFloat] {
+        var heights: [CGFloat] = [quickControlsHeight]
+        let live = liveActivitiesHeight(activities)
+        if live > 0 { heights.append(live) }
+        heights.append(metricsHeight(tiles: metrics, columns: metricColumns))
+        heights.append(exploreHeight(count: exploreCount, width: width))
+        return heights
+    }
+
     static func contentHeight(activities: [NotchDashboardActivity], metrics: Int,
                               exploreCount: Int, width: CGFloat) -> CGFloat {
         let sections = sectionHeights(activities: activities, metrics: metrics,
@@ -179,40 +205,28 @@ enum NotchDashboardLayout {
         return sections.reduce(0, +) + sectionSpacing * CGFloat(sections.count - 1)
     }
 
-    /// One height per section, in the order the page draws them.
-    static func sectionHeights(activities: [NotchDashboardActivity], metrics: Int,
-                               exploreCount: Int, width: CGFloat) -> [CGFloat] {
-        var heights: [CGFloat] = [sectionHeight(quickControlsHeight, header: true)]
-        let live = liveActivitiesHeight(activities)
-        if live > 0 { heights.append(sectionHeight(live, header: true)) }
-        heights.append(sectionHeight(metricsHeight(tiles: metrics, columns: metricColumns), header: true))
-        heights.append(sectionHeight(exploreHeight(count: exploreCount, width: width), header: true))
-        return heights
-    }
-
-    /// The volume and brightness sliders share one row, each taking half of it
-    /// less the gap between them.
+    /// The volume and brightness sliders share one row, each as wide as its
+    /// bar and its mark, and the row keeps the rest of the page empty.
     static func quickControlWidth(width: CGFloat) -> CGFloat {
-        max(0, (width - sectionInset * 2 - sectionSpacing) / 2)
+        min(quickControlBarWidth + quickControlMarkWidth + 6,
+            max(0, (width - quickControlsSpacing) / 2))
     }
 }
 
 /// The dashboard's composition and the routes that reach it. Every decision
 /// here answers a question the island asks before it draws: which sections it
-/// shows, which activities are in them, and what a click on a tile, a menu bar
-/// indicator, or the way back leads to.
+/// shows, which players and timers are in them, and what a click on a tile, a
+/// menu bar indicator, or the way back leads to.
 enum NotchDashboardSupport {
-    /// The player shows while a song is known, playing or paused; a stopped
-    /// player leaves nothing to show. A timer shows while a session runs,
-    /// waits, or has just finished.
+    /// The activity cards, in order: every player that is playing, in the
+    /// order they were found, then the timer.
     ///
-    /// The two are decided apart, in that order, and never replace each other:
-    /// `music: true, timer: false` and `music: true, timer: true` are two
-    /// states of one section, and a song ending leaves the timer's card where
-    /// it was.
-    static func activities(music: Bool, timer: Bool) -> [NotchDashboardActivity] {
-        var visible: [NotchDashboardActivity] = []
-        if music { visible.append(.nowPlaying) }
+    /// The players are not capped and do not replace one another, and the
+    /// timer is decided apart from them: a song ending leaves the timer's card
+    /// where it was, and a timer ending leaves every player's card where it
+    /// was. Two players at once are two cards.
+    static func activities(players: [Int], timer: Bool) -> [NotchDashboardActivity] {
+        var visible = players.map { NotchDashboardActivity.player(id: $0) }
         if timer { visible.append(.timer) }
         return visible
     }
@@ -266,13 +280,14 @@ enum NotchDashboardSupport {
     /// what the grid sits on.
     static func returnsToDashboard(fromDetail: Bool) -> Bool { fromDetail }
 
-    /// `count` items in rows of at most `columns`, the rows as even as they
-    /// can be and read left to right.
+    /// `count` items in rows of at most `columns`, read left to right. The
+    /// rows are filled from the left and the last row keeps its items at the
+    /// width of the others, which is how the Explore circles and the tiles
+    /// both lay out.
     static func rows(count: Int, columns: Int) -> [Range<Int>] {
         let capacity = max(1, columns)
         guard count > 0 else { return [] }
-        let rows = (count + capacity - 1) / capacity
-        return (0..<rows).map { row in
+        return (0...((count - 1) / capacity)).map { row in
             let start = row * capacity
             return start..<min(start + capacity, count)
         }
