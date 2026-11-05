@@ -67,6 +67,7 @@ enum NotchMusicVisibilityTests {
         var showingAppPanel = false
         var showingSections = false
         var showingCommandBar = false
+        var dashboardRequested = true
         var commandBarClosings = 0
         var commandBarSurfaceSize = CGSize(width: 616, height: 132)
         var mascotVisible = false

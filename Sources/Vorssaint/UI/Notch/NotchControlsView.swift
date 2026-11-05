@@ -8,7 +8,6 @@ struct NotchControlsView: View {
     @ObservedObject var service: NotchService
     let size: CGSize
     @ObservedObject private var l10n = L10n.shared
-    @AppStorage(DefaultsKey.brightnessControlEnabled) private var brightnessEnabled = false
     @Environment(\.notchBand) private var band
 
     var body: some View {
@@ -51,6 +50,47 @@ struct NotchControlsView: View {
     }
 
     @ViewBuilder private func level(_ item: NotchControlItem) -> some View {
+        NotchLevelControls(item: item, service: service)
+    }
+
+    @ViewBuilder private func shortcut(_ item: NotchControlItem) -> some View {
+        switch item {
+        case .keepAwake: NotchAwakeButton()
+        case .microphone: NotchMicButton()
+        case .screenshot:
+            NotchActionTile(symbol: item.symbol, title: item.title(l10n)) {
+                service.perform { ScreenshotService.shared.capture() }
+            }
+        case .recording: NotchRecorderButton(service: service)
+        case .speedTest:
+            NotchActionTile(symbol: item.symbol, title: item.title(l10n)) { service.showMetric(.network) }
+        case .panel:
+            NotchActionTile(symbol: item.symbol, title: item.title(l10n)) { service.openAppPanel() }
+        case .mixer:
+            NotchActionTile(symbol: item.symbol, title: item.title(l10n)) { service.select(.mixer) }
+        case .commandBar:
+            NotchActionTile(symbol: item.symbol, title: item.title(l10n)) { service.perform { CommandBarService.shared.show() } }
+        case .scratchpad:
+            NotchActionTile(symbol: item.symbol, title: item.title(l10n), action: service.openScratchpad)
+        case .timer: NotchTimerTile(service: service)
+        case .calendar: NotchCalendarTile(service: service)
+        case .volume, .brightness, .keyboardLight, .music: EmptyView()
+        }
+    }
+}
+
+/// A level as the island draws it: volume with its mute button and output
+/// chooser, brightness with its sun and display chooser, the keyboard light,
+/// and the way to set brightness up where it is switched off. The home page
+/// and the dashboard's Quick Controls share this, so a slider in either sets
+/// the same system level the volume and brightness keys move.
+struct NotchLevelControls: View {
+    let item: NotchControlItem
+    @ObservedObject var service: NotchService = .shared
+    @ObservedObject private var l10n = L10n.shared
+    @AppStorage(DefaultsKey.brightnessControlEnabled) private var brightnessEnabled = false
+
+    var body: some View {
         if item == .volume {
             NotchAudioControls(notch: service)
         } else if item == .keyboardLight {
@@ -89,31 +129,6 @@ struct NotchControlsView: View {
             .accessibilityLabel(FeatureStrings.notch(l10n.language).brightness)
         }
         .frame(height: 28)
-    }
-
-    @ViewBuilder private func shortcut(_ item: NotchControlItem) -> some View {
-        switch item {
-        case .keepAwake: NotchAwakeButton()
-        case .microphone: NotchMicButton()
-        case .screenshot:
-            NotchActionTile(symbol: item.symbol, title: item.title(l10n)) {
-                service.perform { ScreenshotService.shared.capture() }
-            }
-        case .recording: NotchRecorderButton(service: service)
-        case .speedTest:
-            NotchActionTile(symbol: item.symbol, title: item.title(l10n)) { service.showMetric(.network) }
-        case .panel:
-            NotchActionTile(symbol: item.symbol, title: item.title(l10n)) { service.openAppPanel() }
-        case .mixer:
-            NotchActionTile(symbol: item.symbol, title: item.title(l10n)) { service.select(.mixer) }
-        case .commandBar:
-            NotchActionTile(symbol: item.symbol, title: item.title(l10n)) { service.perform { CommandBarService.shared.show() } }
-        case .scratchpad:
-            NotchActionTile(symbol: item.symbol, title: item.title(l10n), action: service.openScratchpad)
-        case .timer: NotchTimerTile(service: service)
-        case .calendar: NotchCalendarTile(service: service)
-        case .volume, .brightness, .keyboardLight, .music: EmptyView()
-        }
     }
 }
 

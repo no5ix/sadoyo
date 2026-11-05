@@ -189,6 +189,9 @@ enum NotchPresentationRefreshContract {
         var showingSections = false
         var showingAppPanel = false
         var showingCommandBar = false
+        // The pages these checks draw are sections' own pages: the island was
+        // opened at one, which is what keeps its one page away.
+        var dashboardRequested = false
         var commandBarClosings = 0
         func commandBarDidClose() { commandBarClosings += 1 }
         func flushMascotReaction() {}

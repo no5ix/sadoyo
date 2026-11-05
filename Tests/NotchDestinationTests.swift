@@ -103,6 +103,7 @@ enum NotchDestinationContract {
         var showingAppPanel = false
         var showingSections = false
         var showingCommandBar = false
+        var dashboardRequested = true
         var commandBarClosings = 0
         func commandBarDidClose() { commandBarClosings += 1 }
         var sectionQuery = ""

@@ -507,7 +507,10 @@ struct NotchMusicIdleTransport: View {
     }
 }
 
-private struct NotchMusicTransport: View {
+/// The player's transport: the glyphs, their enablement, the consent path when
+/// automation is not granted. The player's page and the dashboard's card share
+/// it, so both send the same commands to the same player.
+struct NotchMusicTransport: View {
     let playback: NotchPlayback
     /// The home card and a short player use the smaller buttons.
     var compact = false

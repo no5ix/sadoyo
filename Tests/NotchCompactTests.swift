@@ -39,6 +39,9 @@ enum NotchCompactTests {
         var musicShowsVolume = false
         var notice: NotchNotice?
         var showingSections = false
+        /// The page a capsule test draws is a section's own page, never the
+        /// island's one page, which its own size is measured from.
+        var showsDashboard = false
         var modules: [NotchModule] = [.controls, .music]
         var geometry = NotchGeometry(screen: CGRect(x: 0, y: 0, width: 1440, height: 900),
                                      safeAreaTop: 0, cameraWidth: 0, layout: .custom,

@@ -22,6 +22,7 @@ struct MetricsTests {
                 SystemMonitorCPUTests.run(suite)
                 SystemMonitorPlanTests.run(suite)
                 SystemSectionBreakdownTests.run(suite)
+                ProcessMemoryAccountingTests.run(suite)
             }),
             ("clipboard", {
                 ClipboardFeatureTests.run(suite)
@@ -121,6 +122,7 @@ struct MetricsTests {
             ("notch", {
                 NotchTests.run(suite)
                 NotchCompactTests.run(suite)
+                NotchDashboardTests.run(suite)
                 NotchCapsuleTests.run(suite)
                 PlainTextLineMoverTests.run(suite)
                 NotchVolumeKeyTests.run(suite)

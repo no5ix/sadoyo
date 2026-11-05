@@ -3,6 +3,25 @@
 
 import SwiftUI
 
+/// Where a monitoring tile leads. `NotchDashboardMetric` is kept apart from
+/// the panel's detail kinds, so the dashboard's composition can be compiled
+/// and tested without them; this is where the two meet.
+extension NotchDashboardMetric {
+    var detailKind: MetricDetailKind {
+        switch self {
+        case .cpu: return .cpu
+        case .gpu: return .gpu
+        case .memory: return .memory
+        case .battery: return .battery
+        case .network: return .network
+        case .disk: return .disk
+        case .power: return .power
+        case .fan: return .fan
+        case .devices: return .connectedDevices
+        }
+    }
+}
+
 struct NotchSystemView: View {
     let size: CGSize
     let select: (MetricDetailKind) -> Void
@@ -11,84 +30,10 @@ struct NotchSystemView: View {
     @AppStorage(DefaultsKey.networkSpeedUnit) private var networkSpeedUnit = NetworkSpeedUnit.bytes
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    private struct Card: Identifiable {
-        let kind: MetricDetailKind
-        let title: String
-        let symbol: String
-        let value: String?
-        var detail: String? = nil
-        var level: Double? = nil
-        /// Set when the reading itself is the news, so the meter says so
-        /// without the person having to read the number.
-        var wantsAttention = false
-        var id: String { kind.rawValue }
-    }
-
-    private var cards: [Card] {
-        let snapshot = monitor.snapshot
-        var cards: [Card] = []
-        if AppFeature.monitorCPU.isAvailable {
-            cards.append(Card(kind: .cpu, title: l10n.s.cpuLabel, symbol: "cpu",
-                              value: percent(snapshot.cpuUsage), level: snapshot.cpuUsage,
-                              wantsAttention: isBusy(snapshot.cpuUsage)))
-        }
-        if AppFeature.monitorGPU.isAvailable {
-            cards.append(Card(kind: .gpu, title: l10n.s.gpuLabel, symbol: "rectangle.connected.to.line.below",
-                              value: percent(snapshot.gpuUsage), level: snapshot.gpuUsage,
-                              wantsAttention: isBusy(snapshot.gpuUsage)))
-        }
-        if AppFeature.monitorMemory.isAvailable {
-            let ratio = snapshot.memoryUsed.flatMap { used in
-                snapshot.memoryTotal.flatMap { total in total > 0 ? Double(used) / Double(total) : nil }
-            }
-            cards.append(Card(kind: .memory, title: l10n.s.memorySection, symbol: "memorychip",
-                              value: percent(ratio), level: ratio, wantsAttention: isBusy(ratio)))
-        }
-        if AppFeature.monitorPower.isAvailable, let power = snapshot.power, power.hasBattery {
-            cards.append(Card(kind: .battery, title: l10n.s.batteryLabel,
-                              symbol: power.externalConnected ? "battery.100percent.bolt" : "battery.100percent",
-                              value: power.chargePercent.map { "\($0)%" },
-                              level: power.chargePercent.map { Double($0) / 100 },
-                              wantsAttention: !power.externalConnected && (power.chargePercent ?? 100) <= 20))
-        }
-        if AppFeature.monitorNetwork.isAvailable {
-            // The observed unit, so a switch redraws the card at once, not on the next sample.
-            let inBits = networkSpeedUnit == .bits
-            cards.append(Card(kind: .network, title: l10n.s.networkSection, symbol: "network",
-                              value: snapshot.netDownBytesPerSec.map { "↓ " + MetricFormat.networkRate($0, inBits: inBits) },
-                              detail: snapshot.netUpBytesPerSec.map { "↑ " + MetricFormat.networkRate($0, inBits: inBits) }))
-        }
-        if AppFeature.monitorDisk.isAvailable {
-            let disk = snapshot.disk?.devices.first(where: { $0.mountPath == "/" })
-                ?? snapshot.disk?.devices.first(where: \.isInternal)
-            cards.append(Card(kind: .disk, title: l10n.s.diskAvailable.localizedCapitalized, symbol: "internaldrive",
-                              value: disk.map { MetricFormat.diskBytes($0.freeBytes) },
-                              level: disk.map { 1 - $0.usedFraction },
-                              wantsAttention: disk.map { 1 - $0.usedFraction < 0.1 } ?? false))
-        }
-        // The panel's power and fan sections, as cards opening the same details.
-        if AppFeature.monitorPower.isAvailable {
-            let power = snapshot.power
-            cards.append(Card(kind: .power, title: l10n.s.powerSection, symbol: "powerplug.fill",
-                              value: power?.systemWatts.map(MetricFormat.wattsCompact),
-                              detail: power?.externalConnected == true ? power?.adapterWatts.map(MetricFormat.watts) : nil))
-        }
-        if AppFeature.fanControl.isAvailable, !snapshot.fanSpeeds.isEmpty {
-            let strings = FeatureStrings.fanControl(l10n.language)
-            cards.append(Card(kind: .fan, title: strings.title, symbol: "fanblades",
-                              value: snapshot.fanSpeeds.first.map { String(format: strings.rpmFormat, Int($0.rounded())) }))
-        }
-        if AppFeature.connectedDevices.isAvailable {
-            let strings = FeatureStrings.connectedDevices(l10n.language)
-            cards.append(Card(kind: .connectedDevices, title: strings.title, symbol: "cable.connector",
-                              value: "\(snapshot.connectedDevices.count)"))
-        }
-        return cards
-    }
-
-    private func isBusy(_ level: Double?) -> Bool {
-        guard let level, level.isFinite else { return false }
-        return level >= 0.85
+    /// The same readings the dashboard's grid draws, from one place.
+    private var cards: [NotchSystemCard] {
+        NotchSystemCards.cards(snapshot: monitor.snapshot, language: l10n.language,
+                               networkSpeedInBits: networkSpeedUnit == .bits)
     }
 
     var body: some View {
@@ -114,7 +59,7 @@ struct NotchSystemView: View {
         }
     }
 
-    private func grid(cards: [Card], rows: [Range<Int>]) -> some View {
+    private func grid(cards: [NotchSystemCard], rows: [Range<Int>]) -> some View {
         VStack(spacing: NotchLayout.rowSpacing) {
             ForEach(rows, id: \.lowerBound) { row in
                 HStack(spacing: NotchLayout.rowSpacing) {
@@ -127,8 +72,8 @@ struct NotchSystemView: View {
         }
     }
 
-    private func cardButton(_ card: Card) -> some View {
-        Button { select(card.kind) } label: {
+    private func cardButton(_ card: NotchSystemCard) -> some View {
+        Button { select(card.metric.detailKind) } label: {
             VStack(alignment: .leading, spacing: 6) {
                 Label(card.title, systemImage: card.symbol)
                     .font(.system(size: 10, weight: .medium))
@@ -151,12 +96,8 @@ struct NotchSystemView: View {
         .buttonStyle(NotchButtonStyle(cornerRadius: 18))
         .accessibilityElement(children: .ignore)
         .accessibilityAddTraits(.isButton)
-        .accessibilityAction { select(card.kind) }
+        .accessibilityAction { select(card.metric.detailKind) }
         .accessibilityLabel(card.title)
         .accessibilityValue([card.value, card.detail].compactMap { $0 }.joined(separator: ", "))
-    }
-
-    private func percent(_ value: Double?) -> String? {
-        value.flatMap { $0.isFinite ? "\(Int((min(1, max(0, $0)) * 100).rounded()))%" : nil }
     }
 }

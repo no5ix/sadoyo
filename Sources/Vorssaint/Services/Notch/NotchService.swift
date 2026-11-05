@@ -127,6 +127,12 @@ final class NotchService: ObservableObject {
     @Published private(set) var selected: NotchModule = .controls
     @Published private(set) var showingAppPanel = false
     @Published private(set) var showingSections = false
+    /// Whether the open island is the one-page dashboard. Opening the island
+    /// without naming a section, a detail, the panel or the gallery asks for
+    /// the dashboard; going to any of them, and coming back from a detail,
+    /// decides it again. The dashboard is what the grid sits on, so it is what
+    /// the way back leads to.
+    @Published private(set) var dashboardRequested = true
     @Published private(set) var sectionQuery = ""
     @Published var highlightedSection: NotchModule? { didSet { revealHighlightedSection() } }
     /// The gallery's first visible row; the rows above it have stepped away.
@@ -806,9 +812,56 @@ final class NotchService: ObservableObject {
 
     var musicShowsVolume: Bool { NotchSupport.showsMusicVolume() }
 
+    // MARK: - The one-page dashboard
+
+    /// The open island's one page: the levels, the activities that are running,
+    /// the monitoring grid and the sections, together. A detail, the app panel,
+    /// the gallery and the Command Bar are surfaces of their own, so the page
+    /// steps aside for them and returns when they go.
+    var showsDashboard: Bool {
+        NotchDashboardSupport.showsDashboard(dashboard: dashboardRequested, expanded: expanded,
+                                            metric: selectedMetric != nil, appPanel: showingAppPanel,
+                                            sections: showingSections, commandBar: showingCommandBar,
+                                            modules: !modules.isEmpty)
+    }
+
+    /// The player shows while a song is known and the island is allowed to
+    /// watch it; a timer shows while a session runs, waits, or has finished.
+    /// The two are decided apart, so a song and a timer share the page and
+    /// neither's ending takes the other's card away.
+    var dashboardActivities: [NotchDashboardActivity] {
+        NotchDashboardSupport.activities(music: showsDashboardNowPlaying, timer: showsDashboardTimer)
+    }
+
+    private var showsDashboardNowPlaying: Bool {
+        modules.contains(.music) && NotchSupport.watchesMusicActivity() && NotchMusicService.shared.playback != nil
+    }
+
+    private var showsDashboardTimer: Bool {
+        modules.contains(.timer) && NotchTimerService.shared.session.hasSession
+    }
+
+    /// The width the page lays its sections out at.
+    var dashboardContentWidth: CGFloat { expandedGeometry.contentWidth }
+
+    /// What the page measures, which the island grows to hold. The grid's count
+    /// is the System page's own count, so the page and the island agree on the
+    /// tiles without the service reading the monitor's snapshot twice.
+    var dashboardContentHeight: CGFloat {
+        NotchDashboardLayout.contentHeight(activities: dashboardActivities,
+                                           metrics: NotchSupport.systemCardCount(
+                                            hasBattery: PowerSampler.hasInternalBattery,
+                                            fans: SystemMonitor.shared.snapshot.fanSpeeds.count),
+                                           exploreCount: filteredSections.count,
+                                           width: dashboardContentWidth)
+    }
+
     var expandedSize: CGSize {
         if showingSections {
             return geometry.sectionPickerSize(count: filteredSections.count)
+        }
+        if showsDashboard {
+            return geometry.dashboardSize(content: dashboardContentHeight)
         }
         let musicExtras = NotchLyricsSupport.isEnabled() || NotchQueueSupport.isEnabled()
         let launcher = QuickLauncherService.shared
@@ -904,7 +957,12 @@ final class NotchService: ObservableObject {
         // preset's; the gallery, details and the empty island keep the chosen
         // width, and lead their row with their own way back instead of the
         // sections.
-        if !showingSections, !showingAppPanel, selectedMetric == nil, !modules.isEmpty {
+        if showsDashboard {
+            // The dashboard is one page of sections: a row above it, and a
+            // width it reads well at, short of the preset's own content.
+            result.pageTop = .row
+            result.pageContentWidth = min(NotchDashboardLayout.naturalContentWidth, geometry.contentWidth)
+        } else if !showingSections, !showingAppPanel, selectedMetric == nil, !modules.isEmpty {
             result.pageContentWidth = NotchLayout.naturalContentWidth(selected, controls: homeControls,
                                                                       within: geometry.contentWidth)
         } else {
@@ -1436,6 +1494,11 @@ final class NotchService: ObservableObject {
             highlightedSection = destination
         }
         let metric = metric.flatMap { metricIsAvailable($0) ? $0 : nil }
+        // Hovering, clicking, or toggling the island asks for no destination, so
+        // it opens on the dashboard. A section, a detail, the panel and the
+        // gallery each say where they go.
+        let dashboard = NotchDashboardSupport.opensDashboard(module: module != nil, metric: metric != nil,
+                                                             appPanel: appPanel, sections: sections)
         let closesCommandBar = showingCommandBar
         let changesPresentation = !expanded || selected != destination || closesCommandBar
             || showingAppPanel != appPanel || selectedMetric != metric || showingSections != sections
@@ -1462,6 +1525,7 @@ final class NotchService: ObservableObject {
             showingCommandBar = false
             showingAppPanel = appPanel
             showingSections = sections
+            dashboardRequested = dashboard
             if selected != destination { selected = destination }
             if pinned { self.pinned = true }
             selectedMetric = metric
@@ -1498,6 +1562,7 @@ final class NotchService: ObservableObject {
             showingAppPanel = false
             showingSections = false
             showingCommandBar = false
+            dashboardRequested = true
             sectionQuery = ""
             highlightedSection = nil
             sectionRow = 0
@@ -1976,7 +2041,11 @@ final class NotchService: ObservableObject {
 
     func goBack() {
         let changesPresentation = selectedMetric != nil || showingAppPanel
-        mutatePresentation(transitionContent: changesPresentation ? .replace : .none) { selectedMetric = nil; showingAppPanel = false }
+        mutatePresentation(transitionContent: changesPresentation ? .replace : .none) {
+            selectedMetric = nil; showingAppPanel = false
+            // The way back from a detail is the dashboard the grid sits on.
+            if changesPresentation { dashboardRequested = true }
+        }
         syncVisibleConsumers()
         if changesPresentation { provideHapticFeedback() }
     }
@@ -4452,10 +4521,16 @@ final class NotchService: ObservableObject {
         }
         let musicWanted = modules.contains(.music) && ((expanded && (selected == .music || (selected == .controls && NotchSupport.controls().contains(.music)))
             && !showingAppPanel && !showingSections && !showingCommandBar)
+            // The dashboard draws the player among its sections, so it reads
+            // playback there too, as the player's own page does.
+            || (showsDashboard && NotchSupport.watchesMusicActivity())
             || ((!hiddenUntilHover || NotchSupport.hiddenShowsActivity())
                 && (NotchSupport.watchesMusicActivity() || NotchSupport.routes(.track))))
         if musicWanted { NotchMusicService.shared.start() } else { NotchMusicService.shared.stop() }
-        let needs = expanded && selected == .system && selectedMetric == nil && modules.contains(.system) && !showingAppPanel
+        // The grid is sampled while the island draws it, on its page and on the
+        // dashboard alike.
+        let needs = expanded && (selected == .system || showsDashboard) && selectedMetric == nil
+            && modules.contains(.system) && !showingAppPanel
             && !showingSections && !showingCommandBar
         var detailNeeds = expanded && !showingSections ? selectedMetric?.monitorNeeds ?? .none : .none
         if needs, AppFeature.monitorDisk.isAvailable { detailNeeds.disk = true }

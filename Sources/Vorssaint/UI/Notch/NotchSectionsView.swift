@@ -105,7 +105,7 @@ struct NotchSectionsView: View {
             VStack(spacing: 6) {
                 Image(systemName: module.symbol)
                     .font(.system(size: 22, weight: .medium))
-                    .foregroundStyle(tint(for: module))
+                    .foregroundStyle(module.dashboardTint)
                     .frame(width: 25, height: 25)
                 Text(module.title(l10n.language))
                     .font(.system(size: 11, weight: .medium))
@@ -143,14 +143,6 @@ struct NotchSectionsView: View {
         .help(visible ? module.title(l10n.language) + "  ⌥⌘" + module.shortcutKey.uppercased() : "")
     }
 
-    private func tint(for module: NotchModule) -> Color {
-        switch module {
-        case .music: return .pink
-        case .calendar: return .red
-        case .timer: return .orange
-        default: return .white.opacity(0.85)
-        }
-    }
 }
 
 /// The gallery's search lives in the header as a magnifier: the field

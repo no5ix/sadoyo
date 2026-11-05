@@ -1360,7 +1360,8 @@ def main():
         "    private func musicStripHolds(", "    var compactActivity:",
         "    var compactActivityGeometry:", "    private func compactGeometry(", "    var compactActivities:",
         "    var compactCompanion:",
-        "    var surfaceSize:", "    var surfaceShift:", "    func collapse(",
+        "    var surfaceSize:", "    var surfaceShift:", "    var showsDashboard: Bool {",
+        "    func collapse(",
         "    private func detachCaptureIfClosingOnCollapse(", "    func endCaptureControls(",
         "    private func syncVisibleConsumers(", "    private func releaseMonitor("])
     for call in ["NotchSupport.controls", "NotchSupport.watchesMusicActivity", "NotchSupport.idleContent",
@@ -1477,6 +1478,7 @@ def main():
           + declaration(notch, "    private func canHostMascotVisit(").replace("private func", "func", 1)
           + declaration(notch, "    var usesGlassSurface:")
           + declaration(notch, "    var lingeringMusic:")
+          + declaration(notch, "    var showsDashboard: Bool {")
           + declaration(notch, "    var expandedGeometry:").replace("var expandedGeometry", "override var expandedGeometry", 1)
           + declaration(notch, "    private var playerToggleCount:")
           + declaration(notch, "    private func compactMusicTransition(").replace("private func", "func", 1)

@@ -35,9 +35,13 @@ struct ProcessUsage: Identifiable, Equatable {
 
 /// Answers "which apps are eating this resource?" for the panel's System
 /// section. CPU and GPU come from cumulative per-process counters sampled as
-/// deltas; memory uses `ps` to rank candidates before reading kernel footprint.
-/// Helper processes are consolidated under the app responsible for them, so one
-/// app shows up once instead of as a pile of helper rows.
+/// deltas, and their rows are consolidated under the app responsible for them,
+/// so one app shows up once instead of as a pile of helper rows.
+///
+/// Memory is not consolidated: every process is asked for its own kernel
+/// footprint and ranked by it, as `ProcessMemorySupport` explains. A footprint
+/// belongs to one process, so adding the footprints of a helper and the app it
+/// is responsible to would show a figure for neither of them.
 final class ProcessUsageService {
     static let shared = ProcessUsageService()
 
@@ -504,53 +508,20 @@ final class ProcessUsageService {
         cacheLock.unlock()
 
         let sampleStartedAt: UInt64? = AppFeature.killProcess.isAvailable ? mach_absolute_time() : nil
-        let result = Shell.run("/bin/ps", ["-Aceo", "pid,rss,comm", "-m"])
-        // ps enumerates and ranks the candidates; rss (KiB) is only the
-        // fallback value. The figure shown is the kernel's physical
-        // footprint, the same one Activity Monitor's Memory column uses —
-        // rss counts shared and purgeable pages and over-reports (issue #174).
-        let rows = result.status == 0
-            ? groupedByApp(parsePS(result.output, maxRows: rawProcessRowLimit(for: limit)) { (Double($0) ?? 0) * 1024 }
-                .map { row in
-                    guard let footprint = Self.physicalFootprint(of: row.pid) else { return row }
-                    return ProcessUsage(pid: row.pid, name: row.name, value: footprint)
-                }, sampleStartedAt: sampleStartedAt)
-            : nil
-        return finishMemory(rows, limit: limit)
-    }
-
-    /// The kernel's physical memory footprint of a process, readable for any
-    /// process without special privileges. Returns nil when the process died
-    /// between the ps snapshot and this call.
-    private static func physicalFootprint(of pid: pid_t) -> Double? {
-        var info = rusage_info_current()
-        let status = withUnsafeMutablePointer(to: &info) { pointer in
-            pointer.withMemoryRebound(to: rusage_info_t?.self, capacity: 1) { rebound in
-                proc_pid_rusage(pid, RUSAGE_INFO_CURRENT, rebound)
-            }
+        // Every process, at its own footprint, heaviest first: the list reads
+        // as Activity Monitor's Memory column does, and a row's pid is the
+        // process the memory belongs to.
+        let samples = ProcessMemorySupport.samples(pids: ProcessMemorySupport.processIDs(),
+                                                  footprint: ProcessMemorySupport.footprint(of:))
+        let measured = ProcessMemorySupport.rows(samples: samples,
+                                                 limit: ProcessMemorySupport.cachedRowLimit(for: limit)) {
+            ResponsibleProcess.displayName(pid: $0, fallback: "pid \($0)")
         }
-        guard status == 0, info.ri_phys_footprint > 0 else { return nil }
-        return Double(info.ri_phys_footprint)
-    }
-
-    /// Lines look like "  437  12.5 WindowServer" (value column varies).
-    private func parsePS(_ output: String, maxRows: Int, transform: (String) -> Double) -> [ProcessUsage] {
-        var rows: [ProcessUsage] = []
-        for line in output.split(separator: "\n").dropFirst() {
-            let columns = line.split(separator: " ", maxSplits: 2, omittingEmptySubsequences: true)
-            guard columns.count == 3, let pid = pid_t(columns[0]) else { continue }
-            let value = transform(String(columns[1]))
-            guard value > 0 else { continue }
-            rows.append(ProcessUsage(pid: pid,
-                                     name: String(columns[2]).trimmingCharacters(in: .whitespaces),
-                                     value: value))
-            if rows.count >= maxRows { break }
+        let rows = measured.map { row in
+            ProcessUsage(pid: row.pid, name: row.name, value: Double(row.bytes))
         }
-        return rows
-    }
-
-    private func rawProcessRowLimit(for limit: Int) -> Int {
-        max(limit * 10, 120)
+        return finishMemory(withForceQuitIdentity(rows, sampleStartedAt: sampleStartedAt, unsafeOwners: []),
+                            limit: limit)
     }
 
     // MARK: - Consolidation

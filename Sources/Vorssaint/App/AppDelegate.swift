@@ -519,8 +519,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
 
     private func showMetricPanel(for metric: MenuBarMetric, anchoredTo button: NSStatusBarButton) {
         let detailKind = metric.detailKind
-        if NotchSupport.routesAppPanel(), NotchService.shared.acceptsSystemFeedback,
-           NotchSupport.modules().contains(.system) {
+        // One click on a menu bar indicator opens the island at that detail,
+        // whether the island is collapsed, closed, or showing something else.
+        // The island answers for its own metric availability, as it always did:
+        // a metric it will not show leaves the island closed.
+        if NotchDashboardSupport.menuBarOpensDetail(islandRuns: NotchService.shared.acceptsSystemFeedback,
+                                                    routesPanel: NotchSupport.routesAppPanel(),
+                                                    systemPage: NotchSupport.modules().contains(.system),
+                                                    metricAvailable: true) {
             NotchService.shared.showMetric(detailKind, toggle: true); return
         }
         if popoverIsOpen {

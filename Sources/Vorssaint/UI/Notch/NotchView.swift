@@ -319,6 +319,7 @@ struct NotchView: View {
 
     private var pageName: String {
         if service.showingSections { return text.sectionsTitle }
+        if service.showsDashboard { return text.title }
         if showsDetail || service.modules.isEmpty { return service.detailTitle }
         return service.selected.title(l10n.language)
     }
@@ -326,6 +327,8 @@ struct NotchView: View {
     @ViewBuilder private var page: some View {
         if service.showingSections {
             NotchSectionsView(service: service)
+        } else if service.showsDashboard {
+            dashboard
         } else if scrollsVertically {
             ScrollView {
                 content
@@ -338,6 +341,23 @@ struct NotchView: View {
             .notchScrollEdgeFade()
         } else {
             content
+        }
+    }
+
+    /// The island's one page. It scrolls only where the display, or a height
+    /// chosen by hand, leaves the sections taller than the island.
+    @ViewBuilder private var dashboard: some View {
+        if service.dashboardContentHeight > service.contentSize.height {
+            ScrollView {
+                NotchDashboardView(service: service)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                    .padding(.bottom, 4)
+                    .contentShape(Rectangle())
+            }
+            .scrollIndicators(.automatic)
+            .notchScrollEdgeFade()
+        } else {
+            NotchDashboardView(service: service)
         }
     }
 
@@ -462,7 +482,9 @@ struct NotchView: View {
     /// or the display leaves less room. The outer silhouette stays unchanged.
     private var pageSize: CGSize {
         var size = service.contentSize
-        guard !showsDetail else { return size }
+        // The dashboard keeps the height its sections measure, which the island
+        // was grown to; no page's minimum applies to it.
+        guard !showsDetail, !service.showsDashboard else { return size }
         switch service.selected {
         case .controls:
             let items = NotchSupport.controls()

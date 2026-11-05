@@ -688,6 +688,10 @@ struct NotchControlSurface: ViewModifier {
     let cornerRadius: CGFloat
     var selected = false
     var interactive = true
+    /// How much white the card's fill is over the island's black. A dashboard
+    /// section asks for more than a control, so its cards separate from the
+    /// surface and from each other; the default keeps every other card as it is.
+    var fillOpacity: CGFloat = 0.065
     @AppStorage(DefaultsKey.notchLiquidGlassEnabled) private var glass = false
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var contrast
@@ -698,7 +702,7 @@ struct NotchControlSurface: ViewModifier {
         Group {
             if glassSurface {
                 content
-                    .background(.white.opacity(selected ? 0.11 : 0.045), in: shape)
+                    .background(.white.opacity(selected ? 0.11 : fillOpacity * 0.7), in: shape)
                     .overlay {
                         shape.strokeBorder(.white.opacity(selected ? 0.16 : 0.065), lineWidth: 0.5)
                             .allowsHitTesting(false)
@@ -706,13 +710,13 @@ struct NotchControlSurface: ViewModifier {
             } else {
 #if compiler(>=6.2)
                 if #available(macOS 26, *), glass, !reduceTransparency {
-                    content.background(.white.opacity(selected ? 0.12 : 0.065), in: shape)
+                    content.background(.white.opacity(selected ? 0.12 : fillOpacity), in: shape)
                         .glassEffect(.regular.interactive(interactive), in: shape)
                 } else {
-                    content.background(.white.opacity(selected ? 0.12 : 0.065), in: shape)
+                    content.background(.white.opacity(selected ? 0.12 : fillOpacity), in: shape)
                 }
 #else
-                content.background(.white.opacity(selected ? 0.12 : 0.065), in: shape)
+                content.background(.white.opacity(selected ? 0.12 : fillOpacity), in: shape)
 #endif
             }
         }
