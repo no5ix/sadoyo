@@ -72,7 +72,13 @@ final class NotchMusicService: ObservableObject {
     private var chosenSource: NotchPlaybackSource.Selection?
     /// A command carried to the player it was aimed at, and dropped if a reading
     /// names any other player.
-    private var pendingCommand: (command: Command, pid: Int32)?
+    /// The reading of each player the adapter reports, from that player's own
+    /// words: the card of a player that is not in effect draws its title, its
+    /// artist, and its position from here, and never from the player in effect.
+    @Published private(set) var sourceReadings: [Int32: NotchPlayback] = [:]
+    /// The cover each player reports, and the recording it belongs to. A card
+    /// shows its own player's cover, and the app's icon where none is reported.
+    @Published private(set) var sourceCovers: [Int32: (item: String?, image: NSImage)] = [:]
     private var restoringSource = false
     private var artworkCache = NotchArtworkCache<(image: NSImage, tint: NotchArtworkTint?)>()
     private var artworkWork: DispatchWorkItem?
@@ -288,20 +294,57 @@ final class NotchMusicService: ObservableObject {
         awaitingPlayback = false
         updateAutomation(for: reading.playback)
         NotchLyricsService.shared.playbackChanged(reading.playback)
-        flushPendingCommand()
+        updateSourceReadings(reading.sources)
         updateQueue()
     }
 
-    /// The command a card's control carried. While no player is being read the
-    /// choice is still on its way, so the command waits; a reading that names
-    /// the player it was aimed at is answered; a reading that names any other
-    /// player ends it. A click therefore never arrives at a player it did not
-    /// name, and a command never sits around to answer a later player.
-    private func flushPendingCommand() {
-        guard let pending = pendingCommand, let pid = playback?.track.appPID else { return }
-        pendingCommand = nil
-        guard pid == pending.pid else { return }
-        send(pending.command)
+    /// One reading per reported player, sampled when the reply was read, so a
+    /// card's position runs from that sample as the primary card's does. A
+    /// player that reports no recording gets no reading, and its card shows the
+    /// app and what it is doing.
+    private func updateSourceReadings(_ readings: [NotchPlaybackSource]) {
+        let sampledAt = Date()
+        var next: [Int32: NotchPlayback] = [:]
+        for source in readings {
+            guard let title = source.title, source.hasTrack else { continue }
+            let track = RadialNowPlayingSnapshot(title: title, artist: source.artist, album: nil,
+                                                 artworkData: source.artworkData,
+                                                 appBundleIdentifier: source.bundleIdentifier, appPID: source.pid)
+            next[source.pid] = NotchPlayback(track: track, isPlaying: source.isPlaying,
+                                             elapsed: source.elapsed ?? 0, duration: source.duration ?? 0,
+                                             rate: source.isPlaying ? 1 : 0, sampledAt: sampledAt,
+                                             canSeek: false, hasPosition: source.elapsed != nil,
+                                             itemIdentifier: source.itemIdentifier)
+        }
+        if next != sourceReadings { sourceReadings = next }
+        var covers = sourceCovers.filter { reading in readings.contains { $0.pid == reading.key } }
+        for source in readings {
+            guard let data = source.artworkData, let image = NSImage(data: data) else { continue }
+            if covers[source.pid]?.image !== image { covers[source.pid] = (item: source.itemIdentifier, image: image) }
+        }
+        if !sameCovers(covers, sourceCovers) { sourceCovers = covers }
+    }
+
+    /// Covers are compared by the recording they were read for and the image
+    /// itself: a reply that repeats the same bytes does not redraw the cards.
+    private func sameCovers(_ first: [Int32: (item: String?, image: NSImage)],
+                            _ second: [Int32: (item: String?, image: NSImage)]) -> Bool {
+        first.count == second.count && first.allSatisfy { pid, cover in
+            guard let other = second[pid] else { return false }
+            return cover.item == other.item && cover.image === other.image
+        }
+    }
+
+    /// The card's reading of one player: its own title, artist and position.
+    func sourcePlayback(_ source: NotchPlaybackSource) -> NotchPlayback? {
+        sourceReadings[source.pid]
+    }
+
+    /// The cover the player reports for the recording it shows. Where it reports
+    /// none, nil, and the card shows the app's icon.
+    func sourceArtwork(_ source: NotchPlaybackSource) -> NSImage? {
+        let cover = sourceCovers[source.pid]
+        return cover?.item == source.itemIdentifier ? cover?.image : nil
     }
 
     private func connectionEnded() {
@@ -558,28 +601,16 @@ final class NotchMusicService: ObservableObject {
         send(command, context: playback?.commandContext)
     }
 
-    /// A command aimed at one player, from that player's own card. It goes to
-    /// that player and to no other: at once, in its own context, while it is the
-    /// player in effect; otherwise the player is chosen first and the command is
-    /// carried to the reading that names it. A player the adapter does not
-    /// report is refused, so a stale card cannot send anything.
+    /// A command aimed at one player, from that player's own card. It is sent to
+    /// that player's process and bundle, and reaches that player's own
+    /// recording. Nothing about the page changes: the player in effect keeps
+    /// leading, and the cards keep their places, because a control is not a
+    /// choice of which player the page follows. A player the adapter no longer
+    /// reports is refused, so a stale card sends nothing.
     @discardableResult
     func requestCommand(_ command: Command, for source: NotchPlaybackSource) -> Bool {
-        let inEffect = playback?.track.appPID.flatMap { Int($0) }
-            ?? selectedSourcePID.map { Int($0) } ?? -1
-        switch NotchDashboardSupport.playerCommand(sourcePID: Int(source.pid), inEffectPID: inEffect,
-                                                   reported: sources.contains(where: { $0.pid == source.pid })) {
-        case .refuse:
-            pendingCommand = nil
-            return false
-        case .send:
-            pendingCommand = nil
-            return send(command)
-        case .selectFirst:
-            pendingCommand = (command, source.pid)
-            selectSource(source.selection)
-            return true
-        }
+        guard let action = command.playerAction else { return false }
+        return send(.player(pid: source.pid, bundleIdentifier: source.bundleIdentifier, action: action))
     }
 
     func skipFromGesture(forward: Bool) {
@@ -595,7 +626,8 @@ final class NotchMusicService: ObservableObject {
         default: break
         }
         switch command {
-        case .source, .queueStop: break
+        // A card's control names its own player, so it needs no player in effect.
+        case .source, .queueStop, .player: break
         default: guard playback != nil else { return false }
         }
         guard process?.isRunning == true, let input else { return false }

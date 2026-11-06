@@ -323,17 +323,120 @@ enum NotchDashboardTests {
         }
 
         suite.run("a player's control goes to that player, and to no other") {
-            // The player in effect is answered at once; a player that is not is
-            // chosen first and the command is carried to it alone; a player the
-            // adapter does not report is refused, so a stale card sends nothing.
-            suite.expect(NotchDashboardSupport.playerCommand(sourcePID: 7, inEffectPID: 7, reported: true) == .send,
-                         "the player in effect is sent the command in its own context")
-            suite.expect(NotchDashboardSupport.playerCommand(sourcePID: 9, inEffectPID: 7, reported: true) == .selectFirst,
-                         "another player is chosen first, and only then sent the command")
-            suite.expect(NotchDashboardSupport.playerCommand(sourcePID: 9, inEffectPID: 7, reported: false) == .refuse,
+            // The command carries the player the click was aimed at, by process
+            // and bundle. It asks nothing about which player the page follows.
+            suite.expect(NotchDashboardSupport.playerCommand(sourcePID: 9, bundleIdentifier: "com.spotify.client",
+                                                             action: .toggle, inEffectPID: 7, reported: true)
+                             == .send(pid: 9, bundleIdentifier: "com.spotify.client", action: .toggle),
+                         "a card's control is aimed at the player of that card")
+            suite.expect(NotchDashboardSupport.playerCommand(sourcePID: 7, bundleIdentifier: "com.apple.Music",
+                                                             action: .next, inEffectPID: 7, reported: true)
+                             == .send(pid: 7, bundleIdentifier: "com.apple.Music", action: .next),
+                         "the card of the player in effect is aimed the same way")
+            suite.expect(NotchDashboardSupport.playerCommand(sourcePID: 9, bundleIdentifier: "com.spotify.client",
+                                                             action: .toggle, inEffectPID: 7, reported: false) == .refuse,
                          "a player the adapter no longer reports is sent nothing")
-            suite.expect(NotchDashboardSupport.playerCommand(sourcePID: -1, inEffectPID: -1, reported: true) == .refuse,
+            suite.expect(NotchDashboardSupport.playerCommand(sourcePID: -1, bundleIdentifier: "com.spotify.client",
+                                                             action: .toggle, inEffectPID: 7, reported: true) == .refuse,
                          "a card without a process is sent nothing")
+            suite.expect(NotchDashboardSupport.playerCommand(sourcePID: 9, bundleIdentifier: "com.spotify.client",
+                                                             action: nil, inEffectPID: 7, reported: true) == .refuse,
+                         "a control with no per-player form is aimed at no player")
+            suite.expect(NotchDashboardSupport.playerCommand(sourcePID: 9, bundleIdentifier: "",
+                                                             action: .toggle, inEffectPID: 7, reported: true) == .refuse,
+                         "a card that names no app is sent nothing")
+            // A card's marks are drawn only where a command can reach that
+            // player: a command for a player that names no recording of its own
+            // would land on the player the system is playing.
+            let scoped = NotchPlaybackSource(pid: 9, bundleIdentifier: "com.spotify.client", isMusicApp: true,
+                                             isPlaying: true, hasTrack: true, itemIdentifier: "item-1")
+            let unscoped = NotchPlaybackSource(pid: 31, bundleIdentifier: "com.netease.163music", isMusicApp: true,
+                                               isPlaying: true, hasTrack: true)
+            suite.expect(NotchDashboardLayout.commandsReach(player: scoped),
+                         "a player that reports its own recording is reached by its card's marks")
+            suite.expect(!NotchDashboardLayout.commandsReach(player: unscoped),
+                         "a player that names no recording is given no marks, so none of them is a dead control")
+            suite.expect(NotchPlaybackCommand.toggle.playerAction == .toggle
+                             && NotchPlaybackCommand.next.playerAction == .next
+                             && NotchPlaybackCommand.previous.playerAction == .previous
+                             && NotchPlaybackCommand.seek(10).playerAction == nil
+                             && NotchPlaybackCommand.source(nil).playerAction == nil,
+                         "only the three marks of a card's transport have a per-player form")
+        }
+
+        suite.run("using a player's control leaves the cards where they were") {
+            let safari = NotchPlaybackSource(pid: 21, bundleIdentifier: "com.apple.Safari", isMusicApp: false,
+                                             isPlaying: true, hasTrack: true, displayName: "Safari")
+            let netease = NotchPlaybackSource(pid: 31, bundleIdentifier: "com.netease.163music", isMusicApp: true,
+                                              isPlaying: true, hasTrack: true, displayName: "NetEaseMusic")
+            let spotify = NotchPlaybackSource(pid: 41, bundleIdentifier: "com.spotify.client", isMusicApp: true,
+                                              isPlaying: true, hasTrack: true, displayName: "Spotify")
+            let reported = [netease, safari, spotify]
+            let first = NotchDashboardLayout.playerIDs(sources: reported, inEffectPID: 31)
+            suite.expect(first == [31, 21, 41],
+                         "the player in effect leads, and the others follow by process")
+            // A command is not a choice of player, so the players and the player
+            // in effect are the same afterwards, and the order is the same.
+            suite.expect(NotchDashboardLayout.playerIDs(sources: reported, inEffectPID: 31) == first,
+                         "the order is the players, not the last control used")
+            suite.expect(!first.dropFirst().contains(31),
+                         "a player is not drawn twice, so no card repeats the card above")
+            // Only a choice of player moves a card, and moves it once.
+            suite.expect(NotchDashboardLayout.playerIDs(sources: reported, inEffectPID: 41) == [41, 31, 21],
+                         "a chosen player leads once, and the rest keep their order")
+            suite.expect(NotchDashboardLayout.playerIDs(sources: reported, inEffectPID: nil) == [31, 21, 41],
+                         "with no player in effect the players keep their own order")
+        }
+
+        suite.run("every player's card is drawn from that player's own report") {
+            let cover = Data((0..<64).map { UInt8($0) })
+            let entries: [[String: Any]] = [
+                ["pid": 21, "bundleIdentifier": "com.apple.Safari", "isMusicApp": false, "isPlaying": true,
+                 "hasTrack": true, "displayName": "Safari", "title": "Big Buck Bunny", "artist": "Blender",
+                 "elapsed": 57.0, "duration": 600.0, "itemIdentifier": "video-1",
+                 "artworkBase64": cover.base64EncodedString()],
+                ["pid": 31, "bundleIdentifier": "com.netease.163music", "isMusicApp": true, "isPlaying": false,
+                 "hasTrack": true, "displayName": "NetEaseMusic", "title": "当年情", "artist": "Leslie Cheung",
+                 "elapsed": 150.0, "duration": 254.0],
+                // A player that reports a song with no cover and no position.
+                ["pid": 41, "bundleIdentifier": "com.spotify.client", "isMusicApp": true, "isPlaying": true,
+                 "hasTrack": true, "title": "Memorable Trip"],
+                // A player that reports nonsense is read as reporting nothing.
+                ["pid": 51, "bundleIdentifier": "com.example.player", "isMusicApp": true, "isPlaying": true,
+                 "hasTrack": true, "title": String(repeating: "n", count: 4_000), "artist": "  ",
+                 "elapsed": -5.0, "duration": Double.nan,
+                 "artworkBase64": Data(repeating: 7, count: NotchPlaybackSource.maximumArtworkBytes + 1)
+                    .base64EncodedString()],
+            ]
+            let sources = NotchPlaybackSource.decode(entries)
+            suite.expect(sources.count == 4, "every reported player is read")
+            let video = sources[0], song = sources[1], bare = sources[2], junk = sources[3]
+            suite.expect(video.title == "Big Buck Bunny" && video.artist == "Blender"
+                             && video.elapsed == 57 && video.duration == 600,
+                         "a player's own title, artist and position are read from it")
+            suite.expect(video.artworkData == cover && video.itemIdentifier == "video-1",
+                         "a player's own cover is read with the recording it belongs to")
+            suite.expect(song.title == "当年情" && song.artist == "Leslie Cheung" && song.artworkData == nil,
+                         "a player that reports no cover is read without inventing one")
+            suite.expect(bare.title == "Memorable Trip" && bare.artist == nil && bare.elapsed == nil
+                             && bare.duration == nil,
+                         "a player that reports no artist and no position is read as reporting none")
+            suite.expect(junk.title == nil && junk.artist == nil && junk.elapsed == nil
+                             && junk.duration == nil && junk.artworkData == nil,
+                         "a text over its bound, a position that is not one, and an oversized cover are refused")
+            suite.expect(junk.hasTrack, "a player that reports a song is still a player, unreadable fields and all")
+        }
+
+        suite.run("a reading's own click opens its page, not the panel") {
+            // The menu bar's indicator of a reading and the same reading's card
+            // on the System page are one route: the reading's detail page, with
+            // the panel, the sections and the dashboard behind it.
+            suite.expect(NotchDashboardLayout.showsMetricDetail(metricSelected: true, appPanel: true),
+                         "a reading opened from the panel is the reading's page, not the panel")
+            suite.expect(NotchDashboardLayout.showsMetricDetail(metricSelected: true, appPanel: false),
+                         "the same reading opened in the island is the same page")
+            suite.expect(!NotchDashboardLayout.showsMetricDetail(metricSelected: false, appPanel: true),
+                         "with no reading named, the panel is the panel")
         }
 
         suite.run("a card's mark opens the app that plays") {
@@ -353,9 +456,16 @@ enum NotchDashboardTests {
         }
 
         suite.run("the timer's pause and close are one control") {
+            // The circle is the control: its plate, its highlight and its hit
+            // area are all of one diameter, and both of the card's buttons are
+            // drawn from one view at one size.
             suite.expect(NotchDashboardLayout.timerControlSide == 28
-                             && NotchDashboardLayout.timerControlCorner == 9,
-                         "the timer's controls share a box and a corner: both drawn by one builder")
+                             && NotchDashboardLayout.timerControlCorner == NotchDashboardLayout.timerControlSide / 2,
+                         "the timer's two controls share one box, whose corner is the radius of its circle")
+            suite.expect(NotchDashboardLayout.transportMarkSide == 22
+                             && NotchDashboardLayout.transportCorner == NotchDashboardLayout.transportMarkSide / 2
+                             && NotchDashboardLayout.transportSpacing > 0,
+                         "a player's three marks are circles of one diameter, at one gap, on every card")
             // The card is the two controls and the clock, at one edge on every
             // side: its height is the edge, the control, and the edge again.
             suite.expect(NotchDashboardLayout.timerCardHeight

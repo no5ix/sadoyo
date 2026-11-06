@@ -174,6 +174,7 @@ enum NotchDestinationContract {
         scratchpadContracts(defaults: defaults, suite: suite)
         reopeningContracts(defaults: defaults, suite: suite)
         countdownContracts(defaults: defaults, suite: suite)
+        menuBarMetricContracts(suite)
         stepBackContracts(suite)
         // A page opened while the Command Bar is in the island takes its place.
         let barHost = Service()
@@ -292,6 +293,58 @@ enum NotchDestinationContract {
         page.open(.music)
         suite.expect(!page.expanded && page.captureControlsExpansions == 1,
                      "opening a page while the capture controls are up expands them instead")
+    }
+
+    /// A reading's menu bar indicator opens that reading's page: in the island,
+    /// from the panel route, and over a panel that is already open. The panel,
+    /// the System overview and a highlighted module are never the destination of
+    /// a reading's own click, and every reading the menu bar carries is aimed at
+    /// its own page.
+    private static func menuBarMetricContracts(_ suite: TestSuite) {
+        let readings = MenuBarMetric.allCases.map(\.detailKind)
+        suite.expect(!readings.allSatisfy({ $0.rawValue.isEmpty }),
+                     "every menu bar indicator names a reading")
+        for metric in readings {
+            // The indicator's click in the island: the page a card on the System
+            // page opens, and no panel.
+            let island = Service()
+            island.open(.music)
+            suite.expect(island.showMetric(metric, toggle: true) && island.expanded
+                             && island.selectedMetric == metric && !island.showingAppPanel,
+                         "the \(metric.rawValue) indicator opens the \(metric.rawValue) page in the island")
+            let tile = Service()
+            tile.open(.system)
+            tile.showMetric(metric)
+            suite.expect(tile.expanded && tile.selectedMetric == metric && !tile.showingAppPanel,
+                         "the \(metric.rawValue) indicator and the \(metric.rawValue) card open one page")
+            tile.stepBack()
+            suite.expect(tile.expanded && tile.selected == .system && tile.selectedMetric == nil,
+                         "the \(metric.rawValue) page steps back to the page its card is on")
+            island.stepBack()
+            suite.expect(!island.expanded,
+                         "a reading opened from the menu bar closes on Escape, as the menu panel does")
+            // The panel route, for an island that cannot take the click: the
+            // panel opens behind the reading's own page.
+            let closed = Service()
+            closed.expanded = false
+            closed.openAppPanel(toggle: true, metric: metric)
+            suite.expect(closed.expanded && closed.showingAppPanel && closed.selectedMetric == metric,
+                         "the \(metric.rawValue) indicator opens the \(metric.rawValue) page from the panel route")
+            closed.stepBack()
+            suite.expect(!closed.expanded,
+                         "the \(metric.rawValue) page from the menu bar closes on Escape")
+            // A panel that is already open is not a reason to hide the reading.
+            let open = Service()
+            open.open(.controls, appPanel: true)
+            open.openAppPanel(toggle: true, metric: metric)
+            suite.expect(open.expanded && open.showingAppPanel && open.selectedMetric == metric,
+                         "the \(metric.rawValue) indicator opens its page over a panel that is already open")
+        }
+        // The panel's own click, with no reading named, keeps its toggle.
+        let panel = Service()
+        panel.open(.controls, appPanel: true)
+        panel.openAppPanel(toggle: true)
+        suite.expect(!panel.expanded, "the panel's own click on the menu bar still toggles the panel")
     }
 
     /// Escape steps back through what the island shows, then closes it.

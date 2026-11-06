@@ -339,6 +339,12 @@ private func sendPlaybackCommand(_ request: NotchPlaybackRequest) {
     case .queue(let request): NotchNativeQueue.configure(request); return
     case .queueStop: NotchNativeQueue.configure(nil); return
     case .queuePlay(let selected): NotchNativeQueue.play(selected); return
+    case .player(let pid, let bundle, let action):
+        // A card's control for one player: reach that player's own recording.
+        // The system's current player is left where it is, so the page's cards
+        // keep their places when a card below the first is used.
+        emit(["sent": NotchNativePlayback.sendCard(action, to: pid, bundleIdentifier: bundle)])
+        return
     default: break
     }
     guard let context = request.context,
@@ -355,7 +361,7 @@ private func sendPlaybackCommand(_ request: NotchPlaybackRequest) {
         }
         identifier = 24
         options = [key: position] as CFDictionary
-    case .queue, .queueStop, .queuePlay, .validate, .source: return
+    case .queue, .queueStop, .queuePlay, .validate, .source, .player: return
     }
     emit(["sent": NotchNativePlayback.send(identifier, options: options, to: target)])
 }

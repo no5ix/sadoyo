@@ -43,6 +43,11 @@ struct NotchQueueSelection: Equatable {
     }
 }
 
+/// What a card's control asks of the player it was aimed at.
+enum NotchPlayerAction: String {
+    case toggle, next, previous
+}
+
 /// A bounded command shared by the UI process and its playback adapter.
 enum NotchPlaybackCommand: Equatable {
     case toggle, next, previous
@@ -50,6 +55,10 @@ enum NotchPlaybackCommand: Equatable {
     case queue(UUID), queueStop, queuePlay(NotchQueueSelection)
     case validate(UUID, NotchPlaybackContext)
     case source(NotchPlaybackSource.Selection?)
+    /// One player's own control, named by process and bundle. It does not
+    /// change which player is in effect: the adapter reaches that player's own
+    /// path, so a card's transport drives that card's player and no other.
+    case player(pid: Int32, bundleIdentifier: String, action: NotchPlayerAction)
     static let maximumMessageBytes = 2048
 
     init?(message: String) {
@@ -62,6 +71,13 @@ enum NotchPlaybackCommand: Equatable {
         case "source-auto": self = .source(nil)
         default:
             let parts = message.split(separator: " ", omittingEmptySubsequences: false)
+            if parts.count == 4, parts[0] == "player", let pid = Int32(parts[1]), pid > 0,
+               let data = Data(base64Encoded: String(parts[2])), let bundle = String(data: data, encoding: .utf8),
+               let action = NotchPlayerAction(rawValue: String(parts[3])) {
+                let player = NotchPlaybackSource.Selection(pid: pid, bundleIdentifier: bundle)
+                guard player.isValid else { return nil }
+                self = .player(pid: pid, bundleIdentifier: bundle, action: action); return
+            }
             if parts.count == 3, parts[0] == "source", let pid = Int32(parts[1]),
                let data = Data(base64Encoded: String(parts[2])), let bundle = String(data: data, encoding: .utf8) {
                 let selection = NotchPlaybackSource.Selection(pid: pid, bundleIdentifier: bundle)
@@ -90,6 +106,18 @@ enum NotchPlaybackCommand: Equatable {
         }
     }
 
+    /// The same action in its per-player form. Only the three marks of a card's
+    /// transport have one: a seek, a queue row, or a choice of source belongs to
+    /// the player in effect, not to a card below it.
+    var playerAction: NotchPlayerAction? {
+        switch self {
+        case .toggle: return .toggle
+        case .next: return .next
+        case .previous: return .previous
+        default: return nil
+        }
+    }
+
     var queueRequest: UUID? {
         switch self {
         case .queue(let id): return id
@@ -101,7 +129,7 @@ enum NotchPlaybackCommand: Equatable {
     var requiresPlaybackContext: Bool {
         switch self {
         case .toggle, .next, .previous, .seek: return true
-        case .queue, .queueStop, .queuePlay, .validate, .source: return false
+        case .queue, .queueStop, .queuePlay, .validate, .source, .player: return false
         }
     }
 
@@ -116,6 +144,9 @@ enum NotchPlaybackCommand: Equatable {
         case .source(let selection?):
             guard selection.isValid else { return nil }
             return "source \(selection.pid) \(Data(selection.bundleIdentifier.utf8).base64EncodedString())"
+        case .player(let pid, let bundle, let action):
+            guard pid > 0, NotchPlaybackCommand.validIdentifier(bundle) else { return nil }
+            return "player \(pid) \(Data(bundle.utf8).base64EncodedString()) \(action.rawValue)"
         case .validate(let id, let context):
             guard context.pid > 0 else { return nil }
             return "validate \(id.uuidString) \(context.pid) \(context.revision.uuidString)"

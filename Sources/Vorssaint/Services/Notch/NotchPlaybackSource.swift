@@ -14,9 +14,27 @@ struct NotchPlaybackSource: Equatable {
     let pid: Int32
     let bundleIdentifier: String
     let isMusicApp: Bool
-    let isPlaying: Bool
+    /// The player's own state, which a second read of the player can correct.
+    var isPlaying: Bool
     let hasTrack: Bool
     var displayName: String? = nil
+    /// What the player reports of its own recording, read from that player's
+    /// path: its card draws these, never the words of the player in effect.
+    var title: String? = nil
+    var artist: String? = nil
+    var elapsed: Double? = nil
+    var duration: Double? = nil
+    /// The recording this cover belongs to, and the cover itself. The adapter
+    /// reads a cover once per recording, so a watched stream does not carry the
+    /// same bytes on every change; a card falls back to the app's icon where no
+    /// cover is reported.
+    var itemIdentifier: String? = nil
+    var artworkData: Data? = nil
+
+    /// The largest cover one source carries in one reply. Covers of several
+    /// players travel in the same line as the readings, so each is kept to a
+    /// size a watched stream can repeat.
+    static let maximumArtworkBytes = 1_024 * 1_024
 
     var selection: Selection { Selection(pid: pid, bundleIdentifier: bundleIdentifier) }
 
@@ -30,6 +48,15 @@ struct NotchPlaybackSource: Equatable {
         var value: [String: Any] = ["pid": pid, "bundleIdentifier": bundleIdentifier, "isMusicApp": isMusicApp,
                                    "isPlaying": isPlaying, "hasTrack": hasTrack]
         value["displayName"] = displayName
+        value["title"] = title
+        value["artist"] = artist
+        value["elapsed"] = elapsed
+        value["duration"] = duration
+        value["itemIdentifier"] = itemIdentifier
+        // The primary reading's cover travels the same way, as base64.
+        if let artworkData, artworkData.count <= Self.maximumArtworkBytes {
+            value["artworkBase64"] = artworkData.base64EncodedString()
+        }
         return value
     }
 
@@ -52,10 +79,38 @@ struct NotchPlaybackSource: Equatable {
                   let track = entry["hasTrack"] as? Bool, track || pid == selectedPID,
                   !sources.contains(where: { $0.pid == pid }) else { continue }
             let name = (entry["displayName"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let artwork = (entry["artworkBase64"] as? String).flatMap { Data(base64Encoded: $0) }
             sources.append(Self(pid: pid, bundleIdentifier: bundle, isMusicApp: music, isPlaying: playing, hasTrack: track,
-                                displayName: name.flatMap { !$0.isEmpty && $0.utf8.count <= 256 ? $0 : nil }))
+                                displayName: name.flatMap { Self.validText($0) },
+                                title: Self.text(entry["title"]),
+                                artist: Self.text(entry["artist"]),
+                                elapsed: Self.position(entry["elapsed"]),
+                                duration: Self.position(entry["duration"]),
+                                itemIdentifier: (entry["itemIdentifier"] as? String)
+                                    .flatMap { NotchPlaybackCommand.validIdentifier($0) ? $0 : nil },
+                                artworkData: artwork.flatMap { $0.count <= Self.maximumArtworkBytes ? $0 : nil }))
         }
         return sources.sorted { $0.pid < $1.pid }
+    }
+
+    /// One text of a source, bounded as the names are: a player that reports a
+    /// megabyte of lyrics in its title field is not shown.
+    static func text(_ value: Any?) -> String? {
+        guard let value = (value as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) else { return nil }
+        return validText(value)
+    }
+
+    static func validText(_ value: String) -> String? {
+        !value.isEmpty && value.utf8.count <= 256 ? value : nil
+    }
+
+    /// A position a player reports, in seconds. A player that has not read its
+    /// own position reports nothing, which the card shows as no timeline.
+    static func position(_ value: Any?) -> Double? {
+        guard let number = value as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID(),
+              number.doubleValue.isFinite, number.doubleValue >= 0, number.doubleValue <= 604_800
+        else { return nil }
+        return number.doubleValue
     }
 
     /// Automatic playback follows music apps and, unless the user turns them

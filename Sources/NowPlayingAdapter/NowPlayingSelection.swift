@@ -28,6 +28,8 @@ enum NotchNativePlayback {
     private static let handle = dlopen("/System/Library/PrivateFrameworks/MediaRemote.framework/MediaRemote", RTLD_LAZY)
     private static let callbacks = DispatchQueue(label: "com.vorssaint.now-playing-selection-callbacks")
     private static let lock = NSLock()
+    /// Written by the cover reads, which outlive the scan that asked for them.
+    private static let covers = NSLock()
     private static var selected: Target?
     private static var identity: Identity?
     private static var context: NotchPlaybackContext?
@@ -182,11 +184,21 @@ enum NotchNativePlayback {
             }
             group.enter()
             readInfo(candidate, artwork: false, queue: callbacks) { info in
+                // Every field of a player's own card is read from that player:
+                // its title, its artist, how far along it is, and the recording
+                // its cover belongs to. The card of a player that is not the one
+                // in effect is drawn from these, never from the player above it.
                 let source = NotchPlaybackSource(pid: candidate.pid, bundleIdentifier: candidate.bundleIdentifier,
                     isMusicApp: isMusicApp(app, parentBundleIdentifier: candidate.applicationBundleIdentifier),
-                    isPlaying: (info?["kMRMediaRemoteNowPlayingInfoPlaybackRate"] as? NSNumber)?.doubleValue ?? 0 > 0,
+                    isPlaying: ((info?["kMRMediaRemoteNowPlayingInfoPlaybackRate"] as? NSNumber)?.doubleValue ?? 0) > 0,
                     hasTrack: (info?["kMRMediaRemoteNowPlayingInfoTitle"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false,
-                    displayName: presentation[candidate.pid]?.name ?? app.localizedName)
+                    displayName: presentation[candidate.pid]?.name ?? app.localizedName,
+                    title: NotchPlaybackSource.text(info?["kMRMediaRemoteNowPlayingInfoTitle"]),
+                    artist: NotchPlaybackSource.text(info?["kMRMediaRemoteNowPlayingInfoArtist"]),
+                    elapsed: NotchPlaybackSource.position(info?["kMRMediaRemoteNowPlayingInfoElapsedTime"]),
+                    duration: NotchPlaybackSource.position(info?["kMRMediaRemoteNowPlayingInfoDuration"]),
+                    itemIdentifier: (info?["itemIdentifier"] as? String)
+                        ?? (info?["kMRMediaRemoteNowPlayingInfoContentItemIdentifier"] as? String))
                 resultsLock.lock()
                 candidates.append((candidate, source))
                 resultsLock.unlock()
@@ -199,9 +211,9 @@ enum NotchNativePlayback {
         resultsLock.lock()
         let ready = candidates.map { candidate, source in
             guard let playing = states[candidate.pid], playing != source.isPlaying else { return (candidate, source) }
-            return (candidate, NotchPlaybackSource(pid: source.pid, bundleIdentifier: source.bundleIdentifier,
-                                                   isMusicApp: source.isMusicApp, isPlaying: playing,
-                                                   hasTrack: source.hasTrack, displayName: source.displayName))
+            var corrected = source
+            corrected.isPlaying = playing
+            return (candidate, corrected)
         }
         resultsLock.unlock()
         let now = ProcessInfo.processInfo.systemUptime
@@ -222,9 +234,20 @@ enum NotchNativePlayback {
         }
         let requested = selection
         let bridging = requested != nil && releaseAt != nil
+        lock.unlock()
+        // The cards of players that are not in effect draw their own covers, so
+        // the cover of a recording is read once - not on every notification.
+        let covers = readMissingCovers(ready)
         // The chooser keeps the chosen row, and its checkmark, during a gap.
-        sources = ready.map(\.1).filter { $0.hasTrack || bridging && $0.selection == requested }
-            .sorted { $0.pid < $1.pid }
+        var cards: [NotchPlaybackSource] = []
+        for entry in ready {
+            var card = entry.1
+            guard card.hasTrack || bridging && card.selection == requested else { continue }
+            card.artworkData = covers[card.pid]
+            cards.append(card)
+        }
+        lock.lock()
+        sources = cards.sorted { $0.pid < $1.pid }
         lock.unlock()
         discovered = true
         // An unanswered selected player stays selected, but exposes no stale
@@ -335,6 +358,46 @@ enum NotchNativePlayback {
         }
     }
 
+    /// The covers read per player, and the recording each belongs to. A
+    /// recording that reported no cover is remembered as reporting none, so the
+    /// watched stream does not ask for the same absent bytes on every change.
+    private static var sourceCovers: [Int32: (item: String?, data: Data?)] = [:]
+
+    /// The covers of the players whose cards the page draws, for the recordings
+    /// it has not read them for. Bounded: at most the covers of the first
+    /// players that report a track, each within the size one reply carries.
+    private static func readMissingCovers(_ ready: [(Target, NotchPlaybackSource)]) -> [Int32: Data] {
+        let limit = 4
+        let present = Set(ready.map { $0.0.pid })
+        lock.withLock { sourceCovers = sourceCovers.filter { present.contains($0.key) } }
+        var out: [Int32: Data] = [:]
+        var read = 0
+        let group = DispatchGroup()
+        for (target, source) in ready where source.hasTrack && read < limit {
+            let item = source.itemIdentifier
+            let cached = lock.withLock { sourceCovers[target.pid] }
+            if let cached, item == nil || cached.item == item {
+                if let data = cached.data { out[target.pid] = data }
+                continue
+            }
+            read += 1
+            // A recording with no cover of its own stays known as one without.
+            lock.withLock { sourceCovers[target.pid] = (item: item, data: nil) }
+            group.enter()
+            readInfo(target, artwork: true, queue: callbacks) { info in
+                let data = (info as? [String: Any])?["kMRMediaRemoteNowPlayingInfoArtworkData"] as? Data
+                let accepted = data.flatMap { $0.count <= NotchPlaybackSource.maximumArtworkBytes ? $0 : nil }
+                lock.withLock { sourceCovers[target.pid] = (item: item, data: accepted) }
+                if let accepted {
+                    covers.withLock { out[target.pid] = accepted }
+                }
+                group.leave()
+            }
+        }
+        _ = group.wait(timeout: .now() + 0.6)
+        return out
+    }
+
     static func supportedCommands(_ target: Target, queue: DispatchQueue, completion: @escaping (NSArray?) -> Void) {
         typealias Read = @convention(c) (AnyObject, DispatchQueue, @escaping @convention(block) (NSArray?) -> Void) -> Void
         guard let read = function(handle, "MRMediaRemoteGetSupportedCommandsForPlayer", as: Read.self) else {
@@ -409,6 +472,42 @@ enum NotchNativePlayback {
         }) else { return false }
         guard group.wait(timeout: .now() + 2) == .success else { return false }
         return resultLock.withLock { delivered }
+    }
+
+    /// One card's control, aimed at one player. The player's own path is built
+    /// from its process, and the command is scoped to the recording that player
+    /// reports. The system's current player is not asked, and which player the
+    /// page follows is not changed: a card's transport drives that card's
+    /// player, and the cards keep their places.
+    static func sendCard(_ action: NotchPlayerAction, to pid: Int32, bundleIdentifier: String) -> Bool {
+        guard pid > 0, let app = NSRunningApplication(processIdentifier: pid), !app.isTerminated,
+              resolvedBundleIdentifier(for: app) == bundleIdentifier,
+              var target = makeTarget(app) else { return false }
+        let group = DispatchGroup()
+        let read = NSLock()
+        var info: [String: Any]?
+        group.enter()
+        readInfo(target, artwork: false, queue: callbacks) { reply in
+            read.lock(); info = reply as? [String: Any]; read.unlock()
+            group.leave()
+        }
+        guard group.wait(timeout: .now() + 1) == .success else { return false }
+        let readings = read.withLock { info }
+        // The recording scopes the command, so it cannot land on a song the
+        // player has moved on to. Without one, the player is not sent anything.
+        target.itemIdentifier = readings?["itemIdentifier"] as? String
+            ?? (readings?["kMRMediaRemoteNowPlayingInfoContentItemIdentifier"] as? String)
+        guard target.itemIdentifier != nil else { return false }
+        target.playPauseCommand = playPauseCommand(for: readings ?? [:])
+        target.requiresCurrentPlayer = false
+        target.allowsDirectCommands = true
+        let identifier: Int32
+        switch action {
+        case .toggle: identifier = target.playPauseCommand
+        case .next: identifier = 4
+        case .previous: identifier = 5
+        }
+        return send(identifier, to: target)
     }
 
     static func stringConstant(_ name: String) -> String? {

@@ -630,6 +630,10 @@ struct NotchMusicTimeline: View {
     /// The island's player sets the times beside the bar, as a phone's
     /// island does, which leaves its short row room for the artist.
     var timesBeside = false
+    /// The bar of a player that is not the one in effect shows where that
+    /// player is and asks nothing of it: seeking belongs to one player, the one
+    /// the page follows.
+    var interactive = true
     @ObservedObject private var l10n = L10n.shared
     @State private var scrubPosition: Double?
     @State private var scrubTrack: RadialNowPlayingSnapshot?
@@ -689,7 +693,7 @@ struct NotchMusicTimeline: View {
     }
 
     @ViewBuilder private func bar(_ position: TimeInterval) -> some View {
-        if service.canSeek {
+        if interactive, service.canSeek {
             NotchLevelSlider(
                 value: Binding(get: { position }, set: {
                     if scrubTrack == nil {

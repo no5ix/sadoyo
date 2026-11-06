@@ -157,10 +157,11 @@ enum NotchDashboardLayout {
     /// transport, so its card is the tall one.
     static let activityCardHeight: CGFloat = 75
     static let activityArtwork: CGFloat = 44
-    /// The other players the system reports carry the app, its name and the way
-    /// to make it the card above: one row, and the page keeps room for the
-    /// readings and the sections under it.
-    static let playerCardHeight: CGFloat = 48
+    /// Every player's card carries its own cover, its own title and artist, its
+    /// own position and its own transport, so every card is as tall as the first
+    /// - only its type is smaller. Two players are two cards of one height, and
+    /// the page asks the island for the height they all need.
+    static let playerCardHeight: CGFloat = activityCardHeight
     /// The card's edge to its content, on every side alike. The timer's card is
     /// as tall as its clock, so its top edge is as far from its words as its
     /// leading edge is, and a card of one line is not padded at the top.
@@ -168,17 +169,21 @@ enum NotchDashboardLayout {
     /// A card that carries one line of its own, with the edge on every side.
     static var timerCardHeight: CGFloat { activityCardPadding * 2 + activityArtwork - 12 }
     /// The timer card's two controls are one control: the same box, the same
-    /// rounded shape, the same place in the row. The pause is filled with the
-    /// timer's colour because it holds the session; the close is quiet and
-    /// lights that same shape when the pointer is on it.
+    /// circle, the same place in the row. The pause is filled with the timer's
+    /// colour because it holds the session; the close is quiet and lights that
+    /// same circle when the pointer is on it. The circle is the button: its
+    /// plate, its highlight and its hit area are all of it, as on the player's
+    /// transport, so the close of a card is the pause's equal in every way.
     static let timerControlSide: CGFloat = 28
-    static let timerControlCorner: CGFloat = 9
+    static var timerControlCorner: CGFloat { timerControlSide / 2 }
     static let timerControlGap: CGFloat = 8
     /// A player card's transport: three marks of the size the primary card's
-    /// compact transport uses, so a player's row and the player above it read
-    /// as the same control.
+    /// compact transport uses, in the same circle, so a player's row and the
+    /// player above it read as the same control.
     static let transportMarkSide: CGFloat = 22
-    static let transportCorner: CGFloat = 7
+    static var transportCorner: CGFloat { transportMarkSide / 2 }
+    /// The three marks sit in a row of their own, at one gap, on every card.
+    static let transportSpacing: CGFloat = 6
     /// The mark of the app that plays, and the shape it is a button of: the
     /// artwork of the player in effect and the icon of the others are both a
     /// way to that app.
@@ -260,29 +265,41 @@ enum NotchDashboardLayout {
         }
     }
 
-    /// The players the page shows, from what the Now Playing adapter reports:
-    /// the one in effect first, then every other process that reports a track.
-    /// This is the list the Now Playing page switches between, so a browser
-    /// playing a video is on the page as readily as a music app, and no player
-    /// is left out because a permission is missing: what the adapter does not
-    /// report, the page does not draw.
+    /// The players the page shows, in the order their cards are drawn: the one
+    /// in effect leads, and the others follow in the adapter's own order, by
+    /// process. Nothing about a card's control is in this order, and a card is
+    /// never listed twice: using a control on the card below the first sends
+    /// that player a command, and the cards stay where they were.
     static func playerIDs(sources: [NotchPlaybackSource], inEffectPID: Int?,
                           limit: Int = NotchDashboardLayout.maxPlayers) -> [Int] {
-        var seen = Set<Int>()
         var ids: [Int] = []
         if let inEffectPID, inEffectPID > 0, sources.contains(where: { Int($0.pid) == inEffectPID }) {
             ids.append(inEffectPID)
-            seen.insert(inEffectPID)
         }
         for source in sources where source.isPlaying || source.hasTrack {
             let pid = Int(source.pid)
-            guard pid > 0, !seen.contains(pid) else { continue }
+            guard pid > 0, !ids.contains(pid) else { continue }
             ids.append(pid)
-            seen.insert(pid)
             if ids.count >= limit { break }
         }
         return ids
     }
+
+    /// Whether a card's transport can reach the player of that card. A command
+    /// for a player that is not the one in effect is scoped to the recording that
+    /// player reports; a player that reports no recording of its own cannot be
+    /// sent one, because the command would land on the player the system is
+    /// playing. Such a card therefore shows no marks that would do nothing: it
+    /// keeps its cover, its words, its position, and its way to the app.
+    static func commandsReach(player: NotchPlaybackSource) -> Bool {
+        player.hasTrack && player.itemIdentifier != nil
+    }
+
+    /// The page a reading's detail opens over, which is the reading's own page
+    /// whatever surface it was opened from. A reading's menu bar indicator and
+    /// the same reading's card on the System page are one route, and the panel
+    /// is never between a reading and its page.
+    static func showsMetricDetail(metricSelected: Bool, appPanel: Bool) -> Bool { metricSelected }
 
     /// The Explore circles at their columns, which is seven whenever the page
     /// is as wide as it wants to be.
@@ -378,24 +395,21 @@ enum NotchMenuBarRoute: Equatable {
 /// menu bar indicator, or the way back leads to.
 enum NotchDashboardSupport {
 
-    /// Where one click on a player card's control goes. The command is sent to
-    /// the player the click was aimed at: straight to it while it is the player
-    /// in effect, and by making it the player first - carrying the command to
-    /// it alone - when it is not. A command is never sent to a player the click
-    /// did not name, and a player the page does not report is refused.
+    /// Where one click on a player card's control goes: to the player the click
+    /// was aimed at, by process and bundle, and to no other. The command does
+    /// not ask which player the page follows, so the card above stays the card
+    /// above. A player the page no longer reports, a card with no process, and a
+    /// control that has no per-player form are all refused.
     enum PlayerCommand: Equatable {
-        /// The player is in effect: the command goes now, in its own context.
-        case send
-        /// The player is not in effect: select it, and send the command only
-        /// once its own reading has arrived.
-        case selectFirst
-        /// Nothing to send: the pid is not a player the page reports.
+        case send(pid: Int32, bundleIdentifier: String, action: NotchPlayerAction)
         case refuse
     }
 
-    static func playerCommand(sourcePID: Int, inEffectPID: Int, reported: Bool) -> PlayerCommand {
-        guard reported, sourcePID > 0 else { return .refuse }
-        return sourcePID == inEffectPID ? .send : .selectFirst
+    static func playerCommand(sourcePID: Int, bundleIdentifier: String, action: NotchPlayerAction?,
+                              inEffectPID: Int, reported: Bool) -> PlayerCommand {
+        guard reported, sourcePID > 0, let action,
+              NotchPlaybackCommand.validIdentifier(bundleIdentifier) else { return .refuse }
+        return .send(pid: Int32(sourcePID), bundleIdentifier: bundleIdentifier, action: action)
     }
 
     /// How a card's mark opens the app that plays: a process that is running is

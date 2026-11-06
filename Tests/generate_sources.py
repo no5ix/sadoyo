@@ -1131,6 +1131,11 @@ def main():
           + declaration(playback_adapter, "    static func readPlaybackState(")
           + declaration(playback_adapter, "    private static func currentPlayerPID(").replace("private static", "static", 1)
           + declaration(playback_adapter, "    static func send(")
+          # A card's control aimed at one player: that player's own path, and
+          # the recording it reports, with the system's current player untouched.
+          + declaration(playback_adapter, "    static func sendCard(")
+          + "static let covers = NSLock()\nstatic var sourceCovers: [Int32: (item: String?, data: Data?)] = [:]\n"
+          + declaration(playback_adapter, "    private static func readMissingCovers(").replace("private static", "static", 1)
           + declaration(playback_adapter, "    private static func resolvedBundleIdentifier(").replace("private static", "static", 1)
           + declaration(playback_adapter, "    private static func makeTarget(").replace("private static", "static", 1)
           + declaration(adapter_entry, "private func sendPlaybackCommand(").replace("private func", "static func", 1)
@@ -1536,7 +1541,8 @@ def main():
               .replace("UserDefaults.standard", "ReviewDefaults.current!")
           + "".join(declaration(renderer, prefix).replace("private static", "static")
                     .replace("UserDefaults.standard", "ReviewDefaults.current!") for prefix in [
-                        "    static func attributed(", "    private static func metricBlockAttachment(",
+                        "    static func attributed(", "    private static func attributed(segments:",
+                        "    private static func metricBlockAttachment(",
                         "    private static func metricBlockImage(", "    private static func batteryBlockAttachment(",
                         "    private static func batteryBlockImage(", "    private static func blockImageCost(",
                         "    private static func dynamicTextAttributes(", "    static func nsColor(for warning:",
@@ -2102,10 +2108,14 @@ def main():
           + declaration(music, "    private func receive(").replace("private func", "func", 1)
           + declaration(music, "    private func endPlaybackGap()").replace("private func", "func", 1)
           + declaration(music, "    private func apply(").replace("private func", "func", 1)
-          # A card's control aimed at one player: the rule that chooses it first
-          # and carries the command to the reading that names it.
-          + "var pendingCommand: (command: Command, pid: Int32)?\n"
-          + declaration(music, "    private func flushPendingCommand()").replace("private func", "func", 1)
+          # Each card's own reading of its player: the words, position and cover
+          # that player reports, kept by process, and the control aimed at it.
+          + "var sourceReadings: [Int32: NotchPlayback] = [:]\n"
+          + "var sourceCovers: [Int32: (item: String?, image: NSImage)] = [:]\n"
+          + declaration(music, "    private func updateSourceReadings(").replace("private func", "func", 1)
+          + declaration(music, "    private func sameCovers(").replace("private func", "func", 1)
+          + declaration(music, "    func sourcePlayback(")
+          + declaration(music, "    func sourceArtwork(")
           + declaration(music, "    func requestCommand(")
           + declaration(music, "    func seek(")
           + declaration(music, "    func selectSource(")

@@ -172,6 +172,50 @@ struct NotchIconButton: View {
     }
 }
 
+/// A round icon button, the shape the island's transport uses: the circle is
+/// the plate, the highlight and the hit area all at once, centred on the glyph.
+/// A card's controls are built from this one view, so the pause of a timer, the
+/// close of a card and the three marks of a player are the same control in
+/// every way that is seen - size, circle, highlight and place in the row.
+struct NotchCircularIconButton: View {
+    let symbol: String
+    let title: String
+    /// The button's box, which is also the circle's diameter.
+    var side: CGFloat = 28
+    /// Filled: the plate is lit in `tint` all the time, because the control
+    /// holds something. Quiet: it lights when the pointer is on it.
+    var filled = false
+    var tint: Color = .white
+    var disabled = false
+    var selected = false
+    let action: () -> Void
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var hover = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: side * 0.4, weight: .semibold))
+                .foregroundStyle(filled ? tint : .white.opacity(hover || selected ? 0.95 : 0.65))
+                .contentTransition(.symbolEffect(.replace))
+                .animation(reduceMotion ? nil : .smooth(duration: 0.24), value: symbol)
+                .frame(width: side, height: side)
+                .background(filled ? AnyShapeStyle(tint.opacity(0.22))
+                                   : AnyShapeStyle(.white.opacity(hover || selected ? 0.12 : 0)), in: Circle())
+                .contentShape(Circle())
+        }
+        // The style's own plate is a square of the same radius, which at a
+        // square box is the same circle: press and hover light the one shape.
+        .buttonStyle(NotchButtonStyle(cornerRadius: side / 2))
+        .disabled(disabled)
+        .onHover { hover = $0 }
+        .animation(reduceMotion ? nil : .smooth(duration: 0.2), value: hover)
+        .help(title)
+        .accessibilityLabel(title)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+}
+
 /// The island's way to its sections, in its top row or on a page that
 /// lays out its own top, while nothing floating beside the island offers it.
 struct NotchSectionsButton: View {

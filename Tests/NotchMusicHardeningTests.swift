@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Vorssaint
 
+import AppKit
 import Foundation
 import UniformTypeIdentifiers
 
@@ -274,22 +275,24 @@ enum NotchMusicHardeningTests {
         service.stop()
     }
 
-    /// One card's control is aimed at one player. The command goes to that
-    /// player and to no other: at once, in that player's own context, while it
-    /// is the player in effect; and by choosing the player first, then carrying
-    /// the command to the reading that names it, when it is not.
+    /// One card's control is aimed at one player. The command carries that
+    /// player's process and bundle; the player in effect is left where it is,
+    /// and the readings the cards draw are each player's own. A control is not a
+    /// choice of which player the page follows, so no card moves.
     private static func playerTargetedCommands(_ suite: TestSuite) {
         let service = NotchMusicCommandContract.Service()
         service.start()
-        func last() -> NotchPlaybackRequest? {
-            service.input?.fileHandleForWriting.written.last.flatMap {
+        func request() -> NotchPlaybackRequest? {
+            service.queue.drain()
+            return service.input?.fileHandleForWriting.written.last.flatMap {
                 String(data: $0, encoding: .utf8).flatMap {
                     NotchPlaybackRequest(message: $0.trimmingCharacters(in: .newlines))
                 }
             }
         }
+        func lines() -> Int { service.input?.fileHandleForWriting.written.count ?? 0 }
         func play(_ pid: Int32, _ bundle: String) -> NotchPlayback {
-            let track = RadialNowPlayingSnapshot(title: "Track \(pid)", artist: "Example", album: "Recording",
+            let track = RadialNowPlayingSnapshot(title: "Track \\(pid)", artist: "Example", album: "Recording",
                                                  artworkData: nil, appBundleIdentifier: bundle, appPID: pid)
             var value = NotchPlayback(track: track, isPlaying: true, elapsed: 0, duration: 180, rate: 1,
                                       sampledAt: Date(timeIntervalSinceReferenceDate: 0), canSeek: false,
@@ -298,66 +301,71 @@ enum NotchMusicHardeningTests {
             value.canSendCommandsDirectly = true
             return value
         }
-        let spotify = NotchPlaybackSource(pid: 42, bundleIdentifier: "test.music", isMusicApp: true,
-                                          isPlaying: true, hasTrack: true)
-        let browser = NotchPlaybackSource(pid: 202, bundleIdentifier: "test.browser", isMusicApp: false,
-                                          isPlaying: true, hasTrack: true)
-        let music = play(42, "test.music")
-        service.playback = music
-        service.sources = [spotify, browser]
-
-        // The card of the player in effect is answered in that player's context.
-        suite.expect(service.requestCommand(.next, for: spotify),
-                     "the card of the player in effect is answered")
-        service.queue.drain()
-        suite.expect(last() == NotchPlaybackRequest(command: .next, context: music.commandContext),
-                     "the command goes to the player in effect, in that player's context")
-
-        // A second player's card chooses that player first, and sends the first
-        // player nothing, because the click did not name it.
-        let written = service.input?.fileHandleForWriting.written.count ?? 0
-        suite.expect(service.requestCommand(.toggle, for: browser), "the other player's card is answered")
-        service.queue.drain()
-        suite.expect((service.input?.fileHandleForWriting.written.count ?? 0) == written + 1
-                         && last() == NotchPlaybackRequest(command: .source(browser.selection)),
-                     "the second player is chosen, and no command is sent to the first")
-
-        // The command is carried to the reading that names the player the card
-        // was aimed at, and to no other reading.
-        func reading(_ item: NotchPlayback?, sources: [NotchPlaybackSource] = [spotify, browser])
-            -> NotchMusicCommandContract.Service.Reading {
+        func reading(_ item: NotchPlayback?, sources: [NotchPlaybackSource]) -> NotchMusicCommandContract.Service.Reading {
             NotchMusicCommandContract.Service.Reading(playback: item, artwork: nil, tint: nil, sources: sources,
                                                        automatic: true, selectedPID: nil)
         }
-        func lines() -> Int { service.input?.fileHandleForWriting.written.count ?? 0 }
-        service.receive(reading(nil))
-        suite.expect(lines() == written + 1, "no command is sent while no player is being read")
-        let web = play(202, "test.browser")
-        service.receive(reading(web))
-        service.queue.drain()
-        suite.expect(lines() == written + 2
-                         && last() == NotchPlaybackRequest(command: .toggle, context: web.commandContext),
-                     "the carried command reaches the player the card named, in that player's context")
-        // A reading of a player the click did not name drops the carried
-        // command, so a click cannot arrive at a player it never mentioned.
-        let carried = lines()
-        service.receive(reading(music))
-        service.queue.drain()
-        suite.expect(service.requestCommand(.next, for: browser), "the second player's card is answered again")
-        service.queue.drain()
-        let chosen = lines()
-        suite.expect(chosen == carried + 1
-                         && last() == NotchPlaybackRequest(command: .source(browser.selection)),
-                     "the second player is chosen again, and the first is sent nothing")
-        service.receive(reading(music))
-        service.queue.drain()
-        suite.expect(lines() == chosen, "a reading of a player the click did not name drops the carried command")
-        // A card of a player the adapter no longer reports sends nothing at all.
-        let final = service.input?.fileHandleForWriting.written.count ?? 0
-        service.sources = [spotify]
-        suite.expect(!service.requestCommand(.previous, for: browser)
-                         && (service.input?.fileHandleForWriting.written.count ?? 0) == final,
-                     "a stale player's card sends nothing to any player")
+        let netease = NotchPlaybackSource(pid: 42, bundleIdentifier: "test.music", isMusicApp: true,
+                                          isPlaying: true, hasTrack: true, displayName: "NetEaseMusic",
+                                          title: "当年情", artist: "Leslie Cheung", elapsed: 150, duration: 254)
+        let browser = NotchPlaybackSource(pid: 202, bundleIdentifier: "test.browser", isMusicApp: false,
+                                          isPlaying: true, hasTrack: true, displayName: "Safari",
+                                          title: "Big Buck Bunny", elapsed: 12, duration: 600)
+        let music = play(42, "test.music")
+        service.playback = music
+        service.awaitingPlayback = false
+        service.sources = [netease, browser]
+
+        // The card of the player in effect is aimed at its own process.
+        suite.expect(service.requestCommand(.next, for: netease), "the card of the player in effect is answered")
+        suite.expect(request()?.command == .player(pid: 42, bundleIdentifier: "test.music", action: .next),
+                     "the command names the player of the card, by process and bundle")
+
+        // A card below the first is aimed at its own process. Nothing is chosen,
+        // so the player in effect, the cards' order and the readings stay put.
+        let written = lines()
+        suite.expect(service.requestCommand(.toggle, for: browser), "the other player's card is answered")
+        suite.expect(request()?.command == .player(pid: 202, bundleIdentifier: "test.browser", action: .toggle),
+                     "a secondary card's control is sent to that player's process")
+        suite.expect(service.playback == music && service.selectedSourcePID == nil && !service.awaitingPlayback,
+                     "a control on the card below the first does not change which player is in effect")
+        suite.expect(lines() == written + 1, "one control writes one command: no source is chosen behind it")
+
+        // A control that has no per-player form is not aimed at a card's player.
+        suite.expect(!service.requestCommand(.seek(30), for: browser) && lines() == written + 1,
+                     "a seek belongs to the player the page follows, not to a card below it")
+
+        // Every card's reading is that player's own report, and no card borrows
+        // the words, the position or the cover of another.
+        service.receive(reading(music, sources: [netease, browser]))
+        suite.expect(service.sourcePlayback(browser)?.track.title == "Big Buck Bunny"
+                         && service.sourcePlayback(browser)?.track.artist == nil
+                         && service.sourcePlayback(browser)?.elapsed == 12
+                         && service.sourcePlayback(browser)?.duration == 600
+                         && service.sourcePlayback(browser)?.isPlaying == true,
+                     "a card's reading is its own player's words and position")
+        suite.expect(service.sourcePlayback(netease)?.track.title == "当年情"
+                         && service.sourcePlayback(netease)?.track.artist == "Leslie Cheung"
+                         && service.sourcePlayback(netease)?.elapsed == 150,
+                     "the card of the player in effect is read from that same player")
+        suite.expect(service.sourcePlayback(netease) != service.sourcePlayback(browser),
+                     "no card borrows the words, the position or the cover of another")
+
+        // The cover a player reports belongs to the recording it was read for.
+        // A real 1x1 PNG, as small as a player's cover gets: the card shows it,
+        // so it must be bytes an image can be made of.
+        let cover = Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==") ?? Data()
+        suite.expect(NSImage(data: cover) != nil, "the fixture's cover is an image")
+        var covered = browser
+        covered.artworkData = cover
+        covered.itemIdentifier = "video-9"
+        service.receive(reading(music, sources: [netease, covered]))
+        suite.expect(service.sourceArtwork(covered) != nil && service.sourceArtwork(netease) == nil,
+                     "a player's cover is shown on that player's card alone, and where none is reported, on none")
+        var moved = covered
+        moved.itemIdentifier = "video-10"
+        suite.expect(service.sourceArtwork(moved) == nil,
+                     "a cover is not carried onto the recording it was not read for")
         service.stop()
     }
 

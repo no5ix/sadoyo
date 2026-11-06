@@ -247,9 +247,51 @@ enum NotchPlaybackRoutingTests {
                      "a video that lost the system session cannot send to the new global player")
         Adapter.systemPID = 10
         replyEncoding(suite)
+        cardCommandsPerPlayer(suite)
         radioPlayback(suite)
         lateRate(suite)
         recordingContext(suite)
+    }
+
+    /// A card's control for one player: the message that names the player, and
+    /// the rules for reaching it. The command carries a process and a bundle, not
+    /// the player the page follows, so the cards keep their places; and a player
+    /// that is not there, or whose recording cannot be read, is sent nothing.
+    private static func cardCommandsPerPlayer(_ suite: TestSuite) {
+        let toggle = NotchPlaybackCommand.player(pid: 202, bundleIdentifier: "test.video", action: .toggle)
+        let encoded = toggle.message ?? ""
+        suite.expect(encoded.hasPrefix("player 202 ") && encoded.hasSuffix(" toggle"),
+                     "a card's command names its player's process, bundle and action")
+        suite.expect(NotchPlaybackCommand(message: encoded) == toggle,
+                     "the adapter reads the same command back, aimed at the same player")
+        suite.expect(!toggle.requiresPlaybackContext,
+                     "a card's command needs no player in effect: it names its own player")
+        let bundle = Data("test.video".utf8).base64EncodedString()
+        suite.expect(NotchPlaybackCommand(message: "player 0 \(bundle) toggle") == nil,
+                     "a player command with no process is refused")
+        suite.expect(NotchPlaybackCommand(message: "player 202 not-base64!! toggle") == nil,
+                     "a player command with no readable bundle is refused")
+        suite.expect(NotchPlaybackCommand(message: "player 202 \(bundle) seek") == nil,
+                     "a card's command has three actions and no others")
+        suite.expect(NotchPlaybackCommand(message: "player 202 \(bundle) toggle extra") == nil,
+                     "a player command with a word too many is refused")
+
+        // The adapter reaches a player only where that player's own process and
+        // bundle answer, and only where it can read the recording to scope the
+        // command to. Anything else is refused, so a card never sends a command
+        // to a player it did not name, and never claims a command was sent.
+        NotchPlaybackRoutingContract.applications = [
+            NotchPlaybackRoutingContract.NSRunningApplication(bundleIdentifier: "test.video", processIdentifier: 202)
+        ]
+        suite.expect(!NotchPlaybackRoutingContract.sendCard(.toggle, to: 202, bundleIdentifier: "test.video"),
+                     "a player whose recording cannot be read is sent nothing")
+        suite.expect(!NotchPlaybackRoutingContract.sendCard(.next, to: 303, bundleIdentifier: "test.gone"),
+                     "a card whose process is not running is sent nothing")
+        suite.expect(!NotchPlaybackRoutingContract.sendCard(.previous, to: 202, bundleIdentifier: "test.other"),
+                     "a card whose app is not the process the adapter named is sent nothing")
+        suite.expect(!NotchPlaybackRoutingContract.sendCard(.toggle, to: -1, bundleIdentifier: "test.video"),
+                     "a card with no process is sent nothing")
+        NotchPlaybackRoutingContract.applications = []
     }
 
     private static func radioPlayback(_ suite: TestSuite) {

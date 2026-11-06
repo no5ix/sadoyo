@@ -1047,11 +1047,15 @@ final class NotchService: ObservableObject {
     }
     /// A detail's title, the app panel's, or the island's own with no sections.
     var detailTitle: String {
-        if showingAppPanel { return "Vorssaint" }
         let language = L10n.shared.language
-        guard let metric = selectedMetric else { return FeatureStrings.notch(language).title }
-        // The fan card opens Fan Control, so its page shares that title.
-        return metric == .fan ? FeatureStrings.fanControl(language).title : metric.title(L10n.shared.s)
+        // The page is named for what it shows. A reading opened from its menu bar
+        // indicator carries that reading's name, with the panel open behind it.
+        if let metric = selectedMetric {
+            // The fan card opens Fan Control, so its page shares that title.
+            return metric == .fan ? FeatureStrings.fanControl(language).title : metric.title(L10n.shared.s)
+        }
+        if showingAppPanel { return "Vorssaint" }
+        return FeatureStrings.notch(language).title
     }
     var contentSize: CGSize { expandedGeometry.contentSize(for: expandedSize) }
     var usesGlassSurface: Bool {
@@ -2068,7 +2072,11 @@ final class NotchService: ObservableObject {
     /// focus and shows the reading as a page of its own, so a click on a
     /// reading never lands on the section the reading sits in.
     func openAppPanel(toggle: Bool = false, metric: MetricDetailKind? = nil) {
-        if toggle, expanded, showingAppPanel, !showingSections, !showingCommandBar { collapse(); return }
+        // A reading's own click is never the click that closes the panel: the
+        // indicator opens that reading's page, and Back is the way out of it.
+        if toggle, metric == nil, expanded, showingAppPanel, !showingSections, !showingCommandBar {
+            collapse(); return
+        }
         if let metric {
             MenuPanelFocus.shared.focus(metric)
             open(.system, appPanel: true, metric: metric)
