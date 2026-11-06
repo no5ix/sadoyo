@@ -731,9 +731,14 @@ final class StatusItemController {
             return
         }
         guard let metric = focusMetric(from: sender) else {
+            // The indicator names no reading, so the click is the app panel's.
+            // This is the exit a metric click takes when it opens the general
+            // panel, and it is written down so it is not a mystery.
+            AppDelegate.traceMenuBar("metric indicator clicked with no reading behind it")
             onLeftClick?()
             return
         }
+        AppDelegate.traceMenuBar("metric \(metric.detailKind.rawValue) indicator clicked")
         onMetricClick?(metric, sender)
     }
 

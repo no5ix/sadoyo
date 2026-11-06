@@ -561,7 +561,6 @@ if (( TEST )); then
         Sources/Vorssaint/Services/Metrics/MaxCapacityProbe.swift
         Sources/Vorssaint/Services/SystemMonitor/ProcessMemorySupport.swift
         Sources/Vorssaint/Services/Media/PlaybackSessionsSupport.swift
-        Sources/Vorssaint/Services/Media/AccessibilityPlayerSupport.swift
         Sources/Vorssaint/Services/Metrics/TemperatureSensorSelector.swift
         Sources/Vorssaint/Services/Metrics/SustainedAlertGate.swift
         Sources/Vorssaint/Services/WindowLayout/WindowLayoutSupport.swift

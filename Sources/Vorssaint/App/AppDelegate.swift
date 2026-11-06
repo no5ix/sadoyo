@@ -417,8 +417,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     /// Whether the menu bar icon is actually visible on a screen, rather than
     /// present in the status bar but clipped or dropped by a crowded/notched menu
     /// bar (in which case the button still has a window, just not an on-screen one).
-    private static let menuBarLog = Logger(subsystem: Bundle.main.bundleIdentifier ?? "vorssaint",
-                                           category: "menubar")
+    static let menuBarLog = Logger(subsystem: Bundle.main.bundleIdentifier ?? "vorssaint",
+                                   category: "menubar")
+
+    /// The metric click's own trace, written with `NSLog`. A click that lands on
+    /// the wrong page has to be readable in the log on any Mac: the app's own
+    /// `Logger` categories are not always stored, while these lines always are.
+    static func traceMenuBar(_ message: String) {
+        NSLog("[menubar] %@", message)
+    }
     private static let updateLog = Logger(subsystem: Bundle.main.bundleIdentifier ?? "vorssaint",
                                           category: "update")
 
@@ -527,9 +534,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         // which state of the island sent it there.
         let (route, reason) = island.menuBarMetricRoute(for: detailKind)
         Self.menuBarLog.log("metric \(metric.rawValue, privacy: .public) route=\(route.logName, privacy: .public) blockedBy=\(reason ?? "none", privacy: .public) appPanel=\(NotchSupport.routesAppPanel(), privacy: .public)")
+        Self.traceMenuBar("metric \(detailKind) route=\(route.logName) blockedBy=\(reason ?? "none")"
+            + " appPanel=\(NotchSupport.routesAppPanel()) islandRunning=\(island.running)")
         if route == .islandDetail, island.showMetric(detailKind, toggle: true) { return }
         if route == .islandDetail {
             Self.menuBarLog.log("metric \(metric.rawValue, privacy: .public) island refused the detail; opening the panel's")
+            Self.traceMenuBar("metric \(detailKind) island refused the detail; opening the panel's")
         }
         if route == .nothing { return }
         // The panel opens at the reading's own detail page, not at the section

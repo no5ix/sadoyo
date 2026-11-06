@@ -833,13 +833,23 @@ final class NotchService: ObservableObject {
                                             modules: !modules.isEmpty)
     }
 
-    /// The players the page shows: the one the system names as playing, then
-    /// every other player whose own dictionary says it is playing. Nothing is
-    /// capped at one, and the timer is decided apart from all of them.
+    /// The players the page shows: the one in effect, then every other process
+    /// the Now Playing adapter reports a track for. This is the list the Now
+    /// Playing page switches between - a music app and a browser playing a video
+    /// are the same kind of card - and no permission is asked of anyone: what the
+    /// adapter does not report, the page does not draw.
     var dashboardPlayerIDs: [Int] {
-        PlaybackSessionsService.cardPlayerIDs(
-            primary: showsDashboardNowPlaying ? Int(NotchMusicService.shared.playback?.track.appPID ?? -1) : nil,
-            sessions: PlaybackSessionsService.shared.sessions)
+        NotchDashboardLayout.playerIDs(
+            sources: NotchMusicService.shared.sources,
+            inEffectPID: showsDashboardNowPlaying
+                ? Int(NotchMusicService.shared.playback?.track.appPID ?? -1) : nil)
+    }
+
+    /// The player whose card carries the cover, the title and the transport.
+    var dashboardPrimaryPlayerID: Int? {
+        guard NotchSupport.watchesMusicActivity(), let pid = NotchMusicService.shared.playback?.track.appPID,
+              pid > 0 else { return nil }
+        return Int(pid)
     }
 
     var dashboardActivities: [NotchDashboardActivity] {
@@ -897,17 +907,32 @@ final class NotchService: ObservableObject {
         min(NotchDashboardLayout.naturalContentWidth, expandedGeometry.contentWidth)
     }
 
+    /// The readings the page draws, so that the page fits the island: all of
+    /// them where there is room, then one row, then none - the grid gives way
+    /// before the month, the players, the timer and the way to the sections do,
+    /// and the System page still draws every one of them.
+    var dashboardMetricTiles: Int {
+        let tiles = NotchSupport.systemCardCount(hasBattery: PowerSampler.hasInternalBattery,
+                                                 fans: SystemMonitor.shared.snapshot.fanSpeeds.count)
+        return NotchDashboardLayout.tilesFittingPage(activities: dashboardActivities,
+                                                     calendar: showsDashboardCalendar,
+                                                     tiles: tiles,
+                                                     exploreCount: filteredSections.count,
+                                                     width: dashboardContentWidth,
+                                                     available: expandedGeometry.dashboardContentLimit,
+                                                     primaryPlayerID: dashboardPrimaryPlayerID)
+    }
+
     /// What the page measures, which the island grows to hold. The grid's count
     /// is the System page's own count, so the page and the island agree on the
     /// tiles without the service reading the monitor's snapshot twice.
     var dashboardContentHeight: CGFloat {
         NotchDashboardLayout.contentHeight(activities: dashboardActivities,
                                            calendar: showsDashboardCalendar,
-                                           metrics: NotchSupport.systemCardCount(
-                                            hasBattery: PowerSampler.hasInternalBattery,
-                                            fans: SystemMonitor.shared.snapshot.fanSpeeds.count),
+                                           metrics: max(0, dashboardMetricTiles),
                                            exploreCount: filteredSections.count,
-                                           width: dashboardContentWidth)
+                                           width: dashboardContentWidth,
+                                           primaryPlayerID: dashboardPrimaryPlayerID)
     }
 
     var expandedSize: CGSize {
@@ -4631,10 +4656,6 @@ final class NotchService: ObservableObject {
             || ((!hiddenUntilHover || NotchSupport.hiddenShowsActivity())
                 && (NotchSupport.watchesMusicActivity() || NotchSupport.routes(.track))))
         if musicWanted { NotchMusicService.shared.start() } else { NotchMusicService.shared.stop() }
-        // The page's other players are asked only while the page draws them, and
-        // never when the island is not allowed to watch music at all.
-        PlaybackSessionsService.shared.setWatching(showsDashboard && modules.contains(.music)
-            && NotchSupport.watchesMusicActivity())
         // The grid is sampled while the island draws it, on its page and on the
         // dashboard alike.
         let needs = expanded && (selected == .system || showsDashboard) && selectedMetric == nil

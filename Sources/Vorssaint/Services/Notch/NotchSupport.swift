@@ -2857,6 +2857,16 @@ struct NotchGeometry: Equatable {
         CGSize(width: max(0, size.width - NotchLayout.horizontalInset * 2),
                height: max(0, size.height - headerTopInset - headerChromeHeight))
     }
+
+    /// The tallest content the island can be given, at its preset's own limit:
+    /// the tallest island it draws, less its header. The page measures itself to
+    /// this, so it is drawn whole - the way to the sections included - and does
+    /// not run under a scroll a person has to find.
+    var dashboardContentLimit: CGFloat {
+        let tallest = screen.height - 48 - quickAccessBottomInset
+        let island = layout == .custom ? min(customHeight, tallest) : tallest
+        return max(0, island - headerTopInset - headerChromeHeight)
+    }
     var appPanelSize: CGSize { contentSize(for: expandedSize(module: .tools, panel: true)) }
     func frame(for size: CGSize) -> CGRect {
         CGRect(x: screen.midX + surfaceShift - size.width / 2,

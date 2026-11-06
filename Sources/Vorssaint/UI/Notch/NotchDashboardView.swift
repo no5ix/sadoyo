@@ -24,7 +24,6 @@ struct NotchDashboardView: View {
     @ObservedObject private var music = NotchMusicService.shared
     @ObservedObject private var timer = NotchTimerService.shared
     @ObservedObject private var monitor = SystemMonitor.shared
-    @ObservedObject private var sessions = PlaybackSessionsService.shared
     @Environment(\.notchBand) private var band
     @AppStorage(DefaultsKey.networkSpeedUnit) private var networkSpeedUnit = NetworkSpeedUnit.bytes
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -49,10 +48,15 @@ struct NotchDashboardView: View {
                                          timer: timer.session.hasSession && service.modules.contains(.timer))
     }
 
-    /// The same readings the System page draws.
+    /// The same readings the System page draws, as many of them as the page has
+    /// room for: the grid gives way to keep the month, the players, the timer
+    /// and the way to the sections on the page, and the System page draws every
+    /// reading in full.
     private var tiles: [NotchSystemCard] {
-        NotchSystemCards.cards(snapshot: monitor.snapshot, language: l10n.language,
-                               networkSpeedInBits: networkSpeedUnit == .bits)
+        let cards = NotchSystemCards.cards(snapshot: monitor.snapshot, language: l10n.language,
+                                           networkSpeedInBits: networkSpeedUnit == .bits)
+        let shown = service.dashboardMetricTiles
+        return shown >= 0 ? Array(cards.prefix(shown)) : []
     }
 
     private var sections: [NotchModule] { service.filteredSections }
@@ -118,8 +122,8 @@ struct NotchDashboardView: View {
                 case .player(let id):
                     if id == primaryPlayerID, let playback = music.playback {
                         nowPlayingCard(playback)
-                    } else if let session = sessions.session(id: Int32(id)) {
-                        playerCard(session)
+                    } else if let source = playerSource(id) {
+                        playerCard(source)
                     }
                 case .timer:
                     timerCard
@@ -166,38 +170,37 @@ struct NotchDashboardView: View {
     /// its mark and name, what it plays and how far along it is, and the
     /// transport that drives that process and no other. A player that has not
     /// agreed to be automated shows its name and the way to ask it.
-    private func playerCard(_ session: NotchPlaybackSession) -> some View {
-        NotchDashboardCard {
+    /// A player the system reports that is not the one in effect: the app's own
+    /// mark, its name, and the one control that makes it the card above, where
+    /// its cover, its title and its transport are drawn. The list is the Now
+    /// Playing page's own, so a browser playing a video and a music app are read
+    /// the same way and no card is drawn for a player that cannot be read.
+    private func playerCard(_ source: NotchPlaybackSource) -> some View {
+        NotchDashboardCard(height: NotchDashboardLayout.playerCardHeight) {
             HStack(spacing: 8) {
-                appMark(session)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(session.title ?? session.appName)
-                        .font(.system(size: 11, weight: .semibold))
-                        .lineLimit(1).truncationMode(.middle)
-                    // The app is named, and what the card cannot do is said:
-                    // a player whose reading is blocked is shown as blocked,
-                    // never as playing, and never with a song it did not name.
-                    Text(session.needsPermission
-                         ? FeatureStrings.notchMusicExtras(l10n.language).playerPermissionNeeded
-                         : (session.artist ?? session.appName))
-                        .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1).truncationMode(.middle)
-                    playerProgress(session)
+                appMark(pid: Int(source.pid))
+                Text(playerName(source))
+                    .font(.system(size: 11, weight: .semibold))
+                    .lineLimit(1).truncationMode(.middle)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                // The card's body is not pressed. This is the control: it asks
+                // the adapter for this player, and its full card takes the place
+                // of the one above.
+                NotchIconButton(symbol: "arrow.triangle.2.circlepath", title: text.open) {
+                    music.selectSource(source.selection)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                playerTransport(session)
+                .accessibilityIdentifier("notch.dashboard.player.\(Int(source.pid)).select")
             }
         }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel(session.appName)
-        .accessibilityIdentifier("notch.dashboard.player.\(session.pid)")
+        .accessibilityLabel(playerName(source))
+        .accessibilityIdentifier("notch.dashboard.player.\(Int(source.pid))")
     }
 
-    /// The player's own icon, so two cards at once are told apart at a glance.
-    private func appMark(_ session: NotchPlaybackSession) -> some View {
+    /// The app's own mark, from the process that reports the track.
+    private func appMark(pid: Int) -> some View {
         Group {
-            if let icon = session.icon {
+            if let icon = NSRunningApplication(processIdentifier: pid_t(pid))?.icon {
                 Image(nsImage: icon)
             } else {
                 Image(systemName: "music.note")
@@ -205,77 +208,18 @@ struct NotchDashboardView: View {
             }
         }
         .font(.system(size: 15, weight: .medium))
-        .frame(width: NotchDashboardLayout.activityArtwork, height: NotchDashboardLayout.activityArtwork)
+        .frame(width: 26, height: 26)
         .accessibilityHidden(true)
     }
 
-    /// The song's position, and the two times the player's own clock gives.
-    /// A player that does not answer with a length says what it is doing.
-    @ViewBuilder private func playerProgress(_ session: NotchPlaybackSession) -> some View {
-        if let fraction = session.fraction {
-            HStack(spacing: 4) {
-                Text(session.elapsedText ?? "0:00")
-                    .font(.system(size: 8, weight: .medium, design: .rounded)).monospacedDigit()
-                    .foregroundStyle(.secondary)
-                NotchMeter(value: fraction, height: 3, tint: .white.opacity(0.85))
-                Text(session.remainingText ?? "0:00")
-                    .font(.system(size: 8, weight: .medium, design: .rounded)).monospacedDigit()
-                    .foregroundStyle(.secondary)
-            }
-        } else {
-            // A player that gives no length has no position to draw; the card
-            // says what it plays and leaves the bar empty.
-            NotchMeter(value: 0, height: 3)
-        }
+    private func playerSource(_ id: Int) -> NotchPlaybackSource? {
+        music.sources.first { Int($0.pid) == id }
     }
 
-    /// The card drives the player it belongs to. A player that has not agreed
-    /// to be automated gets the way to agree, in the player's page's own words.
-    @ViewBuilder private func playerTransport(_ session: NotchPlaybackSession) -> some View {
-        switch session.access {
-        case .granted:
-            // Only the commands this player answers to: a player driven through
-            // its window has the one control its window carries.
-            HStack(spacing: 2) {
-                ForEach(Array(PlaybackSessionsService.cardCommands(for: session).enumerated()),
-                        id: \.offset) { _, command in
-                    transportButton(session, command)
-                }
-            }
-        case .consent:
-            VStack(spacing: 3) {
-                Button(FeatureStrings.notchMusicExtras(l10n.language).allowPlayback) { sessions.requestConsent(session) }
-                    .buttonStyle(.borderless).font(.system(size: 10, weight: .medium))
-                    .disabled(sessions.requesting)
-                if sessions.requesting { ProgressView().controlSize(.small) }
-            }
-        case .denied:
-            Button(l10n.s.permissionOpenSettings) { Permissions.shared.openAutomationSettings() }
-                .buttonStyle(.borderless).font(.system(size: 10, weight: .medium))
-        case .unavailable:
-            // A window player is read and driven through the Accessibility API,
-            // so the card asks for that; a scripted player is driven by its own
-            // dictionary, and the way to it is the app.
-            if session.source == .window {
-                Button(l10n.s.permissionOpenSettings) { Permissions.shared.openAccessibilitySettings() }
-                    .buttonStyle(.borderless).font(.system(size: 10, weight: .medium))
-            } else {
-                Button(FeatureStrings.notchMusicExtras(l10n.language).openPlayer) { session.app?.activate(options: [.activateAllWindows]) }
-                    .buttonStyle(.borderless).font(.system(size: 10, weight: .medium))
-            }
-        }
-    }
-
-    private func transportButton(_ session: NotchPlaybackSession, _ command: NotchPlaybackCommand) -> some View {
-        Button { sessions.send(command, to: session) } label: {
-            Image(systemName: command.dashboardSymbol)
-                .font(.system(size: 11, weight: .semibold))
-                .frame(width: 22, height: 22)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(NotchButtonStyle(cornerRadius: 7, lifts: false))
-        .disabled(!session.canSend(command))
-        .accessibilityLabel(command.dashboardTitle(FeatureStrings.radialMenu(l10n.language)))
+    private func playerName(_ source: NotchPlaybackSource) -> String {
+        source.displayName
+            ?? NSRunningApplication(processIdentifier: pid_t(Int(source.pid)))?.localizedName
+            ?? source.bundleIdentifier
     }
 
     /// A running timer as a card: its phase, its clock, the pause that holds
@@ -283,7 +227,7 @@ struct NotchDashboardView: View {
     /// card's own buttons drive it - and the Timer page, where another timer is
     /// started, is reached from the page's own mark.
     private var timerCard: some View {
-        NotchDashboardCard {
+        NotchDashboardCard(height: nil) {
             HStack(spacing: 8) {
                 HStack(spacing: 7) {
                     Image(systemName: timerSymbol)
@@ -536,15 +480,29 @@ private extension NotchPlaybackCommand {
 /// them, and the shape that catches the pointer is the card's own outline.
 private struct NotchDashboardCard<Content: View>: View {
     @ViewBuilder var content: () -> Content
-    var height: CGFloat = NotchDashboardLayout.activityCardHeight
+    /// The card's height, or `nil` for a card as tall as what it holds. A card
+    /// with a height of its own centres its content in it; a card measured to
+    /// its content keeps the edge the same on every side, which is what a card
+    /// of one line of text needs.
+    var height: CGFloat? = NotchDashboardLayout.activityCardHeight
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var hover = false
 
     var body: some View {
-        content()
-            .padding(NotchDashboardLayout.activityCardPadding)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .frame(height: height)
+        Group {
+            if let height {
+                content()
+                    .padding(NotchDashboardLayout.activityCardPadding)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(maxHeight: .infinity)
+                    .frame(height: height)
+            } else {
+                content()
+                    .padding(NotchDashboardLayout.activityCardPadding)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
             .modifier(NotchControlSurface(cornerRadius: NotchDashboardLayout.cornerRadius,
                                           selected: hover, fillOpacity: NotchDashboardLayout.fillOpacity))
             .contentShape(RoundedRectangle(cornerRadius: NotchDashboardLayout.cornerRadius, style: .continuous))

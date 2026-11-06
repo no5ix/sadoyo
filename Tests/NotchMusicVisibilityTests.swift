@@ -524,28 +524,10 @@ enum NotchMusicVisibilityTests {
         bar.syncVisibleConsumers()
         suite.expect(!reader.running, "the bar covering a page keeps that page's readers stopped")
 
-        // The other players are asked only while the one page draws them.
-        let players = Service()
-        // The page shows the players only where the island is allowed to watch
-        // music, so this block asks for that page, not for an earlier test's
-        // defaults.
-        defaults.set(true, forKey: DefaultsKey.notchEnabled)
-        defaults.set(true, forKey: DefaultsKey.notchShowPlayingMusic)
-        defaults.set(NotchIdleContent.music.rawValue, forKey: DefaultsKey.notchIdleContent)
-        players.modules = NotchSupport.modules(in: defaults)
-        players.expanded = true
-        players.dashboardRequested = true
-        players.syncVisibleConsumers()
-        suite.expect(players.playersWatching == true,
-                     "the open dashboard asks the other players, so two songs can show at once")
-        players.dashboardRequested = false
-        players.syncVisibleConsumers()
-        suite.expect(players.playersWatching == false,
-                     "a section page asks nothing of the other players")
-        players.dashboardRequested = true
-        players.expanded = false
-        players.syncVisibleConsumers()
-        suite.expect(players.playersWatching == false,
-                     "a closed island asks nothing of the other players")
+        // The page's players come from the Now Playing adapter's own list, which
+        // the music reader fills. The page asks for no reader of its own, so the
+        // watching decided here is the music reader's, and every player that
+        // reports a track comes with it.
+
     }
 }

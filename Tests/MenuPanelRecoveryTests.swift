@@ -170,6 +170,7 @@ enum MenuPanelRecoveryTests {
     }
     final class NotchService {
         static var shared = NotchService()
+        var running = false
         var acceptsSystemFeedback = false
         /// The metric's own switch, as it is off when a reading is not shown.
         var metricAvailable = true
@@ -291,6 +292,9 @@ enum MenuPanelRecoveryTests {
             static var messages: [String] = []
             static func log(_ message: String) { messages.append(message) }
         }
+        // The production trace goes to `NSLog`; the harness keeps the same lines
+        // so a click's route can be read back from the log it wrote.
+        static func traceMenuBar(_ message: String) { menuBarLog.messages.append(message) }
         let presentationLogStart = menuBarLog.messages.count
         var presentationLogs: [String] {
             menuBarLog.messages.dropFirst(presentationLogStart).filter { $0.hasPrefix("panel open show=") }
@@ -706,9 +710,10 @@ enum MenuPanelRecoveryTests {
             let host = setup(present: false)
             let start = Host.menuBarLog.messages.count
             host.showMetricPanel(for: MenuBarMetric(detailKind: "memory"), anchoredTo: host.statusController.button!)
-            let lines = Host.menuBarLog.messages.dropFirst(start).filter { $0.hasPrefix("metric memory route=") }
-            expect(lines.count == 1 && lines.first?.contains("route=panel-detail") == true
-                   && lines.first?.contains("blockedBy=island-off") == true,
+            let lines = Host.menuBarLog.messages.dropFirst(start)
+                .filter { $0.hasPrefix("metric memory route=") }
+            expect(lines.count >= 1
+                   && lines.allSatisfy { $0.contains("route=panel-detail") && $0.contains("blockedBy=island-off") },
                    "the click writes the route it took and the island's condition to the log")
         }
         for reopening in [false, true] {

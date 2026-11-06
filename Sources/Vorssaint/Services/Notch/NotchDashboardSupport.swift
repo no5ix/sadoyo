@@ -92,6 +92,8 @@ enum NotchDashboardLayout {
     /// The page reads at this width at every preset, and narrows when a preset
     /// on a small display offers less.
     static let naturalContentWidth: CGFloat = 568
+    /// The players one page carries, the one in effect among them.
+    static let maxPlayers: Int = 4
 
     // MARK: Quick Controls
 
@@ -151,15 +153,20 @@ enum NotchDashboardLayout {
 
     // MARK: Live Activities
 
-    /// A player's card holds its cover, its title, its position and its
-    /// transport; a timer's card holds its mark, its phase, its clock and its
-    /// pause. Both are the same height, so two cards of the section line up, and
-    /// the height is the card's own: the words, the times and the buttons are
-    /// read at their own size instead of being crushed into a row of text.
+    /// The player in effect carries its cover, its title, its position and its
+    /// transport, so its card is the tall one.
     static let activityCardHeight: CGFloat = 75
     static let activityArtwork: CGFloat = 44
-    /// The card's edge to its content, on every side alike.
+    /// The other players the system reports carry the app, its name and the way
+    /// to make it the card above: one row, and the page keeps room for the
+    /// readings and the sections under it.
+    static let playerCardHeight: CGFloat = 48
+    /// The card's edge to its content, on every side alike. The timer's card is
+    /// as tall as its clock, so its top edge is as far from its words as its
+    /// leading edge is, and a card of one line is not padded at the top.
     static let activityCardPadding: CGFloat = 10
+    /// A card that carries one line of its own, with the edge on every side.
+    static var timerCardHeight: CGFloat { activityCardPadding * 2 + activityArtwork - 12 }
 
     // MARK: System Monitoring
 
@@ -167,7 +174,7 @@ enum NotchDashboardLayout {
     /// A tile is a label, a value and a meter, so it is taller than a row of
     /// text: the reading is the tile's own, and a tap opens it. The tile is
     /// measured so its value is read at a glance, not crowded against its edge.
-    static let metricTileHeight: CGFloat = 75
+    static let metricTileHeight: CGFloat = 64
     static let metricSpacing: CGFloat = 8
     /// The tile's edge to its reading, the same on every side.
     static let metricTilePadding: CGFloat = 10
@@ -217,10 +224,47 @@ enum NotchDashboardLayout {
         }
     }
 
-    /// The activity cards, in order, with the gap between them. Every player
-    /// has its own card; the timer has its own.
-    static func liveActivitiesHeight(_ activities: [NotchDashboardActivity]) -> CGFloat {
-        stackHeight(activities.count, cardHeight: activityCardHeight, spacing: cardSpacing)
+    /// The activity cards, in order, with the gap between them: the player in
+    /// effect at its full height, the other players at one row, the timer at its
+    /// clock. This is the height the page asks the island for, so the sections
+    /// below - the readings and the way to the sections - are on the page and
+    /// not under a scroll.
+    static func liveActivitiesHeight(_ activities: [NotchDashboardActivity],
+                                     primaryPlayerID: Int? = nil) -> CGFloat {
+        activities.reduce(0) { total, activity in
+            total + activityHeight(activity, primaryPlayerID: primaryPlayerID)
+        } + cardSpacing * CGFloat(max(0, activities.count - 1))
+    }
+
+    static func activityHeight(_ activity: NotchDashboardActivity, primaryPlayerID: Int? = nil) -> CGFloat {
+        switch activity {
+        case .player(let id): return id == primaryPlayerID ? activityCardHeight : playerCardHeight
+        case .timer: return timerCardHeight
+        }
+    }
+
+    /// The players the page shows, from what the Now Playing adapter reports:
+    /// the one in effect first, then every other process that reports a track.
+    /// This is the list the Now Playing page switches between, so a browser
+    /// playing a video is on the page as readily as a music app, and no player
+    /// is left out because a permission is missing: what the adapter does not
+    /// report, the page does not draw.
+    static func playerIDs(sources: [NotchPlaybackSource], inEffectPID: Int?,
+                          limit: Int = NotchDashboardLayout.maxPlayers) -> [Int] {
+        var seen = Set<Int>()
+        var ids: [Int] = []
+        if let inEffectPID, inEffectPID > 0, sources.contains(where: { Int($0.pid) == inEffectPID }) {
+            ids.append(inEffectPID)
+            seen.insert(inEffectPID)
+        }
+        for source in sources where source.isPlaying || source.hasTrack {
+            let pid = Int(source.pid)
+            guard pid > 0, !seen.contains(pid) else { continue }
+            ids.append(pid)
+            seen.insert(pid)
+            if ids.count >= limit { break }
+        }
+        return ids
     }
 
     /// The Explore circles at their columns, which is seven whenever the page
@@ -248,20 +292,57 @@ enum NotchDashboardLayout {
     /// island's own geometry measures, so the page is as tall as the cards,
     /// the grid and the circles it holds, and no more.
     static func sectionHeights(activities: [NotchDashboardActivity], calendar: Bool,
-                               metrics: Int, exploreCount: Int, width: CGFloat) -> [CGFloat] {
+                               metrics: Int, exploreCount: Int, width: CGFloat,
+                               primaryPlayerID: Int? = nil) -> [CGFloat] {
         var heights: [CGFloat] = []
         if calendar { heights.append(calendarCardHeight) }
-        let live = liveActivitiesHeight(activities)
+        let live = liveActivitiesHeight(activities, primaryPlayerID: primaryPlayerID)
         if live > 0 { heights.append(live) }
         heights.append(metricsHeight(tiles: metrics, columns: metricColumns))
         heights.append(exploreHeight(count: exploreCount, width: width))
         return heights
     }
 
+    /// How many of the readings the page draws so that the page fits the island:
+    /// all of them where the island is tall enough, then one row, then none. The
+    /// month, the players, the timer and the way to the sections keep their
+    /// room, because the page is read top to bottom and ends at the sections;
+    /// the grid is the part that gives way, and it is the part the System page
+    /// draws in full. A page that fits needs no scroll, and the sections are
+    /// there without one.
+    static func tilesFittingPage(activities: [NotchDashboardActivity], calendar: Bool,
+                                 tiles: Int, exploreCount: Int, width: CGFloat,
+                                 available: CGFloat, primaryPlayerID: Int? = nil) -> Int {
+        // The shapes the grid draws, most to least: all of it, one row of the
+        // columns, nothing. The page takes the first that fits.
+        var steps: [Int] = [tiles]
+        if tiles > metricColumns { steps.append(metricColumns) }
+        steps.append(0)
+        for shown in steps {
+            let needed = contentHeight(activities: activities, calendar: calendar, metrics: shown,
+                                       exploreCount: exploreCount, width: width,
+                                       primaryPlayerID: primaryPlayerID)
+            if needed <= available { return shown }
+        }
+        // Not even a page without the grid fits: the island is shorter than the
+        // page can be, so it scrolls at its own height.
+        return -1
+    }
+
+    /// The tallest page the island draws on a display of the given height: the
+    /// display less the island's chrome - the screen's own limit, the row of
+    /// levels at its top, and the page's edges. The page is measured against
+    /// this, so the readings and the way to the sections are on the page by
+    /// default and not under a scroll a person has to find.
+    static func maxPageHeight(screenHeight: CGFloat) -> CGFloat {
+        screenHeight - 48 - quickControlsHeight - 20
+    }
+
     static func contentHeight(activities: [NotchDashboardActivity], calendar: Bool, metrics: Int,
-                              exploreCount: Int, width: CGFloat) -> CGFloat {
+                              exploreCount: Int, width: CGFloat, primaryPlayerID: Int? = nil) -> CGFloat {
         let sections = sectionHeights(activities: activities, calendar: calendar, metrics: metrics,
-                                      exploreCount: exploreCount, width: width)
+                                      exploreCount: exploreCount, width: width,
+                                      primaryPlayerID: primaryPlayerID)
         guard !sections.isEmpty else { return 0 }
         return sections.reduce(0, +) + sectionSpacing * CGFloat(sections.count - 1)
     }
@@ -312,6 +393,8 @@ enum NotchDashboardSupport {
     /// timer is decided apart from them: a song ending leaves the timer's card
     /// where it was, and a timer ending leaves every player's card where it
     /// was. Two players at once are two cards.
+    /// The page's activities: the players the system reports, in order, then the
+    /// timer, which is decided apart from every one of them.
     static func activities(players: [Int], timer: Bool) -> [NotchDashboardActivity] {
         var visible = players.map { NotchDashboardActivity.player(id: $0) }
         if timer { visible.append(.timer) }

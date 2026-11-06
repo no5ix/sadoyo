@@ -249,6 +249,59 @@ enum NotchDashboardTests {
                          "the section and the detail share one way back")
         }
 
+        suite.run("the page gives way in its grid, not in its sections") {
+            let width = NotchDashboardLayout.naturalContentWidth
+            let activities: [NotchDashboardActivity] = [.player(id: 7), .player(id: 9), .timer]
+            func page(_ tiles: Int) -> CGFloat {
+                NotchDashboardLayout.contentHeight(activities: activities, calendar: true, metrics: tiles,
+                                                   exploreCount: 7, width: width, primaryPlayerID: 7)
+            }
+            func fit(_ available: CGFloat) -> Int {
+                NotchDashboardLayout.tilesFittingPage(activities: activities, calendar: true, tiles: 8,
+                                                      exploreCount: 7, width: width, available: available,
+                                                      primaryPlayerID: 7)
+            }
+            suite.expect(fit(page(8)) == 8,
+                         "an island tall enough for the page keeps every reading on it")
+            suite.expect(fit(page(4)) == 4,
+                         "a row short costs a row of readings, and nothing else")
+            suite.expect(fit(page(0)) == 0,
+                         "with no room for the grid the page draws none of it, and keeps the sections")
+            suite.expect(fit(page(8) - 6) == 4,
+                         "a little too little room costs the grid's second row, not the month")
+            suite.expect(fit(24) == -1,
+                         "an island that holds no page at all says so, and the page scrolls")
+            suite.expect(fit(NotchDashboardLayout.maxPageHeight(screenHeight: 1084)) == 8,
+                         "on a built-in display the page keeps all eight readings and ends at the sections")
+        }
+
+        suite.run("the page's players are the players the system reports") {
+            let safari = NotchPlaybackSource(pid: 21, bundleIdentifier: "com.apple.Safari", isMusicApp: false,
+                                             isPlaying: true, hasTrack: true, displayName: "Safari")
+            let netease = NotchPlaybackSource(pid: 31, bundleIdentifier: "com.netease.163music", isMusicApp: true,
+                                              isPlaying: true, hasTrack: true, displayName: "NetEaseMusic")
+            let spotify = NotchPlaybackSource(pid: 41, bundleIdentifier: "com.spotify.client", isMusicApp: true,
+                                              isPlaying: false, hasTrack: true, displayName: "Spotify")
+            let silent = NotchPlaybackSource(pid: 51, bundleIdentifier: "com.apple.Music", isMusicApp: true,
+                                             isPlaying: false, hasTrack: false)
+            let reported = [netease, safari, spotify, silent]
+            // The one in effect leads, whatever order the adapter reported in,
+            // and a browser that reports a track is a player like any other.
+            suite.expect(NotchDashboardLayout.playerIDs(sources: reported, inEffectPID: 31) == [31, 21, 41],
+                         "the player in effect, then the others that report a track, and no silent process")
+            suite.expect(NotchDashboardLayout.playerIDs(sources: reported, inEffectPID: nil) == [31, 21, 41],
+                         "with none in effect, every player that reports a track is on the page")
+            suite.expect(NotchDashboardLayout.playerIDs(sources: reported, inEffectPID: 21) == [21, 31, 41],
+                         "the card above is the first, and the rest keep their order")
+            // A page of four players is the whole list, and the fifth is not asked.
+            let many = reported + [NotchPlaybackSource(pid: 61, bundleIdentifier: "com.apple.podcast",
+                                                       isMusicApp: true, isPlaying: true, hasTrack: true)]
+            suite.expect(NotchDashboardLayout.playerIDs(sources: many, inEffectPID: 31) == [31, 21, 41, 61],
+                         "the page carries the players it has room for, in order")
+            suite.expect(NotchDashboardLayout.playerIDs(sources: [], inEffectPID: 31).isEmpty,
+                         "what the adapter does not report, the page does not draw")
+        }
+
         suite.run("closing the timer's card leaves every player's card") {
             // The card's close ends the timer's session. The players' cards are
             // decided by what plays, so the close touches none of them.
@@ -259,7 +312,7 @@ enum NotchDashboardTests {
                    "the timer closed, the players keep their cards and their order")
             suite.expect(NotchDashboardLayout.liveActivitiesHeight(both)
                              - NotchDashboardLayout.liveActivitiesHeight(closed)
-                             == NotchDashboardLayout.activityCardHeight + NotchDashboardLayout.cardSpacing,
+                             == NotchDashboardLayout.timerCardHeight + NotchDashboardLayout.cardSpacing,
                          "the page loses the timer's card and its gap, and nothing else")
             suite.expect(NotchDashboardSupport.sections(activities: closed, calendar: true).contains(.liveActivities),
                          "the section stays while the players run")
@@ -336,9 +389,11 @@ enum NotchDashboardTests {
                              == busy.reduce(0, +) + NotchDashboardLayout.sectionSpacing * 2,
                          "the page is its sections and the gaps between them")
             // Each card, player or timer, adds exactly its own height.
-            suite.expect(NotchDashboardLayout.liveActivitiesHeight([.player(id: 7)]) + NotchDashboardLayout.cardSpacing
-                             + NotchDashboardLayout.activityCardHeight
-                             == NotchDashboardLayout.liveActivitiesHeight([.player(id: 7), .player(id: 9)]),
+            suite.expect(NotchDashboardLayout.liveActivitiesHeight([.player(id: 7)], primaryPlayerID: 7)
+                             + NotchDashboardLayout.cardSpacing
+                             + NotchDashboardLayout.playerCardHeight
+                             == NotchDashboardLayout.liveActivitiesHeight([.player(id: 7), .player(id: 9)],
+                                                                          primaryPlayerID: 7),
                          "a second player adds a card of its own, and the gap")
             suite.expect(NotchDashboardLayout.liveActivitiesHeight(cards)
                              > NotchDashboardLayout.liveActivitiesHeight([.player(id: 7)]),
@@ -383,14 +438,28 @@ enum NotchDashboardTests {
                          "both levels fit the row, one on each side of the camera")
             // Monitoring: four columns, two rows, each tile a label, a reading
             // and a meter, read at a glance and not crowded against its edge.
-            suite.expect(NotchDashboardLayout.metricTileHeight >= 70
+            suite.expect(NotchDashboardLayout.metricTileHeight >= 60
                              && NotchDashboardLayout.metricTilePadding == 10,
                          "a tile has room for its label, its reading and its meter, and one edge")
             suite.expect(NotchDashboardLayout.activityCardHeight >= 70
                              && NotchDashboardLayout.activityCardPadding == 10,
                          "a card is tall enough for its words, its times and its buttons, and one edge")
-            suite.expect(NotchDashboardLayout.activityCardHeight == NotchDashboardLayout.metricTileHeight,
-                         "the player's card and the timer's card are as tall as the grid's tiles, so the page lines up")
+            // The whole page, at its fullest, is measured against the island's
+            // tallest page, so the readings and the way to the sections are on
+            // the page by default and not under a scroll the person has to find.
+            let crowded: [NotchDashboardActivity] = [.player(id: 7), .player(id: 9), .player(id: 11), .timer]
+            let page = NotchDashboardLayout.contentHeight(activities: crowded, calendar: true, metrics: 8,
+                                                          exploreCount: 7, width: width, primaryPlayerID: 7)
+            suite.expect(page <= NotchDashboardLayout.maxPageHeight(screenHeight: 1084),
+                         "the month, three players, the timer, the readings and the sections fit the island: \(page)")
+            suite.expect(NotchDashboardLayout.liveActivitiesHeight(crowded, primaryPlayerID: 7)
+                             == NotchDashboardLayout.activityCardHeight
+                             + 2 * NotchDashboardLayout.playerCardHeight + NotchDashboardLayout.timerCardHeight
+                             + 3 * NotchDashboardLayout.cardSpacing,
+                         "the players in effect is tall, the others are rows, the timer is its clock")
+            suite.expect(NotchDashboardLayout.timerCardHeight
+                             == NotchDashboardLayout.activityCardPadding * 2 + NotchDashboardLayout.activityArtwork - 12,
+                         "the timer's card is its clock with the same edge on every side")
             suite.expect(NotchDashboardLayout.metricsHeight(tiles: 8)
                              == NotchDashboardLayout.gridHeight(rows: 2,
                                                                 tileHeight: NotchDashboardLayout.metricTileHeight,

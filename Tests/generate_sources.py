@@ -1375,10 +1375,6 @@ def main():
     music_visibility = music_visibility.replace("calendar: hasCalendarActivity", "calendar: false")
     music_visibility = music_visibility.replace("playback?.isPlaying == true)",
                                                 "playback?.isPlaying == true, in: ReviewDefaults.current)")
-    # The other players are separate applications asked over Apple Events; the
-    # visibility contract checks which page is watched, not that the events go.
-    music_visibility = music_visibility.replace("PlaybackSessionsService.shared.setWatching(",
-                                                "notePlayersWatching(")
     music_visibility = music_visibility.replace("captureControls: captureControls != nil)",
                                                 "captureControls: captureControls != nil, in: ReviewDefaults.current)")
     music_visibility = music_visibility.replace(
@@ -1391,8 +1387,6 @@ def main():
                                                 "AppFeature.connectedDevices.isAvailable(in: ReviewDefaults.current)")
     write("NotchMusicVisibility.swift", "import Foundation\nextension NotchMusicVisibilityTests {\n"
           + "final class Service: State {\nfunc resignPanelKey() { panel?.resignKey() }\n"
-          + "var playersWatching: Bool? = nil\n"
-          + "func notePlayersWatching(_ watching: Bool) { playersWatching = watching }\n"
           + "func forgetDetailHeight() {}\n"
           + music_visibility + "}\n}\n")
     write("NotchScreenEdgeClicks.swift", "import AppKit\nextension NotchScreenEdgeClickTests {\nfinal class Service: State {\n"

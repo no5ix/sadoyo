@@ -147,20 +147,25 @@ struct NotchIconButton: View {
     var selected = false
     let action: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var hover = false
 
     var body: some View {
         Button(action: action) {
             Image(systemName: symbol)
                 .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(selected ? .white : .white.opacity(0.55))
+                .foregroundStyle(selected ? .white : .white.opacity(hover ? 0.9 : 0.55))
                 .contentTransition(.symbolEffect(.replace))
                 .animation(reduceMotion ? nil : .smooth(duration: 0.24), value: symbol)
                 .frame(width: 28, height: 28)
-                .background(.white.opacity(selected ? 0.12 : 0),
+                // The control's own shape, lit when the pointer is on it: the
+                // rounded square is the button's size, not the card's.
+                .background(.white.opacity(selected ? 0.12 : (hover ? 0.08 : 0)),
                             in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                .animation(reduceMotion ? nil : .smooth(duration: 0.2), value: hover)
                 .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
         }
         .buttonStyle(NotchButtonStyle(cornerRadius: 9))
+        .onHover { hover = $0 }
         .help(title)
         .accessibilityLabel(title)
         .accessibilityAddTraits(selected ? .isSelected : [])
