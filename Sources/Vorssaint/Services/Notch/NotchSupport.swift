@@ -1813,15 +1813,31 @@ enum NotchSupport {
     /// beside agents, an event or music; downloads already carry their
     /// status. An event's clock always runs, so a download, agents or music
     /// can take the side its title had.
+    /// The companion the closed strip takes. A pair chosen by hand wins while it
+    /// is one the activities answer to; otherwise the strip pairs by itself,
+    /// with the first companion on the list, so a page of activities needs no
+    /// choosing to show the pair a person is most likely using.
+    static func defaultCompanion(of primary: NotchCompactActivity?,
+                                 companions: [NotchCompactActivity],
+                                 chosen: NotchCompactActivity?) -> NotchCompactActivity? {
+        guard primary != nil else { return nil }
+        if let chosen, companions.contains(chosen) { return chosen }
+        return companions.first
+    }
+
     static func compactCompanions(of primary: NotchCompactActivity, timer: Bool, running: Bool, downloads: Bool,
                                   agents: Bool, calendar: Bool, music: Bool) -> [NotchCompactActivity] {
+        // The player leads the pairs. The island's page shows everything at
+        // once, and the closed strip has room for one companion, so what is
+        // heard is the companion that is put in it: a song that plays is what a
+        // person is listening to, ahead of a download, an agent, or a date.
         let pairs: [(Bool, NotchCompactActivity)]
         switch primary {
         case .timer where timer:
-            pairs = [(downloads, .downloads), (running && agents, .agents), (running && calendar, .calendar),
-                     (running && music, .music)]
+            pairs = [(running && music, .music), (downloads, .downloads), (running && agents, .agents),
+                     (running && calendar, .calendar)]
         case .calendar where calendar:
-            pairs = [(downloads, .downloads), (agents, .agents), (music, .music)]
+            pairs = [(music, .music), (downloads, .downloads), (agents, .agents)]
         default:
             pairs = []
         }

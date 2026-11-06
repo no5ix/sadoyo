@@ -42,8 +42,16 @@ enum NotchDashboardTests {
             // The card is the page's, so it is measured as one shape: the grid
             // at the rows the grid draws itself, with the month's name above it.
             suite.expect(NotchDashboardLayout.calendarCardHeight
-                             == NotchDashboardLayout.calendarHeaderHeight + 6 + NotchDashboardLayout.calendarGridHeight,
-                         "the card is the grid, its header and their gap, and nothing else")
+                             == NotchDashboardLayout.calendarCardPadding * 2
+                                 + NotchDashboardLayout.calendarHeaderHeight
+                                 + NotchDashboardLayout.calendarHeaderGap
+                                 + NotchDashboardLayout.calendarGridHeight,
+                         "the card is its edge, the month's name, the grid and the edge again, and nothing else")
+            // The card's edge is the same on every side, so the month's name and
+            // the last week of days sit as far from the outline as the card's
+            // first day does, and the card is not empty at its bottom.
+            suite.expect(NotchDashboardLayout.calendarCardPadding == 8,
+                         "one edge, kept on all four sides")
             suite.expect(NotchDashboardLayout.calendarGridHeight
                              >= NotchDashboardLayout.calendarMonthMinimumHeight,
                          "the grid keeps a row for every week of the month")
@@ -54,8 +62,8 @@ enum NotchDashboardTests {
                 activities: [.player(id: 7), .player(id: 9), .timer],
                 calendar: true, metrics: 8, exploreCount: 14,
                 width: NotchDashboardLayout.naturalContentWidth)
-            suite.expect(drawn <= 630,
-                         "the page the reference draws fits the island's tallest preset: \(Int(drawn))pt")
+            suite.expect(drawn <= 700,
+                         "the page the reference draws fits a small display's island: \(Int(drawn))pt")
             // What runs is not capped to make that true: more cards make the page
             // taller, and the page scrolls in the island instead of hiding a card.
             let crowded = NotchDashboardLayout.contentHeight(
@@ -82,9 +90,9 @@ enum NotchDashboardTests {
                                                               metrics: 8, exploreCount: 7,
                                                               width: NotchDashboardLayout.naturalContentWidth)
             suite.expect(withCard.count == without.count + 1
-                             && withCard[1] == NotchDashboardLayout.calendarCardHeight
-                             && without.count == 4,
-                         "the calendar is the page's second section, between the levels and the activities")
+                             && withCard.first == NotchDashboardLayout.calendarCardHeight
+                             && without.count == 3,
+                         "the calendar leads the page's sections, under the row of levels")
         }
 
         suite.run("every player playing gets a card, and the timer has its own") {
@@ -150,37 +158,72 @@ enum NotchDashboardTests {
             suite.expect(ids.count == expected.count, "no two tiles share a destination")
         }
 
-        suite.run("the two levels sit at the two ends of the page") {
-            // One row, the first level at the leading edge, the last at the
-            // trailing edge, the page's empty middle between them: the row the
-            // reference draws, and the Controls page's own controls in it.
-            suite.expect(NotchDashboardLayout.hasTrailingGap(levels: 2),
-                         "volume and brightness share the row with the page's middle between them")
-            suite.expect(!NotchDashboardLayout.hasTrailingGap(levels: 1),
-                         "one level takes the leading end, and nothing is pushed to the far side")
-            suite.expect(!NotchDashboardLayout.hasTrailingGap(levels: 0),
-                         "no level takes no row, and the page does not grow one")
-            suite.expect(NotchDashboardLayout.quickControlLeadingCount == 1
-                             && NotchDashboardLayout.quickControlsHeight == 28,
-                         "the row is one row of the Controls page's compact sliders")
+        suite.run("the levels are the island's top row, choosers and all") {
+            // The row of levels is the island's own top row, beside the camera
+            // as the Controls page sets it: volume at the leading edge, the last
+            // level at the trailing edge, and the page starting under it, so no
+            // empty band is left above the sliders.
+            suite.expect(NotchDashboardLayout.showsLevelRow(levels: 2)
+                             && NotchDashboardLayout.showsLevelRow(levels: 1),
+                         "a Mac with a level to show has the row, and the page starts under it")
+            suite.expect(!NotchDashboardLayout.showsLevelRow(levels: 0),
+                         "with every level hidden the island keeps its bare top, and no empty row")
+            // The chooser is the row's own: it is where the output and the
+            // display are picked. A tight row shortens the bar first.
+            suite.expect(NotchDashboardLayout.quickControlNaturalWidth
+                             == NotchDashboardLayout.quickControlMarkWidth + 6
+                                 + NotchDashboardLayout.quickControlBarWidth + 6
+                                 + NotchDashboardLayout.quickControlChooserWidth,
+                         "a level is its mark, its bar and its chooser")
+            suite.expect(NotchDashboardLayout.quickControlBarMinimumWidth
+                             < NotchDashboardLayout.quickControlBarWidth
+                             && NotchDashboardLayout.quickControlChooserWidth > 0,
+                         "the bar narrows before the chooser is dropped")
+            let side = (NotchDashboardLayout.naturalContentWidth - 210) / 2
+            suite.expect(side >= NotchDashboardLayout.quickControlNaturalWidth,
+                         "each side beside this Mac's camera holds a level with its chooser: \(Int(side))pt")
+            suite.expect(NotchDashboardLayout.quickControlMinimumWidth <= 106,
+                         "and a narrow row's side takes a level at its narrowest: "
+                             + "\(Int(NotchDashboardLayout.quickControlMinimumWidth))pt")
         }
 
-        suite.run("menu bar indicators open their detail directly") {
+        suite.run("menu bar indicators open their detail, wherever they land") {
             // A reading in the menu bar is a reading, so its indicator leads to
-            // that reading's detail. What the app's panel is set to open at the
-            // app's own icon is a separate question and does not answer this one.
-            suite.expect(NotchDashboardSupport.menuBarOpensDetail(islandRuns: true, systemPage: true,
-                                                                  metricAvailable: true),
+            // that reading's detail: the island's page when the island can take
+            // the click, the app's panel at the same detail when it cannot. The
+            // panel is never left at the section the reading is one card in,
+            // and what the panel opens at the app's own icon is a separate
+            // question that does not answer this one.
+            suite.expect(NotchDashboardSupport.menuBarRoute(islandRuns: true, systemPage: true,
+                                                            metricAvailable: true) == .islandDetail,
                          "an indicator's click opens the island at its detail")
-            suite.expect(!NotchDashboardSupport.menuBarOpensDetail(islandRuns: false, systemPage: true,
-                                                                   metricAvailable: true),
-                         "an island that is off leaves the click to the menu panel")
-            suite.expect(!NotchDashboardSupport.menuBarOpensDetail(islandRuns: true, systemPage: false,
-                                                                   metricAvailable: true),
-                         "an island with no System page leaves the click to the menu panel")
-            suite.expect(!NotchDashboardSupport.menuBarOpensDetail(islandRuns: true, systemPage: true,
-                                                                   metricAvailable: false),
-                         "a metric the island will not show opens no detail")
+            suite.expect(NotchDashboardSupport.menuBarRoute(islandRuns: false, systemPage: true,
+                                                            metricAvailable: true) == .panelDetail,
+                         "an island that is off takes the click to the panel's detail page")
+            suite.expect(NotchDashboardSupport.menuBarRoute(islandRuns: true, systemPage: false,
+                                                            metricAvailable: true) == .panelDetail,
+                         "an island with no System page takes it to the panel's detail page")
+            suite.expect(NotchDashboardSupport.menuBarRoute(islandRuns: false, systemPage: false,
+                                                            metricAvailable: true) == .panelDetail,
+                         "neither surface ready, the click still lands on a detail page")
+            suite.expect(NotchDashboardSupport.menuBarRoute(islandRuns: true, systemPage: true,
+                                                            metricAvailable: false) == .nothing,
+                         "a metric that is off opens no detail, on either surface")
+            // The panel is a surface of the reading's own: opened at a metric, it
+            // shows that reading's page, which is what one click asks for.
+            suite.expect(NotchDashboardSupport.metricShowsInAppPanel(appPanelOpen: true)
+                             && !NotchDashboardSupport.metricShowsInAppPanel(appPanelOpen: false),
+                         "with the panel on screen the detail is the panel's page")
+            // Why a click did not reach the island, in the log's own words.
+            suite.expect(NotchDashboardSupport.menuBarRouteReason([("island-off", true), ("fullscreen", true)]) == nil,
+                         "a click the island takes has no reason")
+            suite.expect(NotchDashboardSupport.menuBarRouteReason([("island-off", true),
+                                                                   ("fullscreen", false),
+                                                                   ("mission-control", false)])
+                             == "fullscreen,mission-control",
+                         "the log names every condition that sent the click away, in order")
+            suite.expect(NotchDashboardSupport.menuBarRouteReason([("metric-off", false)]) == "metric-off",
+                         "a metric that is off says so by its own name")
             for metric in NotchDashboardMetric.allCases {
                 suite.expect(!metric.detailID.isEmpty, "\(metric.rawValue) leads somewhere")
             }
@@ -271,22 +314,26 @@ enum NotchDashboardTests {
                                                             exploreCount: 7, width: width)
             let busy = NotchDashboardLayout.sectionHeights(activities: cards, calendar: false, metrics: 8,
                                                             exploreCount: 7, width: width)
-            suite.expect(idle.count == 3 && busy.count == 4,
+            suite.expect(idle.count == 2 && busy.count == 3,
                          "one height per section, the activity cards measured only when something runs")
             // A section is its content and nothing else: no label line, no
             // card insets of its own. That is what keeps the island exactly as
-            // tall as the page it holds.
-            suite.expect(idle[0] == NotchDashboardLayout.quickControlsHeight,
-                         "the levels' row is a row, not a card with a caption")
-            suite.expect(idle[1] == NotchDashboardLayout.metricsHeight(tiles: 8),
-                         "the grid is measured at its rows")
-            suite.expect(idle[2] == NotchDashboardLayout.exploreHeight(count: 7, width: width),
+            // tall as the page it holds, with no empty space at its bottom.
+            suite.expect(idle[0] == NotchDashboardLayout.metricsHeight(tiles: 8),
+                         "the grid is measured at its rows, and leads the page when nothing runs")
+            suite.expect(idle[1] == NotchDashboardLayout.exploreHeight(count: 7, width: width),
                          "the sections' marks are measured at their rows")
-            suite.expect(busy[1] == NotchDashboardLayout.liveActivitiesHeight(cards),
+            suite.expect(busy[0] == NotchDashboardLayout.liveActivitiesHeight(cards),
                          "the activity section is measured at its three cards")
+            // The levels are not among the page's heights: they are the island's
+            // top row, which the island's geometry measures with its insets.
+            suite.expect(!NotchDashboardLayout.sectionHeights(activities: cards, calendar: true, metrics: 8,
+                                                              exploreCount: 7, width: width)
+                             .contains(NotchDashboardLayout.quickControlsHeight),
+                         "the page measures no row of levels, so the island adds no row of empty space")
             suite.expect(NotchDashboardLayout.contentHeight(activities: cards, calendar: false, metrics: 8,
                                                              exploreCount: 7, width: width)
-                             == busy.reduce(0, +) + NotchDashboardLayout.sectionSpacing * 3,
+                             == busy.reduce(0, +) + NotchDashboardLayout.sectionSpacing * 2,
                          "the page is its sections and the gaps between them")
             // Each card, player or timer, adds exactly its own height.
             suite.expect(NotchDashboardLayout.liveActivitiesHeight([.player(id: 7)]) + NotchDashboardLayout.cardSpacing
@@ -323,20 +370,27 @@ enum NotchDashboardTests {
 
         suite.run("the sections are laid out as the page was drawn") {
             let width = NotchDashboardLayout.naturalContentWidth
-            // Quick Controls: a compact row of two levels, leading the page,
-            // each a mark and a narrow bar, with room to spare beside them.
+            let side = (width - 210) / 2
+            // Quick Controls: the island's row, one compact level on each side
+            // of the camera, each a mark, a bar and its chooser.
             suite.expect(NotchDashboardLayout.quickControlsHeight >= 24
                              && NotchDashboardLayout.quickControlsHeight <= 34,
                          "the row is tall enough for a slider a pointer can hold, and no taller")
             suite.expect(NotchDashboardLayout.quickControlBarWidth <= 140,
                          "a level's bar stays compact: \(NotchDashboardLayout.quickControlBarWidth)")
-            suite.expect(2 * NotchDashboardLayout.quickControlWidth(width: width)
-                             + NotchDashboardLayout.quickControlsSpacing <= width,
-                         "both levels fit the row side by side, with the row's end left empty")
+            suite.expect(2 * NotchDashboardLayout.quickControlWidth(width: side)
+                             + 210 <= width,
+                         "both levels fit the row, one on each side of the camera")
             // Monitoring: four columns, two rows, each tile a label, a reading
-            // and a meter.
-            suite.expect(NotchDashboardLayout.metricTileHeight >= 44,
-                         "a tile has room for its label, its reading and its meter")
+            // and a meter, read at a glance and not crowded against its edge.
+            suite.expect(NotchDashboardLayout.metricTileHeight >= 70
+                             && NotchDashboardLayout.metricTilePadding == 10,
+                         "a tile has room for its label, its reading and its meter, and one edge")
+            suite.expect(NotchDashboardLayout.activityCardHeight >= 70
+                             && NotchDashboardLayout.activityCardPadding == 10,
+                         "a card is tall enough for its words, its times and its buttons, and one edge")
+            suite.expect(NotchDashboardLayout.activityCardHeight == NotchDashboardLayout.metricTileHeight,
+                         "the player's card and the timer's card are as tall as the grid's tiles, so the page lines up")
             suite.expect(NotchDashboardLayout.metricsHeight(tiles: 8)
                              == NotchDashboardLayout.gridHeight(rows: 2,
                                                                 tileHeight: NotchDashboardLayout.metricTileHeight,

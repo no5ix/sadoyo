@@ -519,14 +519,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
 
     private func showMetricPanel(for metric: MenuBarMetric, anchoredTo button: NSStatusBarButton) {
         let detailKind = metric.detailKind
-        // One click on a menu bar indicator opens the island at that detail,
-        // whether the island is collapsed, closed, or showing something else.
-        // The island answers for its own metric availability, as it always did:
-        // a metric it will not show leaves the island closed.
-        if NotchDashboardSupport.menuBarOpensDetail(islandRuns: NotchService.shared.acceptsSystemFeedback,
-                                                    systemPage: NotchSupport.modules().contains(.system),
-                                                    metricAvailable: true) {
-            NotchService.shared.showMetric(detailKind, toggle: true); return
+        let island = NotchService.shared
+        // One click on a menu bar indicator opens that reading's detail: the
+        // island's page when the island can take the click, the app's panel at
+        // the same detail when it cannot. The route and the island's own
+        // conditions are written down, so a click that lands on the panel says
+        // which state of the island sent it there.
+        let (route, reason) = island.menuBarMetricRoute(for: detailKind)
+        Self.menuBarLog.log("metric \(metric.rawValue, privacy: .public) route=\(route.logName, privacy: .public) blockedBy=\(reason ?? "none", privacy: .public) appPanel=\(NotchSupport.routesAppPanel(), privacy: .public)")
+        if route == .islandDetail, island.showMetric(detailKind, toggle: true) { return }
+        if route == .islandDetail {
+            Self.menuBarLog.log("metric \(metric.rawValue, privacy: .public) island refused the detail; opening the panel's")
+        }
+        if route == .nothing { return }
+        // The panel opens at the reading's own detail page, not at the section
+        // the reading is one card in.
+        if NotchSupport.routesAppPanel(), island.acceptsSystemFeedback {
+            island.openAppPanel(toggle: true, metric: detailKind); return
         }
         if popoverIsOpen {
             if MenuPanelFocus.shared.activeMetric == detailKind {

@@ -738,14 +738,25 @@ enum NotchActivityTests {
             NotchSupport.compactCompanions(of: primary, timer: timer, running: running, downloads: true, agents: true,
                                            calendar: calendar, music: true)
         }
-        suite.expect(companions(of: .timer) == [.downloads, .agents, .calendar, .music],
-                     "a running timer offers every supported pair instead of silently choosing one")
+        suite.expect(companions(of: .timer) == [.music, .downloads, .agents, .calendar],
+                     "a running timer offers every supported pair, the player first, and the strip takes it")
         suite.expect(companions(of: .timer, running: false) == [.downloads],
                      "a paused or finished timer keeps its status mark beside agents, an event or music")
         suite.expect(companions(of: .timer, timer: false).isEmpty && companions(of: .calendar, calendar: false).isEmpty,
                      "an activity that is not showing offers no pair")
-        suite.expect(companions(of: .calendar, running: false) == [.downloads, .agents, .music],
+        suite.expect(companions(of: .calendar, running: false) == [.music, .downloads, .agents],
                      "an event's clock keeps its side beside a download, agents or music, whatever the timer does")
+        // The strip pairs by itself: the person is not asked to choose, and the
+        // player leads, so a song playing is what the closed island shows.
+        suite.expect(NotchSupport.defaultCompanion(of: .timer, companions: companions(of: .timer), chosen: nil) == .music,
+                     "a timer with a player running pairs with the player, unasked")
+        suite.expect(NotchSupport.defaultCompanion(of: .timer, companions: [.downloads, .music], chosen: .music) == .music
+                         && NotchSupport.defaultCompanion(of: .timer, companions: [.music], chosen: .downloads) == .music,
+                     "a pair chosen by hand wins while it is one the activities answer to")
+        suite.expect(NotchSupport.defaultCompanion(of: nil, companions: [.music], chosen: nil) == nil,
+                     "a strip with no activity pairs with nothing")
+        suite.expect(NotchSupport.defaultCompanion(of: .downloads, companions: [], chosen: nil) == nil,
+                     "an activity that supports no pair shows no companion")
         suite.expect([NotchCompactActivity.downloads, .agents, .music].allSatisfy { companions(of: $0).isEmpty },
                      "downloads, agents and music need both wings and cannot lead a pair")
         suite.expect(NotchActivityCombination(primary: .calendar, companion: .music).title(.enUS) == "Music + Calendar"

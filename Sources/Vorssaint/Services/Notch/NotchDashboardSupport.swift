@@ -95,25 +95,32 @@ enum NotchDashboardLayout {
 
     // MARK: Quick Controls
 
-    /// One row of the two levels, each a mark and a bar: the sliders the
-    /// Controls page draws, made compact, and nothing else above the page.
+    /// The levels sit in the island's top row, beside the camera where the
+    /// camera is, as the Controls page puts them there: the first at the row's
+    /// leading edge and the last at its trailing edge. The row is the island's
+    /// own header, so its height is the header's and not one of the page's.
     static let quickControlsHeight: CGFloat = 28
     static let quickControlsSpacing: CGFloat = 14
     /// A level's bar is narrow: the row is a control, not a meter to read. The
-    /// mark that leads it keeps the width the mute button and the sun have.
+    /// mark that leads it keeps the width the mute button and the sun have, and
+    /// the chooser that picks the output or the display keeps the chevron's.
     static let quickControlBarWidth: CGFloat = 122
+    /// A narrow row shortens the bar before it drops the chooser, which is how
+    /// an output is picked and a display chosen from the top of the island.
+    static let quickControlBarMinimumWidth: CGFloat = 56
     static let quickControlMarkWidth: CGFloat = 18
-    /// How many levels sit at the page's leading edge. The first is volume and
-    /// the last is brightness, and the row's middle is the page's own empty
-    /// space, which is what puts the two levels at the two ends of the page.
-    static let quickControlLeadingCount = 1
-    static let quickControlGap: CGFloat = 24
-
-    /// Whether the row's middle is empty: with one level there is nothing to
-    /// push to the far side, and the row is that one control at the leading end.
-    static func hasTrailingGap(levels: Int) -> Bool {
-        levels > quickControlLeadingCount
+    static let quickControlChooserWidth: CGFloat = 16
+    /// The parts of one level, with the gaps the Controls page keeps between them.
+    static var quickControlNaturalWidth: CGFloat {
+        quickControlMarkWidth + 6 + quickControlBarWidth + 6 + quickControlChooserWidth
     }
+    static var quickControlMinimumWidth: CGFloat {
+        quickControlMarkWidth + 6 + quickControlBarMinimumWidth + 6 + quickControlChooserWidth
+    }
+
+    /// A row of levels is the page's top only when the Mac has a level to show:
+    /// with every level hidden the island keeps its bare top, as it did.
+    static func showsLevelRow(levels: Int) -> Bool { levels > 0 }
 
     // MARK: Calendar
 
@@ -131,25 +138,39 @@ enum NotchDashboardLayout {
     static let calendarGridWidth: CGFloat = 176
     static let calendarColumnSpacing: CGFloat = 14
     static let calendarHeaderHeight: CGFloat = 16
-    /// The card's height: the grid, with the month and the day named above it
-    /// in a row that also carries the way through the months.
-    static var calendarCardHeight: CGFloat { calendarHeaderHeight + 6 + calendarGridHeight }
+    static let calendarHeaderGap: CGFloat = 4
+    /// The card's edge to its content, the same on every side: the month's grid
+    /// and the day's appointments sit the same distance from the card's outline.
+    static let calendarCardPadding: CGFloat = 8
+    /// The card is as tall as what it holds: the edge, the month's name, the
+    /// grid, and the edge again. Nothing is left empty at the bottom, and
+    /// nothing of the grid is cut off at the last week.
+    static var calendarCardHeight: CGFloat {
+        calendarCardPadding * 2 + calendarHeaderHeight + calendarHeaderGap + calendarGridHeight
+    }
 
     // MARK: Live Activities
 
     /// A player's card holds its cover, its title, its position and its
     /// transport; a timer's card holds its mark, its phase, its clock and its
-    /// pause. Both are the same height, so two cards of the section line up.
-    static let activityCardHeight: CGFloat = 50
-    static let activityArtwork: CGFloat = 34
+    /// pause. Both are the same height, so two cards of the section line up, and
+    /// the height is the card's own: the words, the times and the buttons are
+    /// read at their own size instead of being crushed into a row of text.
+    static let activityCardHeight: CGFloat = 75
+    static let activityArtwork: CGFloat = 44
+    /// The card's edge to its content, on every side alike.
+    static let activityCardPadding: CGFloat = 10
 
     // MARK: System Monitoring
 
     static let metricColumns: Int = 4
     /// A tile is a label, a value and a meter, so it is taller than a row of
-    /// text: the reading is the tile's own, and a tap opens it.
-    static let metricTileHeight: CGFloat = 50
+    /// text: the reading is the tile's own, and a tap opens it. The tile is
+    /// measured so its value is read at a glance, not crowded against its edge.
+    static let metricTileHeight: CGFloat = 75
     static let metricSpacing: CGFloat = 8
+    /// The tile's edge to its reading, the same on every side.
+    static let metricTilePadding: CGFloat = 10
 
     // MARK: Explore
 
@@ -222,9 +243,13 @@ enum NotchDashboardLayout {
     /// The whole dashboard: every section it shows, its content height, the
     /// gaps between them. The island sizes itself to this, so the page never
     /// scrolls for content that fits the display.
+    /// The page's own sections, in the order it draws them, at their heights.
+    /// The levels are not among them: they are the island's top row, which the
+    /// island's own geometry measures, so the page is as tall as the cards,
+    /// the grid and the circles it holds, and no more.
     static func sectionHeights(activities: [NotchDashboardActivity], calendar: Bool,
                                metrics: Int, exploreCount: Int, width: CGFloat) -> [CGFloat] {
-        var heights: [CGFloat] = [quickControlsHeight]
+        var heights: [CGFloat] = []
         if calendar { heights.append(calendarCardHeight) }
         let live = liveActivitiesHeight(activities)
         if live > 0 { heights.append(live) }
@@ -241,11 +266,37 @@ enum NotchDashboardLayout {
         return sections.reduce(0, +) + sectionSpacing * CGFloat(sections.count - 1)
     }
 
-    /// The volume and brightness sliders share one row, each as wide as its
-    /// bar and its mark, and the row keeps the rest of the page empty.
+    /// What one level takes in the row: its mark, its bar and its chooser. The
+    /// row's side is what the island's geometry gives it beside the camera, so
+    /// the bar takes what is left after the mark and the chooser, down to the
+    /// width it narrows to before the chooser goes.
     static func quickControlWidth(width: CGFloat) -> CGFloat {
-        min(quickControlBarWidth + quickControlMarkWidth + 6,
-            max(0, (width - quickControlsSpacing) / 2))
+        min(quickControlNaturalWidth, max(quickControlMinimumWidth, width))
+    }
+}
+
+/// Where a menu bar indicator's click leads, and why.
+///
+/// A metric in the menu bar is a reading, so its indicator leads to that
+/// reading's detail. The island is the first surface for it. Where the island
+/// cannot take the click, the app's panel opens the same detail, as a page of
+/// its own, and never merely the section the reading sits in: one click on a
+/// reading always lands on that reading.
+enum NotchMenuBarRoute: Equatable {
+    /// The island opens, at the metric's detail.
+    case islandDetail
+    /// The app's panel opens, at the metric's detail.
+    case panelDetail
+    /// Nothing opens: the metric is off, so its indicator has no reading.
+    case nothing
+
+    /// The name the menu bar writes to the log.
+    var logName: String {
+        switch self {
+        case .islandDetail: return "island-detail"
+        case .panelDetail: return "panel-detail"
+        case .nothing: return "none"
+        }
     }
 }
 
@@ -311,16 +362,27 @@ enum NotchDashboardSupport {
         !module && !metric && !appPanel && !sections
     }
 
-    /// A menu bar indicator's click leads straight to its detail, with the
-    /// island collapsed, closed, or showing something else: one click, one
-    /// detail. A metric in the menu bar is a reading, so its indicator leads
-    /// to that reading's detail and not to the app's panel, whatever the panel
-    /// is set to open at. It leads to the panel instead when the island does
-    /// not run or has no System page, and nowhere when the metric itself is
-    /// off, which is how the menu bar item already behaves.
-    static func menuBarOpensDetail(islandRuns: Bool, systemPage: Bool, metricAvailable: Bool) -> Bool {
-        metricAvailable && islandRuns && systemPage
+    /// Where the indicator's click goes: the island's detail when the island
+    /// can take it and has a System page to put the reading on; the app's
+    /// panel, at the same detail, when it cannot; nowhere when the metric
+    /// itself is off, which is how the menu bar item already behaves.
+    static func menuBarRoute(islandRuns: Bool, systemPage: Bool, metricAvailable: Bool) -> NotchMenuBarRoute {
+        guard metricAvailable else { return .nothing }
+        return islandRuns && systemPage ? .islandDetail : .panelDetail
     }
+
+    /// Why a click did not reach the island, in the words the menu bar writes
+    /// to the log: every condition that failed, by the name the island gives
+    /// it. A click that the island takes has no reason, and `nil` says so.
+    static func menuBarRouteReason(_ conditions: [(name: String, passed: Bool)]) -> String? {
+        let failed = conditions.filter { !$0.passed }.map { $0.name }
+        return failed.isEmpty ? nil : failed.joined(separator: ",")
+    }
+
+    /// With the island's panel the surface on screen, the metric's detail is
+    /// the panel's page: the panel reads the focus and shows the reading, and
+    /// the island's own detail page would only sit behind it.
+    static func metricShowsInAppPanel(appPanelOpen: Bool) -> Bool { appPanelOpen }
 
     /// Where the way back from a detail leads: always the dashboard, which is
     /// what the grid sits on.

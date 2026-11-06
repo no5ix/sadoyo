@@ -25,6 +25,7 @@ struct NotchDashboardView: View {
     @ObservedObject private var timer = NotchTimerService.shared
     @ObservedObject private var monitor = SystemMonitor.shared
     @ObservedObject private var sessions = PlaybackSessionsService.shared
+    @Environment(\.notchBand) private var band
     @AppStorage(DefaultsKey.networkSpeedUnit) private var networkSpeedUnit = NetworkSpeedUnit.bytes
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -60,7 +61,6 @@ struct NotchDashboardView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: NotchDashboardLayout.sectionSpacing) {
-            quickControls
             if service.showsDashboardCalendar {
                 calendar
             }
@@ -71,31 +71,25 @@ struct NotchDashboardView: View {
             explore
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
+        // The levels are handed to the island's top row, which draws them
+        // beside the camera: the page starts under them, and the row is filled
+        // by the controls instead of left as an empty band.
+        .notchBand(leading: { bandLevels(side: .leading) }, trailing: { bandLevels(side: .trailing) })
         .accessibilityElement(children: .contain)
         .accessibilityLabel(text.title)
     }
 
     // MARK: - Quick Controls
 
-    /// The levels, on one row: volume and brightness, the Controls page's own
-    /// controls drawn narrow — a mark and a bar each, no chooser, no headings —
-    /// with the rest of the row left empty.
-    private var quickControls: some View {
-        // The levels are the Controls page's own controls, drawn narrow. Volume
-        // sits at the page's leading edge and the last level - brightness where
-        // a Mac can set it - at its trailing edge, with the page's empty middle
-        // between them.
-        let levels = NotchSupport.controls().filter(\.isLevel)
-        return HStack(spacing: NotchDashboardLayout.quickControlsSpacing) {
-            ForEach(Array(levels.enumerated()), id: \.offset) { index, item in
-                NotchLevelControls(item: item, compact: true, service: service)
-                if index == NotchDashboardLayout.quickControlLeadingCount - 1
-                    && NotchDashboardLayout.hasTrailingGap(levels: levels.count) {
-                    Spacer(minLength: NotchDashboardLayout.quickControlGap)
-                }
-            }
+    /// The levels, in the island's top row: the Controls page's own controls,
+    /// drawn narrow with their chooser of the output or the display kept. The
+    /// first sits at the row's leading edge and the last - brightness where a
+    /// Mac can set it - at its trailing edge, which is the row the reference
+    /// draws and the row the Controls page has always drawn.
+    private func bandLevels(side: HorizontalEdge) -> some View {
+        NotchBandLevels(band: band, levels: NotchSupport.controls().filter(\.isLevel), side: side) { item in
+            NotchLevelControls(item: item, compact: true, service: service)
         }
-        .frame(height: NotchDashboardLayout.quickControlsHeight)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(NotchDashboardSection.quickControls.title(l10n.language))
         .accessibilityIdentifier("notch.dashboard.controls")
@@ -139,34 +133,28 @@ struct NotchDashboardView: View {
 
     /// The system's player as a card: its cover, the song beside it with its
     /// position and the two times, and the transport at the card's end. The
-    /// card opens the player's page, where the queue, the lyrics and the
-    /// output are.
+    /// card is driven where it is - the cover, the words and the times are read,
+    /// not pressed - and the player's page is reached from the page's own mark.
     private func nowPlayingCard(_ playback: NotchPlayback) -> some View {
         NotchDashboardCard {
             HStack(spacing: 8) {
-                Button { service.select(.music) } label: {
-                    HStack(spacing: 8) {
-                        NotchArtwork(image: music.artwork, size: NotchDashboardLayout.activityArtwork,
-                                     source: playback.track)
-                        VStack(alignment: .leading, spacing: 0) {
-                            Text(playback.track.title ?? "")
-                                .font(.system(size: 11, weight: .semibold))
-                                .lineLimit(1).truncationMode(.middle)
-                            Text(playback.track.artist ?? "")
-                                .font(.system(size: 10))
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1).truncationMode(.middle)
-                            NotchMusicTimeline(playback: playback, service: music,
-                                               tint: music.artworkTint?.color ?? .white, timesBeside: true)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .contentShape(Rectangle())
+                NotchArtwork(image: music.artwork, size: NotchDashboardLayout.activityArtwork,
+                             source: playback.track)
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(playback.track.title ?? "")
+                        .font(.system(size: 11, weight: .semibold))
+                        .lineLimit(1).truncationMode(.middle)
+                    Text(playback.track.artist ?? "")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1).truncationMode(.middle)
+                    NotchMusicTimeline(playback: playback, service: music,
+                                       tint: music.artworkTint?.color ?? .white, timesBeside: true)
                 }
-                .buttonStyle(NotchButtonStyle(cornerRadius: 8, lifts: false))
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .accessibilityLabel(NotchModule.music.title(l10n.language))
-                .accessibilityValue([playback.track.title, playback.track.artist].compactMap { $0 }.joined(separator: ", "))
-                .accessibilityHint(text.open)
+                .accessibilityValue([playback.track.title, playback.track.artist].compactMap { $0 }
+                    .joined(separator: ", "))
                 NotchMusicTransport(playback: playback, compact: true)
             }
         }
@@ -186,7 +174,12 @@ struct NotchDashboardView: View {
                     Text(session.title ?? session.appName)
                         .font(.system(size: 11, weight: .semibold))
                         .lineLimit(1).truncationMode(.middle)
-                    Text(session.artist ?? session.appName)
+                    // The app is named, and what the card cannot do is said:
+                    // a player whose reading is blocked is shown as blocked,
+                    // never as playing, and never with a song it did not name.
+                    Text(session.needsPermission
+                         ? FeatureStrings.notchMusicExtras(l10n.language).playerPermissionNeeded
+                         : (session.artist ?? session.appName))
                         .font(.system(size: 10))
                         .foregroundStyle(.secondary)
                         .lineLimit(1).truncationMode(.middle)
@@ -260,8 +253,16 @@ struct NotchDashboardView: View {
             Button(l10n.s.permissionOpenSettings) { Permissions.shared.openAutomationSettings() }
                 .buttonStyle(.borderless).font(.system(size: 10, weight: .medium))
         case .unavailable:
-            Button(FeatureStrings.notchMusicExtras(l10n.language).openPlayer) { session.app?.activate(options: [.activateAllWindows]) }
-                .buttonStyle(.borderless).font(.system(size: 10, weight: .medium))
+            // A window player is read and driven through the Accessibility API,
+            // so the card asks for that; a scripted player is driven by its own
+            // dictionary, and the way to it is the app.
+            if session.source == .window {
+                Button(l10n.s.permissionOpenSettings) { Permissions.shared.openAccessibilitySettings() }
+                    .buttonStyle(.borderless).font(.system(size: 10, weight: .medium))
+            } else {
+                Button(FeatureStrings.notchMusicExtras(l10n.language).openPlayer) { session.app?.activate(options: [.activateAllWindows]) }
+                    .buttonStyle(.borderless).font(.system(size: 10, weight: .medium))
+            }
         }
     }
 
@@ -277,28 +278,24 @@ struct NotchDashboardView: View {
         .accessibilityLabel(command.dashboardTitle(FeatureStrings.radialMenu(l10n.language)))
     }
 
-    /// A running timer as a card: its phase, its clock, and the pause that
-    /// holds it. The clock and the phase open the timer's page, where the way
-    /// to start another one is.
+    /// A running timer as a card: its phase, its clock, the pause that holds
+    /// it and the close that ends it. The reading is read, not pressed - the
+    /// card's own buttons drive it - and the Timer page, where another timer is
+    /// started, is reached from the page's own mark.
     private var timerCard: some View {
         NotchDashboardCard {
             HStack(spacing: 8) {
-                Button { service.select(.timer) } label: {
-                    HStack(spacing: 7) {
-                        Image(systemName: timerSymbol)
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(.orange)
-                        Text(phaseTitle)
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(.orange)
-                            .lineLimit(1)
-                        timerClock
-                    }
-                    .contentShape(Rectangle())
+                HStack(spacing: 7) {
+                    Image(systemName: timerSymbol)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(.orange)
+                    Text(phaseTitle)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.orange)
+                        .lineLimit(1)
+                    timerClock
                 }
-                .buttonStyle(NotchButtonStyle(cornerRadius: 8, lifts: false))
                 .accessibilityLabel(phaseTitle)
-                .accessibilityHint(text.open)
                 Spacer(minLength: 0)
                 timerPauseButton
                 // The card's own way out: it ends the session, and asks nothing
@@ -435,7 +432,7 @@ struct NotchDashboardView: View {
                     NotchMeter(value: 0, height: 3)
                 }
             }
-            .padding(EdgeInsets(top: 7, leading: 8, bottom: 7, trailing: 8))
+            .padding(NotchDashboardLayout.metricTilePadding)
             .frame(maxWidth: .infinity, alignment: .leading)
             .frame(height: NotchDashboardLayout.metricTileHeight)
             .modifier(NotchControlSurface(cornerRadius: 10, selected: selected,
@@ -545,7 +542,7 @@ private struct NotchDashboardCard<Content: View>: View {
 
     var body: some View {
         content()
-            .padding(.horizontal, 8)
+            .padding(NotchDashboardLayout.activityCardPadding)
             .frame(maxWidth: .infinity, alignment: .leading)
             .frame(height: height)
             .modifier(NotchControlSurface(cornerRadius: NotchDashboardLayout.cornerRadius,
@@ -595,7 +592,7 @@ private struct NotchDashboardCalendarCard: View {
                     permission
                 }
             }
-            .padding(EdgeInsets(top: 5, leading: 8, bottom: 5, trailing: 8))
+            .padding(NotchDashboardLayout.calendarCardPadding)
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .frame(height: NotchDashboardLayout.calendarCardHeight)
@@ -613,7 +610,7 @@ private struct NotchDashboardCalendarCard: View {
 
     private var content: some View {
         HStack(alignment: .top, spacing: NotchDashboardLayout.calendarColumnSpacing) {
-            VStack(alignment: .leading, spacing: 1) {
+            VStack(alignment: .leading, spacing: NotchDashboardLayout.calendarHeaderGap) {
                 header
                 NotchCalendarMonthGrid(month: focus, selectedDay: selectedDay, now: now,
                                        height: NotchDashboardLayout.calendarGridHeight,

@@ -49,6 +49,14 @@ struct NotchPlaybackSession: Identifiable, Equatable {
     var icon: NSImage? { app?.icon }
     var isPlaying: Bool { state == .playing }
 
+    /// The player is known - its process runs and it is a player that the page
+    /// can drive - and its state is not readable, because macOS has not granted
+    /// the automation of the app, or the reading of its window. A card is kept
+    /// for such a player: it names the app, says that the reading is blocked,
+    /// and carries the way to grant it. The state is never guessed at, so a
+    /// player whose state is unknown is not shown as playing.
+    var needsPermission: Bool { state == .unknown && access != .granted }
+
     /// The song's position, only when the player answered with both ends of it.
     var fraction: Double? {
         guard let elapsed, let duration, duration > 0, elapsed >= 0, elapsed <= duration * 1.05 else { return nil }
@@ -136,13 +144,16 @@ enum PlaybackSessionsSupport {
     }
 
     /// The cards the Live Activities section draws: the system's own player
-    /// first, when it has one, then every other player that says it is playing,
-    /// in the order they were found. Nothing is capped at one: three players
-    /// playing at once are three cards.
+    /// first, when it has one, then every other player that says it is playing
+    /// or that the page cannot read without a permission, in the order they
+    /// were found. Nothing is capped at one: three players playing at once are
+    /// three cards, and a player that is waiting for permission is a card of
+    /// its own, because a card that is not drawn cannot be asked for it.
+    /// A player that says it is paused, stopped, and answers, has no card.
     static func cardPlayerIDs(primary: Int?, sessions: [NotchPlaybackSession], now: Date = Date()) -> [Int] {
         var ids: [Int] = []
         if let primary { ids.append(primary) }
-        ids += sessions.filter { $0.isPlaying && !isStale(updated: $0.updated, now: now) }
+        ids += sessions.filter { ($0.isPlaying || $0.needsPermission) && !isStale(updated: $0.updated, now: now) }
             .map { Int($0.pid) }
             .filter { $0 != primary }
         return ids

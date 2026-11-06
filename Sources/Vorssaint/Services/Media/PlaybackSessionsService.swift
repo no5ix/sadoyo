@@ -98,12 +98,8 @@ final class PlaybackSessionsService: ObservableObject {
     private func poll() {
         generation &+= 1
         let now = Date()
-        // A player with no scripting dictionary is read from its window, which
-        // is the Accessibility API's work, and the permission for that belongs
-        // to this application.
-        let trusted = AXIsProcessTrusted()
         let frontmost = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
-        let candidates = runningPlayers(in: frontmost, accessibility: trusted)
+        let candidates = runningPlayers(in: frontmost)
         DispatchQueue.main.async { [weak self] in self?.players = candidates }
         var readings: [NotchPlaybackSession] = []
         for player in candidates {
@@ -122,9 +118,13 @@ final class PlaybackSessionsService: ObservableObject {
     /// The applications that play, as few as the page can show at once: the
     /// ones that declare a player in their own scripting dictionary, and the
     /// music applications that declare no dictionary and are read from the
-    /// window they draw. The application in front is kept even when it has not
-    /// agreed to be read, because its card is the way to ask.
-    private func runningPlayers(in frontmost: String?, accessibility: Bool) -> [Player] {
+    /// window they draw.
+    ///
+    /// A player is listed whether or not it can be read yet. macOS asks its own
+    /// permission for automating an app and for reading a window, and neither
+    /// answer is a reason to hide the player: the card is where the permission
+    /// is asked for, and a player that was never drawn cannot be asked.
+    private func runningPlayers(in frontmost: String?) -> [Player] {
         let own = ProcessInfo.processInfo.processIdentifier
         let primary = NotchMusicService.shared.playback?.track.appPID
         var found: [Player] = []
@@ -150,8 +150,7 @@ final class PlaybackSessionsService: ObservableObject {
                                                                     in: capabilities.properties),
                     duration: PlaybackSessionsSupport.firstProperty(PlaybackSessionsSupport.durationNames,
                                                                     in: capabilities.properties)))
-            } else if accessibility,
-                      AccessibilityPlayerSupport.isWindowPlayer(
+            } else if AccessibilityPlayerSupport.isWindowPlayer(
                         category: AccessibilityPlayerSupport.category(bundleURL: url),
                         scripted: scripted.contains(bundleID), isPrimary: false) {
                 // A player with no dictionary is read through its window: the
@@ -190,7 +189,11 @@ final class PlaybackSessionsService: ObservableObject {
             // The player's own window: its transport control and the words it
             // carries. What the window does not say, the card does not show.
             guard let reading = AccessibilityPlayerReader.read(pid: player.pid) else {
+                // Nothing was read: the window's reading belongs to the
+                // Accessibility API, and the permission is this application's.
+                // The card keeps the app's name and the way to the setting.
                 session.state = .unknown
+                session.access = .unavailable
                 return session
             }
             session.state = reading.state

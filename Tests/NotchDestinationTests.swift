@@ -42,7 +42,9 @@ enum NotchDestinationContract {
         static let shared = Focus()
         final class Focus {
             var normalRequests = 0
+            var metricRequests: [String] = []
             func showNormalPanel() { normalRequests += 1 }
+            func focus(_ metric: MetricDetailKind) { metricRequests.append(metric.rawValue) }
         }
     }
     final class Timer {

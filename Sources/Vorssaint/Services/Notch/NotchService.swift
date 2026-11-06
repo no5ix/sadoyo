@@ -633,10 +633,18 @@ final class NotchService: ObservableObject {
     }
 
     /// A single activity never borrows another activity's wing implicitly.
+    /// The closed strip's companion. Nothing is asked of the person: the strip
+    /// takes the first companion the running activities answer to, and the
+    /// player leads that list, so a song playing beside a timer is drawn on the
+    /// strip's leading side while the timer keeps its clock on the trailing.
+    /// A pair chosen by hand, where one is chosen, keeps its place.
     var compactCompanion: NotchCompactActivity? {
-        guard let activity = compactActivity, activity == activitySelection.preferred else { return nil }
-        return activitySelection.companion(available: compactCompanions(of: activity))
+        guard let activity = compactActivity else { return nil }
+        return NotchSupport.defaultCompanion(of: activity,
+                                             companions: compactCompanions(of: activity),
+                                             chosen: activitySelection.companion(available: compactCompanions(of: activity)))
     }
+
 
     private var compactActivityIsVisible: Bool {
         !fullscreenCompact && !expanded && !peeking && !dragPlaceholder && notice == nil && captureControls == nil
@@ -1004,9 +1012,12 @@ final class NotchService: ObservableObject {
         // width, and lead their row with their own way back instead of the
         // sections.
         if showsDashboard {
-            // The dashboard is one page of sections and nothing above them:
-            // the sliders are the page's top, so no row of buttons is added.
-            result.pageTop = .none
+            // The dashboard's top is the row of levels: volume at the row's
+            // leading edge and the last level at its trailing, beside the
+            // camera where the camera is, as the Controls page sets them. The
+            // page starts below that row, so no empty band is left above it.
+            result.pageTop = NotchDashboardLayout.showsLevelRow(
+                levels: NotchSupport.controls().filter(\.isLevel).count) ? .row : .none
             result.pageContentWidth = min(NotchDashboardLayout.naturalContentWidth, geometry.contentWidth)
             result.sectionsButtonInRow = false
         } else if !showingSections, !showingAppPanel, selectedMetric == nil, !modules.isEmpty {
@@ -2041,8 +2052,18 @@ final class NotchService: ObservableObject {
         return true
     }
 
-    func openAppPanel(toggle: Bool = false) {
+    /// The app's panel, at the normal page or at one reading's detail. Opened
+    /// at a reading, the panel is asked for that detail: the panel reads the
+    /// focus and shows the reading as a page of its own, so a click on a
+    /// reading never lands on the section the reading sits in.
+    func openAppPanel(toggle: Bool = false, metric: MetricDetailKind? = nil) {
         if toggle, expanded, showingAppPanel, !showingSections, !showingCommandBar { collapse(); return }
+        if let metric {
+            MenuPanelFocus.shared.focus(metric)
+            open(.system, appPanel: true, metric: metric)
+            if toggle { detailHasPage = false }
+            return
+        }
         MenuPanelFocus.shared.showNormalPanel()
         open(.controls, appPanel: true)
         // The toggling route is the menu bar's. Opened from there, the panel
@@ -2064,13 +2085,43 @@ final class NotchService: ObservableObject {
         return true
     }
 
-    func showMetric(_ metric: MetricDetailKind, toggle: Bool = false) {
-        guard metricIsAvailable(metric) else { return }
+    /// Opens the island at one reading's detail. Answers whether it did: a
+    /// metric that is off, an island that cannot present, and a toggle that
+    /// closes an open detail are each told to the caller, so a menu bar
+    /// indicator's click always lands on a detail page somewhere.
+    @discardableResult
+    func showMetric(_ metric: MetricDetailKind, toggle: Bool = false) -> Bool {
+        guard metricIsAvailable(metric) else { return false }
         if metric != selectedMetric { forgetDetailHeight() }
-        if toggle, expanded, selectedMetric == metric, !showingSections, !showingCommandBar { collapse(); return }
+        if toggle, expanded, selectedMetric == metric, !showingSections, !showingCommandBar { collapse(); return true }
         open(.system, metric: metric)
         // A metric opened from its menu bar item closes on Escape, like the popover.
         if toggle { detailHasPage = false }
+        // The answer is what the island did: `open` keeps its own guards, and a
+        // click that did not land on the reading is reported, so the menu bar
+        // can take the click to the panel's detail page instead.
+        return expanded && selectedMetric == metric
+    }
+
+    /// Where one click on a metric's menu bar indicator goes, and the names of
+    /// the island's conditions that failed when it does not go there. The
+    /// menu bar writes this to the log, so a click that lands on the panel
+    /// says which of the island's own states sent it there.
+    func menuBarMetricRoute(for metric: MetricDetailKind) -> (route: NotchMenuBarRoute, reason: String?) {
+        let systemPage = NotchSupport.modules().contains(.system)
+        let available = metricIsAvailable(metric)
+        let conditions: [(name: String, passed: Bool)] = [
+            ("metric-off", available),
+            ("system-page-off", systemPage),
+            ("island-off", running),
+            ("island-suspended", !suspended),
+            ("island-window", panel != nil),
+            ("mission-control", windowHost?.isConcealedForMissionControl != true),
+            ("fullscreen", !hiddenInFullscreen),
+        ]
+        let route = NotchDashboardSupport.menuBarRoute(islandRuns: acceptsSystemFeedback,
+                                                       systemPage: systemPage, metricAvailable: available)
+        return (route, NotchDashboardSupport.menuBarRouteReason(conditions))
     }
 
     /// Fan Control is a single card, so its detail fits the card instead of

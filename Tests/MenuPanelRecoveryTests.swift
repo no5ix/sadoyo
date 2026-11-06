@@ -148,16 +148,46 @@ enum MenuPanelRecoveryTests {
         func setMicBadgeHeld(_ value: Bool) { held = value }
     }
     typealias MetricDetailKind = String
-    struct MenuBarMetric { let detailKind: String }
+    struct MenuBarMetric {
+        let detailKind: String
+        var rawValue: String { detailKind }
+    }
+    enum MenuBarRoute {
+        case islandDetail, panelDetail, nothing
+        var logName: String {
+            switch self {
+            case .islandDetail: return "island-detail"
+            case .panelDetail: return "panel-detail"
+            case .nothing: return "none"
+            }
+        }
+    }
     enum Module { case system }
     enum NotchSupport {
-        static func routesAppPanel() -> Bool { false }
+        static var routesPanel = false
+        static func routesAppPanel() -> Bool { routesPanel }
         static func modules() -> [Module] { [] }
     }
     final class NotchService {
-        static let shared = NotchService()
+        static var shared = NotchService()
         var acceptsSystemFeedback = false
-        func showMetric(_ metric: String, toggle: Bool) {}
+        /// The metric's own switch, as it is off when a reading is not shown.
+        var metricAvailable = true
+        /// Whether the island answers that it opened the reading's detail.
+        var islandOpens = true
+        var metricOpens: [String] = []
+        var appPanelOpens: [String] = []
+        /// The production rule, read as the panel reads it: the island takes the
+        /// click while it accepts system feedback, and the panel takes it, at the
+        /// same detail, when it does not.
+        func menuBarMetricRoute(for metric: String) -> (route: MenuBarRoute, reason: String?) {
+            guard metricAvailable else { return (.nothing, "metric-off") }
+            return acceptsSystemFeedback ? (.islandDetail, nil) : (.panelDetail, "island-off")
+        }
+        @discardableResult func showMetric(_ metric: String, toggle: Bool) -> Bool {
+            metricOpens.append(metric); return islandOpens
+        }
+        func openAppPanel(toggle: Bool, metric: String) { appPanelOpens.append(metric) }
     }
     final class MenuPanelFocus {
         static var shared = MenuPanelFocus()
@@ -287,6 +317,7 @@ enum MenuPanelRecoveryTests {
             DispatchQueue.main = Queue(); NotificationCenter.default = Center(); NSAnimationContext.completions = []
             NSScreen.screens = [NSScreen()]; NSApp = Application(); NSWorkspace.shared = NSWorkspace()
             MenuPanelFocus.shared = MenuPanelFocus(); SystemMonitor.shared = SystemMonitor()
+            NotchService.shared = NotchService(); NotchSupport.routesPanel = false
             ProcessUsageService.shared = ProcessUsageService(); PanelInteractionState.shared = PanelInteractionState()
             let host = Host()
             if corrected {
@@ -622,6 +653,64 @@ enum MenuPanelRecoveryTests {
             expect(!host.popover.isShown && !host.monitors && !host.popoverIsClosing,
                    "a reanchored metric still closes on its second click or pending fade \(fading)")
         }
+        // Where one click on a reading's menu bar indicator lands: the island's
+        // detail page first, the panel's own page for the same reading where the
+        // island cannot take the click, and never the section the reading is one
+        // card in. The reason for the fallback goes to the log.
+        do {
+            let host = setup(present: false)
+            NotchService.shared.acceptsSystemFeedback = true
+            let focused = MenuPanelFocus.shared.activeMetric
+            host.showMetricPanel(for: MenuBarMetric(detailKind: "memory"), anchoredTo: host.statusController.button!)
+            expect(NotchService.shared.metricOpens == ["memory"] && !host.popover.isShown
+                   && MenuPanelFocus.shared.activeMetric == focused,
+                   "an island that runs opens its own detail for the indicator's reading, and no panel")
+        }
+        do {
+            let host = setup(present: false)
+            host.showMetricPanel(for: MenuBarMetric(detailKind: "disk"), anchoredTo: host.statusController.button!)
+            expect(NotchService.shared.metricOpens.isEmpty && host.popover.isShown
+                   && MenuPanelFocus.shared.activeMetric == "disk",
+                   "an island that is off opens the panel at the reading's own detail page")
+        }
+        do {
+            let host = setup(present: false)
+            NotchService.shared.acceptsSystemFeedback = true
+            NotchService.shared.islandOpens = false
+            host.showMetricPanel(for: MenuBarMetric(detailKind: "memory"), anchoredTo: host.statusController.button!)
+            expect(NotchService.shared.metricOpens == ["memory"] && host.popover.isShown
+                   && MenuPanelFocus.shared.activeMetric == "memory",
+                   "a detail the island refused is opened in the panel by the same click")
+        }
+        do {
+            // The app's panel set to open at the island: a refused click opens
+            // that panel at the reading, not at the section the reading sits in.
+            let host = setup(present: false)
+            NotchSupport.routesPanel = true
+            NotchService.shared.acceptsSystemFeedback = true
+            NotchService.shared.islandOpens = false
+            host.showMetricPanel(for: MenuBarMetric(detailKind: "memory"), anchoredTo: host.statusController.button!)
+            expect(NotchService.shared.appPanelOpens == ["memory"] && !host.popover.isShown,
+                   "the island's panel opens at the reading's detail page")
+        }
+        do {
+            let host = setup(present: false)
+            NotchService.shared.metricAvailable = false
+            let focused = MenuPanelFocus.shared.activeMetric
+            host.showMetricPanel(for: MenuBarMetric(detailKind: "fan"), anchoredTo: host.statusController.button!)
+            expect(!host.popover.isShown && NotchService.shared.metricOpens.isEmpty
+                   && MenuPanelFocus.shared.activeMetric == focused && NotchService.shared.appPanelOpens.isEmpty,
+                   "a reading that is off opens no detail on either surface")
+        }
+        do {
+            let host = setup(present: false)
+            let start = Host.menuBarLog.messages.count
+            host.showMetricPanel(for: MenuBarMetric(detailKind: "memory"), anchoredTo: host.statusController.button!)
+            let lines = Host.menuBarLog.messages.dropFirst(start).filter { $0.hasPrefix("metric memory route=") }
+            expect(lines.count == 1 && lines.first?.contains("route=panel-detail") == true
+                   && lines.first?.contains("blockedBy=island-off") == true,
+                   "the click writes the route it took and the island's condition to the log")
+        }
         for reopening in [false, true] {
             let host = setup(present: reopening)
             if reopening { host.closePopoverNow(animated: false, reason: .escape, completion: nil) }
@@ -887,6 +976,7 @@ enum MenuPanelRecoveryTests {
             DispatchQueue.main = Queue(); NotificationCenter.default = Center(); NSAnimationContext.completions = []
             NSScreen.screens = [NSScreen()]; NSApp = Application(); NSWorkspace.shared = NSWorkspace()
             MenuPanelFocus.shared = MenuPanelFocus(); SystemMonitor.shared = SystemMonitor()
+            NotchService.shared = NotchService(); NotchSupport.routesPanel = false
             ProcessUsageService.shared = ProcessUsageService(); PanelInteractionState.shared = PanelInteractionState()
             let host = Host()
             host.showPopover(animate: false, activate: false)

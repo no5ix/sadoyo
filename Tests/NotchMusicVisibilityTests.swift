@@ -389,17 +389,17 @@ enum NotchMusicVisibilityTests {
         service.hasTimerActivity = true
         service.hasDownloadActivity = true
         suite.expect(service.compactActivity == .timer, "Nothing for resting music preserves a running timer")
-        service.timerCompanions = [.downloads]
+        service.timerCompanions = [.music, .downloads]
         service.activitySelection.select(.timer, available: service.compactActivities)
-        suite.expect(service.compactCompanion == nil,
-                     "the production Timer selection does not borrow the active download wing")
+        suite.expect(service.compactCompanion == .music,
+                     "the strip pairs by itself, with the player first, and asks nothing of the person")
         service.activitySelection.select(.timer, companion: .downloads,
-                                         available: service.compactActivities, companions: [.downloads])
+                                         available: service.compactActivities, companions: [.music, .downloads])
         suite.expect(service.compactCompanion == .downloads,
-                     "the production strip shows only the explicitly selected companion")
+                     "a pair chosen by hand keeps its place in the production strip")
         service.activitySelection.select(.timer, available: service.compactActivities)
-        suite.expect(service.compactCompanion == nil,
-                     "choosing Timer again removes the explicit pair in the production strip")
+        suite.expect(service.compactCompanion == .music,
+                     "choosing Timer again returns the strip to the pair the activities answer to")
         service.activitySelection = NotchActivitySelection()
         service.hasTimerActivity = false
         suite.expect(service.compactActivity == .downloads, "Nothing for resting music preserves active downloads")
