@@ -249,30 +249,149 @@ enum NotchDashboardTests {
                          "the section and the detail share one way back")
         }
 
-        suite.run("the page gives way in its grid, not in its sections") {
+        suite.run("the island grows by the card, and every section stays on the page") {
             let width = NotchDashboardLayout.naturalContentWidth
-            let activities: [NotchDashboardActivity] = [.player(id: 7), .player(id: 9), .timer]
-            func page(_ tiles: Int) -> CGFloat {
-                NotchDashboardLayout.contentHeight(activities: activities, calendar: true, metrics: tiles,
-                                                   exploreCount: 7, width: width, primaryPlayerID: 7)
+            let tiles = 8
+            func height(_ players: Int, timer: Bool) -> CGFloat {
+                var activities: [NotchDashboardActivity] = (0..<players).map { .player(id: 7 + $0) }
+                if timer { activities.append(.timer) }
+                return NotchDashboardLayout.contentHeight(activities: activities, calendar: true,
+                                                           metrics: tiles, exploreCount: 7, width: width,
+                                                           primaryPlayerID: players > 0 ? 7 : nil)
             }
-            func fit(_ available: CGFloat) -> Int {
-                NotchDashboardLayout.tilesFittingPage(activities: activities, calendar: true, tiles: 8,
-                                                      exploreCount: 7, width: width, available: available,
-                                                      primaryPlayerID: 7)
+            let bare = height(0, timer: false)
+            let one = height(1, timer: false)
+            let two = height(2, timer: false)
+            let three = height(3, timer: false)
+            // A card is a card: each player adds exactly its own height and the
+            // gap, so the page - and the island that measures it - grows by that.
+            suite.expect(one - bare == NotchDashboardLayout.activityCardHeight + NotchDashboardLayout.sectionSpacing,
+                         "one player adds the player's card and the section: one=\(one) bare=\(bare)")
+            suite.expect(two - one == NotchDashboardLayout.playerCardHeight + NotchDashboardLayout.cardSpacing,
+                         "a second player adds its own row inside the section")
+            suite.expect(three - two == NotchDashboardLayout.playerCardHeight + NotchDashboardLayout.cardSpacing,
+                         "a third player adds its own row, and the page keeps growing")
+            suite.expect(height(3, timer: true) - three
+                             == NotchDashboardLayout.timerCardHeight + NotchDashboardLayout.cardSpacing,
+                         "the timer adds its own card beside the players")
+            // The grid is measured whole at every size: the page never trims the
+            // readings to make room for a player.
+            suite.expect(NotchDashboardLayout.metricsHeight(tiles: tiles)
+                             == NotchDashboardLayout.gridHeight(rows: 2,
+                                                                tileHeight: NotchDashboardLayout.metricTileHeight,
+                                                                spacing: NotchDashboardLayout.metricSpacing),
+                         "eight readings are two rows of four, whatever the players are")
+            suite.expect(height(3, timer: true) >= bare
+                             + NotchDashboardLayout.metricsHeight(tiles: tiles)
+                             + NotchDashboardLayout.exploreHeight(count: 7, width: width),
+                         "the page holds the grid and the sections on top of the players")
+            // A built-in display holds the fullest page, so nothing of it is
+            // left under a scroll.
+            suite.expect(three <= NotchDashboardLayout.maxPageHeight(screenHeight: 1084)
+                             && height(3, timer: true) <= NotchDashboardLayout.maxPageHeight(screenHeight: 1084),
+                         "the month, three players, the timer, the grid and the sections fit a built-in display: \(height(3, timer: true))")
+        }
+
+        suite.run("the island's dashboard height follows the page, not the preset") {
+            let screen = CGRect(x: 0, y: 0, width: 1728, height: 1117)
+            func geometry(_ preset: NotchSize, height custom: Double = 320) -> NotchGeometry {
+                NotchGeometry(screen: screen, safeAreaTop: 32, cameraWidth: 200,
+                              layout: preset, customHeight: custom)
             }
-            suite.expect(fit(page(8)) == 8,
-                         "an island tall enough for the page keeps every reading on it")
-            suite.expect(fit(page(4)) == 4,
-                         "a row short costs a row of readings, and nothing else")
-            suite.expect(fit(page(0)) == 0,
-                         "with no room for the grid the page draws none of it, and keeps the sections")
-            suite.expect(fit(page(8) - 6) == 4,
-                         "a little too little room costs the grid's second row, not the month")
-            suite.expect(fit(24) == -1,
-                         "an island that holds no page at all says so, and the page scrolls")
-            suite.expect(fit(NotchDashboardLayout.maxPageHeight(screenHeight: 1084)) == 8,
-                         "on a built-in display the page keeps all eight readings and ends at the sections")
+            let small = geometry(.custom, height: 220)
+            let wide = geometry(.spacious)
+            let one: CGFloat = 420
+            let three: CGFloat = 640
+            let oneSize = small.dashboardSize(content: one, width: 568)
+            let threeSize = small.dashboardSize(content: three, width: 568)
+            suite.expect(threeSize.height > oneSize.height,
+                         "the island grows when the page does, at a preset height of its own")
+            suite.expect(oneSize.height == one + small.headerTopInset + small.headerChromeHeight
+                             && threeSize.height == three + small.headerTopInset + small.headerChromeHeight,
+                         "the island is the page, its header, and nothing else")
+            // The display is the only ceiling, and the page scrolls below it.
+            let tall = small.dashboardSize(content: 4000, width: 568)
+            suite.expect(tall.height == 1117 - 48 - small.quickAccessBottomInset,
+                         "the display bounds the island, which is where the page starts to scroll")
+            suite.expect(small.dashboardContentLimit == tall.height - small.headerTopInset - small.headerChromeHeight,
+                         "the page's own limit is that island less its header")
+            let wideOne = wide.dashboardSize(content: one, width: 568)
+            let wideThree = wide.dashboardSize(content: three, width: 568)
+            suite.expect(wideThree.height - wideOne.height == three - one
+                             && wideThree.height > 220,
+                         "the preset does not set the page's ceiling: its content does, on every preset")
+        }
+
+        suite.run("a player's control goes to that player, and to no other") {
+            // The player in effect is answered at once; a player that is not is
+            // chosen first and the command is carried to it alone; a player the
+            // adapter does not report is refused, so a stale card sends nothing.
+            suite.expect(NotchDashboardSupport.playerCommand(sourcePID: 7, inEffectPID: 7, reported: true) == .send,
+                         "the player in effect is sent the command in its own context")
+            suite.expect(NotchDashboardSupport.playerCommand(sourcePID: 9, inEffectPID: 7, reported: true) == .selectFirst,
+                         "another player is chosen first, and only then sent the command")
+            suite.expect(NotchDashboardSupport.playerCommand(sourcePID: 9, inEffectPID: 7, reported: false) == .refuse,
+                         "a player the adapter no longer reports is sent nothing")
+            suite.expect(NotchDashboardSupport.playerCommand(sourcePID: -1, inEffectPID: -1, reported: true) == .refuse,
+                         "a card without a process is sent nothing")
+        }
+
+        suite.run("a card's mark opens the app that plays") {
+            // A process that runs is brought forward, so no second copy of the
+            // app is started; an app the adapter names is opened by that name.
+            suite.expect(NotchDashboardSupport.appOpening(pid: 7, isRunning: true,
+                                                          bundleIdentifier: "com.spotify.client") == .activate(pid: 7),
+                         "a running player is activated, not launched again")
+            suite.expect(NotchDashboardSupport.appOpening(pid: 7, isRunning: false,
+                                                          bundleIdentifier: "com.netease.163music")
+                             == .open(bundleIdentifier: "com.netease.163music"),
+                         "a player whose process went is opened by the bundle the adapter named")
+            suite.expect(NotchDashboardSupport.appOpening(pid: -1, isRunning: false, bundleIdentifier: nil) == .none,
+                         "a card that names no app asks for nothing")
+            suite.expect(NotchDashboardSupport.appOpening(pid: 7, isRunning: false, bundleIdentifier: "") == .none,
+                         "an empty bundle name is not a way to an app")
+        }
+
+        suite.run("the timer's pause and close are one control") {
+            suite.expect(NotchDashboardLayout.timerControlSide == 28
+                             && NotchDashboardLayout.timerControlCorner == 9,
+                         "the timer's controls share a box and a corner: both drawn by one builder")
+            // The card is the two controls and the clock, at one edge on every
+            // side: its height is the edge, the control, and the edge again.
+            suite.expect(NotchDashboardLayout.timerCardHeight
+                             == NotchDashboardLayout.activityCardPadding * 2
+                             + NotchDashboardLayout.activityArtwork - 12,
+                         "the timer's card is measured to its content, not padded at the top")
+            suite.expect(NotchDashboardLayout.timerControlSide <= NotchDashboardLayout.timerCardHeight
+                             - 2 * NotchDashboardLayout.activityCardPadding,
+                         "the controls sit inside the card's own edge")
+        }
+
+        suite.run("the page keeps its readings and its sections whatever runs") {
+            let width = NotchDashboardLayout.naturalContentWidth
+            let grid = NotchDashboardLayout.metricsHeight(tiles: 8)
+            let sections = NotchDashboardLayout.exploreHeight(count: 7, width: width)
+            func rows(_ activities: [NotchDashboardActivity]) -> [CGFloat] {
+                NotchDashboardLayout.sectionHeights(activities: activities, calendar: true, metrics: 8,
+                                                    exploreCount: 7, width: width, primaryPlayerID: 7)
+            }
+            let none = rows([])
+            let one = rows([.player(id: 7)])
+            let many = rows([.player(id: 7), .player(id: 9), .player(id: 11), .timer])
+            for (name, heights) in [("nothing running", none), ("one player", one), ("three players", many)] {
+                suite.expect(heights.contains(grid), "the whole grid of readings is on the page: \(name)")
+                suite.expect(heights.contains(sections), "the way to the sections is on the page: \(name)")
+                suite.expect(heights.first == NotchDashboardLayout.calendarCardHeight,
+                             "the month leads the page: \(name)")
+                suite.expect(heights.last == sections, "the page ends at the sections, at every size: \(name)")
+            }
+            // The players add their own section; the month, the grid and the way
+            // to the sections are the page at every size.
+            suite.expect(many.count == none.count + 1
+                             && one.count == none.count + 1,
+                         "the players add one section between the month and the grid, at every count")
+            suite.expect(many.first == none.first && many.last == none.last,
+                         "the month leads and the sections close the page, with three players as with none")
         }
 
         suite.run("the page's players are the players the system reports") {

@@ -907,29 +907,15 @@ final class NotchService: ObservableObject {
         min(NotchDashboardLayout.naturalContentWidth, expandedGeometry.contentWidth)
     }
 
-    /// The readings the page draws, so that the page fits the island: all of
-    /// them where there is room, then one row, then none - the grid gives way
-    /// before the month, the players, the timer and the way to the sections do,
-    /// and the System page still draws every one of them.
-    var dashboardMetricTiles: Int {
-        let tiles = NotchSupport.systemCardCount(hasBattery: PowerSampler.hasInternalBattery,
-                                                 fans: SystemMonitor.shared.snapshot.fanSpeeds.count)
-        return NotchDashboardLayout.tilesFittingPage(activities: dashboardActivities,
-                                                     calendar: showsDashboardCalendar,
-                                                     tiles: tiles,
-                                                     exploreCount: filteredSections.count,
-                                                     width: dashboardContentWidth,
-                                                     available: expandedGeometry.dashboardContentLimit,
-                                                     primaryPlayerID: dashboardPrimaryPlayerID)
-    }
-
     /// What the page measures, which the island grows to hold. The grid's count
     /// is the System page's own count, so the page and the island agree on the
     /// tiles without the service reading the monitor's snapshot twice.
     var dashboardContentHeight: CGFloat {
         NotchDashboardLayout.contentHeight(activities: dashboardActivities,
                                            calendar: showsDashboardCalendar,
-                                           metrics: max(0, dashboardMetricTiles),
+                                           metrics: NotchSupport.systemCardCount(
+                                            hasBattery: PowerSampler.hasInternalBattery,
+                                            fans: SystemMonitor.shared.snapshot.fanSpeeds.count),
                                            exploreCount: filteredSections.count,
                                            width: dashboardContentWidth,
                                            primaryPlayerID: dashboardPrimaryPlayerID)

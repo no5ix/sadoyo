@@ -2102,6 +2102,11 @@ def main():
           + declaration(music, "    private func receive(").replace("private func", "func", 1)
           + declaration(music, "    private func endPlaybackGap()").replace("private func", "func", 1)
           + declaration(music, "    private func apply(").replace("private func", "func", 1)
+          # A card's control aimed at one player: the rule that chooses it first
+          # and carries the command to the reading that names it.
+          + "var pendingCommand: (command: Command, pid: Int32)?\n"
+          + declaration(music, "    private func flushPendingCommand()").replace("private func", "func", 1)
+          + declaration(music, "    func requestCommand(")
           + declaration(music, "    func seek(")
           + declaration(music, "    func selectSource(")
           + declaration(music, "    func send(_ command: Command)").replace("    func", "    @discardableResult\n    func", 1)

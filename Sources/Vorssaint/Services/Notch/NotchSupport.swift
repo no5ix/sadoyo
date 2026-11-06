@@ -2839,18 +2839,26 @@ struct NotchGeometry: Equatable {
         return CGSize(width: expandedWidth, height: min(desiredHeight, screen.height - 48 - quickAccessBottomInset))
     }
 
-    /// The open island holding the one-page dashboard: the sections the page
-    /// measures, at the width the page lays them out at. A chosen height stays the island's limit and
-    /// the display bounds it, as every page's height does; the page scrolls
-    /// where the dashboard does not fit, as a page taller than the island does.
+    /// The open island holding the one-page dashboard, at the height the page's
+    /// own sections measure: every card the page draws - the month, one card per
+    /// player, the timer, the readings, the way to the sections - is in that
+    /// height, so the island grows as activities arrive and every section stays
+    /// on the page.
+    ///
+    /// The height chosen for the island is not its ceiling here. That height is
+    /// the island's own resting size and the size of the pages that hold one
+    /// section; the dashboard is the page that grows with what runs, which is
+    /// what the page's design asks for. Only the display bounds it, and where
+    /// the display cannot hold the whole page the page scrolls with all its
+    /// sections drawn - no section is dropped to make a page fit.
     func dashboardSize(content: CGFloat, width: CGFloat) -> CGSize {
-        var preferredHeight = headerTopInset + headerChromeHeight + max(0, content)
-        if layout == .custom { preferredHeight = min(preferredHeight, customHeight) }
+        let preferredHeight = headerTopInset + headerChromeHeight + max(0, content)
         // The island is as wide as the page it holds, and never wider than the
         // preset's own island: a narrow display narrows the page with it.
         let pageWidth = min(expandedWidth, width + NotchLayout.horizontalInset * 2)
         return CGSize(width: pageWidth,
-                      height: min(preferredHeight, screen.height - 48 - quickAccessBottomInset))
+                      height: min(preferredHeight,
+                                  screen.height - 48 - quickAccessBottomInset))
     }
 
     func contentSize(for size: CGSize) -> CGSize {
@@ -2858,14 +2866,11 @@ struct NotchGeometry: Equatable {
                height: max(0, size.height - headerTopInset - headerChromeHeight))
     }
 
-    /// The tallest content the island can be given, at its preset's own limit:
-    /// the tallest island it draws, less its header. The page measures itself to
-    /// this, so it is drawn whole - the way to the sections included - and does
-    /// not run under a scroll a person has to find.
+    /// How much content the dashboard can be shown at all: the tallest island
+    /// the display allows, less its header. Below this the page cannot be drawn
+    /// whole and scrolls, with every section still drawn.
     var dashboardContentLimit: CGFloat {
-        let tallest = screen.height - 48 - quickAccessBottomInset
-        let island = layout == .custom ? min(customHeight, tallest) : tallest
-        return max(0, island - headerTopInset - headerChromeHeight)
+        max(0, screen.height - 48 - quickAccessBottomInset - headerTopInset - headerChromeHeight)
     }
     var appPanelSize: CGSize { contentSize(for: expandedSize(module: .tools, panel: true)) }
     func frame(for size: CGSize) -> CGRect {

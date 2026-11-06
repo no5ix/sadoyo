@@ -70,6 +70,9 @@ final class NotchMusicService: ObservableObject {
     /// on lock, sleep or when the page closes. Tied to a process, so it is
     /// never saved across launches of the app.
     private var chosenSource: NotchPlaybackSource.Selection?
+    /// A command carried to the player it was aimed at, and dropped if a reading
+    /// names any other player.
+    private var pendingCommand: (command: Command, pid: Int32)?
     private var restoringSource = false
     private var artworkCache = NotchArtworkCache<(image: NSImage, tint: NotchArtworkTint?)>()
     private var artworkWork: DispatchWorkItem?
@@ -285,7 +288,20 @@ final class NotchMusicService: ObservableObject {
         awaitingPlayback = false
         updateAutomation(for: reading.playback)
         NotchLyricsService.shared.playbackChanged(reading.playback)
+        flushPendingCommand()
         updateQueue()
+    }
+
+    /// The command a card's control carried. While no player is being read the
+    /// choice is still on its way, so the command waits; a reading that names
+    /// the player it was aimed at is answered; a reading that names any other
+    /// player ends it. A click therefore never arrives at a player it did not
+    /// name, and a command never sits around to answer a later player.
+    private func flushPendingCommand() {
+        guard let pending = pendingCommand, let pid = playback?.track.appPID else { return }
+        pendingCommand = nil
+        guard pid == pending.pid else { return }
+        send(pending.command)
     }
 
     private func connectionEnded() {
@@ -540,6 +556,30 @@ final class NotchMusicService: ObservableObject {
     @discardableResult
     func send(_ command: Command) -> Bool {
         send(command, context: playback?.commandContext)
+    }
+
+    /// A command aimed at one player, from that player's own card. It goes to
+    /// that player and to no other: at once, in its own context, while it is the
+    /// player in effect; otherwise the player is chosen first and the command is
+    /// carried to the reading that names it. A player the adapter does not
+    /// report is refused, so a stale card cannot send anything.
+    @discardableResult
+    func requestCommand(_ command: Command, for source: NotchPlaybackSource) -> Bool {
+        let inEffect = playback?.track.appPID.flatMap { Int($0) }
+            ?? selectedSourcePID.map { Int($0) } ?? -1
+        switch NotchDashboardSupport.playerCommand(sourcePID: Int(source.pid), inEffectPID: inEffect,
+                                                   reported: sources.contains(where: { $0.pid == source.pid })) {
+        case .refuse:
+            pendingCommand = nil
+            return false
+        case .send:
+            pendingCommand = nil
+            return send(command)
+        case .selectFirst:
+            pendingCommand = (command, source.pid)
+            selectSource(source.selection)
+            return true
+        }
     }
 
     func skipFromGesture(forward: Bool) {

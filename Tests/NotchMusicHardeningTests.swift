@@ -191,6 +191,7 @@ enum NotchMusicHardeningTests {
     static func run(_ suite: TestSuite) {
         sourcePriority(suite)
         sourceSwitching(suite)
+        playerTargetedCommands(suite)
         sourceRestore(suite)
         sourcePreference(suite)
         artworkInheritance(suite)
@@ -270,6 +271,93 @@ enum NotchMusicHardeningTests {
         }
         suite.expect(automatic == NotchPlaybackRequest(command: .source(nil)),
                      "a selected source that is not responding can be released from the empty state")
+        service.stop()
+    }
+
+    /// One card's control is aimed at one player. The command goes to that
+    /// player and to no other: at once, in that player's own context, while it
+    /// is the player in effect; and by choosing the player first, then carrying
+    /// the command to the reading that names it, when it is not.
+    private static func playerTargetedCommands(_ suite: TestSuite) {
+        let service = NotchMusicCommandContract.Service()
+        service.start()
+        func last() -> NotchPlaybackRequest? {
+            service.input?.fileHandleForWriting.written.last.flatMap {
+                String(data: $0, encoding: .utf8).flatMap {
+                    NotchPlaybackRequest(message: $0.trimmingCharacters(in: .newlines))
+                }
+            }
+        }
+        func play(_ pid: Int32, _ bundle: String) -> NotchPlayback {
+            let track = RadialNowPlayingSnapshot(title: "Track \(pid)", artist: "Example", album: "Recording",
+                                                 artworkData: nil, appBundleIdentifier: bundle, appPID: pid)
+            var value = NotchPlayback(track: track, isPlaying: true, elapsed: 0, duration: 180, rate: 1,
+                                      sampledAt: Date(timeIntervalSinceReferenceDate: 0), canSeek: false,
+                                      itemIdentifier: "track-\(pid)")
+            value.commandContext = NotchPlaybackContext(pid: pid, revision: UUID())
+            value.canSendCommandsDirectly = true
+            return value
+        }
+        let spotify = NotchPlaybackSource(pid: 42, bundleIdentifier: "test.music", isMusicApp: true,
+                                          isPlaying: true, hasTrack: true)
+        let browser = NotchPlaybackSource(pid: 202, bundleIdentifier: "test.browser", isMusicApp: false,
+                                          isPlaying: true, hasTrack: true)
+        let music = play(42, "test.music")
+        service.playback = music
+        service.sources = [spotify, browser]
+
+        // The card of the player in effect is answered in that player's context.
+        suite.expect(service.requestCommand(.next, for: spotify),
+                     "the card of the player in effect is answered")
+        service.queue.drain()
+        suite.expect(last() == NotchPlaybackRequest(command: .next, context: music.commandContext),
+                     "the command goes to the player in effect, in that player's context")
+
+        // A second player's card chooses that player first, and sends the first
+        // player nothing, because the click did not name it.
+        let written = service.input?.fileHandleForWriting.written.count ?? 0
+        suite.expect(service.requestCommand(.toggle, for: browser), "the other player's card is answered")
+        service.queue.drain()
+        suite.expect((service.input?.fileHandleForWriting.written.count ?? 0) == written + 1
+                         && last() == NotchPlaybackRequest(command: .source(browser.selection)),
+                     "the second player is chosen, and no command is sent to the first")
+
+        // The command is carried to the reading that names the player the card
+        // was aimed at, and to no other reading.
+        func reading(_ item: NotchPlayback?, sources: [NotchPlaybackSource] = [spotify, browser])
+            -> NotchMusicCommandContract.Service.Reading {
+            NotchMusicCommandContract.Service.Reading(playback: item, artwork: nil, tint: nil, sources: sources,
+                                                       automatic: true, selectedPID: nil)
+        }
+        func lines() -> Int { service.input?.fileHandleForWriting.written.count ?? 0 }
+        service.receive(reading(nil))
+        suite.expect(lines() == written + 1, "no command is sent while no player is being read")
+        let web = play(202, "test.browser")
+        service.receive(reading(web))
+        service.queue.drain()
+        suite.expect(lines() == written + 2
+                         && last() == NotchPlaybackRequest(command: .toggle, context: web.commandContext),
+                     "the carried command reaches the player the card named, in that player's context")
+        // A reading of a player the click did not name drops the carried
+        // command, so a click cannot arrive at a player it never mentioned.
+        let carried = lines()
+        service.receive(reading(music))
+        service.queue.drain()
+        suite.expect(service.requestCommand(.next, for: browser), "the second player's card is answered again")
+        service.queue.drain()
+        let chosen = lines()
+        suite.expect(chosen == carried + 1
+                         && last() == NotchPlaybackRequest(command: .source(browser.selection)),
+                     "the second player is chosen again, and the first is sent nothing")
+        service.receive(reading(music))
+        service.queue.drain()
+        suite.expect(lines() == chosen, "a reading of a player the click did not name drops the carried command")
+        // A card of a player the adapter no longer reports sends nothing at all.
+        let final = service.input?.fileHandleForWriting.written.count ?? 0
+        service.sources = [spotify]
+        suite.expect(!service.requestCommand(.previous, for: browser)
+                         && (service.input?.fileHandleForWriting.written.count ?? 0) == final,
+                     "a stale player's card sends nothing to any player")
         service.stop()
     }
 

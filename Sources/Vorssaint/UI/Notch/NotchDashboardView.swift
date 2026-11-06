@@ -48,15 +48,12 @@ struct NotchDashboardView: View {
                                          timer: timer.session.hasSession && service.modules.contains(.timer))
     }
 
-    /// The same readings the System page draws, as many of them as the page has
-    /// room for: the grid gives way to keep the month, the players, the timer
-    /// and the way to the sections on the page, and the System page draws every
-    /// reading in full.
+    /// The same readings the System page draws, all of them. The page asks the
+    /// island for the height they need; the grid is never trimmed to make a page
+    /// fit, and an empty grid is a Mac with no sensors, which the page says.
     private var tiles: [NotchSystemCard] {
-        let cards = NotchSystemCards.cards(snapshot: monitor.snapshot, language: l10n.language,
-                                           networkSpeedInBits: networkSpeedUnit == .bits)
-        let shown = service.dashboardMetricTiles
-        return shown >= 0 ? Array(cards.prefix(shown)) : []
+        NotchSystemCards.cards(snapshot: monitor.snapshot, language: l10n.language,
+                               networkSpeedInBits: networkSpeedUnit == .bits)
     }
 
     private var sections: [NotchModule] { service.filteredSections }
@@ -142,8 +139,13 @@ struct NotchDashboardView: View {
     private func nowPlayingCard(_ playback: NotchPlayback) -> some View {
         NotchDashboardCard {
             HStack(spacing: 8) {
-                NotchArtwork(image: music.artwork, size: NotchDashboardLayout.activityArtwork,
-                             source: playback.track)
+                // The cover is the way to the app that plays it, and nothing
+                // else: the card's body stays unpressed, and the transport
+                // beside it keeps its own clicks.
+                openAppButton(pid: Int(playback.track.appPID ?? -1), bundleIdentifier: playback.track.appBundleIdentifier ?? "",
+                              identifier: "notch.dashboard.nowPlaying.open",
+                              label: NotchArtwork(image: music.artwork, size: NotchDashboardLayout.activityArtwork,
+                                                  source: playback.track))
                 VStack(alignment: .leading, spacing: 0) {
                     Text(playback.track.title ?? "")
                         .font(.system(size: 11, weight: .semibold))
@@ -178,23 +180,100 @@ struct NotchDashboardView: View {
     private func playerCard(_ source: NotchPlaybackSource) -> some View {
         NotchDashboardCard(height: NotchDashboardLayout.playerCardHeight) {
             HStack(spacing: 8) {
-                appMark(pid: Int(source.pid))
-                Text(playerName(source))
-                    .font(.system(size: 11, weight: .semibold))
-                    .lineLimit(1).truncationMode(.middle)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                // The card's body is not pressed. This is the control: it asks
-                // the adapter for this player, and its full card takes the place
-                // of the one above.
-                NotchIconButton(symbol: "arrow.triangle.2.circlepath", title: text.open) {
-                    music.selectSource(source.selection)
+                // The app's mark is the way to the app.
+                openAppButton(pid: Int(source.pid), bundleIdentifier: source.bundleIdentifier,
+                              identifier: "notch.dashboard.player.\(Int(source.pid)).open",
+                              label: appMark(pid: Int(source.pid)))
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(playerName(source))
+                        .font(.system(size: 11, weight: .semibold))
+                        .lineLimit(1).truncationMode(.middle)
+                    // The adapter names the app, not the song, for a player that
+                    // is not the one in effect; what that player is doing is in
+                    // the mark of the control beside it - playing, or held.
+                    Text(source.hasTrack ? playerName(source)
+                                          : FeatureStrings.radialMenu(l10n.language).mediaNothingPlaying)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1).truncationMode(.middle)
                 }
-                .accessibilityIdentifier("notch.dashboard.player.\(Int(source.pid)).select")
+                .frame(maxWidth: .infinity, alignment: .leading)
+                playerTransport(source)
             }
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(playerName(source))
         .accessibilityIdentifier("notch.dashboard.player.\(Int(source.pid))")
+    }
+
+    /// A player's own transport: the same three marks as the card above, each
+    /// aimed at this player and at no other. The middle mark shows what that
+    /// player reports of itself; the two skips are drawn only for a player that
+    /// reports a track to skip, so a control that could do nothing is not shown.
+    @ViewBuilder private func playerTransport(_ source: NotchPlaybackSource) -> some View {
+        HStack(spacing: 4) {
+            let transport = FeatureStrings.radialMenu(l10n.language)
+            if source.hasTrack {
+                playerMark("backward.fill", NotchPlaybackCommand.previous.dashboardTitle(transport), .previous, source)
+            }
+            playerMark(source.isPlaying ? "pause.fill" : "play.fill",
+                       NotchPlaybackCommand.toggle.dashboardTitle(transport), .toggle, source)
+            if source.hasTrack {
+                playerMark("forward.fill", NotchPlaybackCommand.next.dashboardTitle(transport), .next, source)
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(playerName(source))
+    }
+
+    private func playerMark(_ symbol: String, _ title: String, _ command: NotchPlaybackCommand,
+                            _ source: NotchPlaybackSource) -> some View {
+        Button { music.requestCommand(command, for: source) } label: {
+            Image(systemName: symbol)
+                .font(.system(size: 11, weight: .semibold))
+                .frame(width: NotchDashboardLayout.transportMarkSide,
+                       height: NotchDashboardLayout.transportMarkSide)
+                .contentShape(RoundedRectangle(cornerRadius: NotchDashboardLayout.transportCorner,
+                                               style: .continuous))
+        }
+        .buttonStyle(NotchButtonStyle(cornerRadius: NotchDashboardLayout.transportCorner, lifts: false))
+        .accessibilityLabel(title)
+        .accessibilityIdentifier("notch.dashboard.player.\(Int(source.pid)).\(command.dashboardName)")
+    }
+
+    /// The mark of the app that plays, as the way to that app: a process that
+    /// runs is brought forward, and an app the adapter names is opened. The
+    /// card's body and its controls are untouched by this.
+    private func openAppButton(pid: Int, bundleIdentifier: String, identifier: String,
+                               label: some View) -> some View {
+        Button { openApplication(pid: pid, bundleIdentifier: bundleIdentifier) } label: {
+            label
+        }
+        .buttonStyle(NotchButtonStyle(cornerRadius: NotchDashboardLayout.appMarkCorner, lifts: false))
+        .accessibilityLabel(text.open)
+        .accessibilityIdentifier(identifier)
+    }
+
+    /// Both of the card's controls are built by one view, so they cannot drift.
+    private func timerControl(symbol: String, title: String, filled: Bool, disabled: Bool,
+                              identifier: String, action: @escaping () -> Void) -> some View {
+        NotchDashboardTimerControl(symbol: symbol, title: title, filled: filled,
+                                   disabled: disabled, identifier: identifier, action: action)
+    }
+
+    private func openApplication(pid: Int, bundleIdentifier: String) {
+        switch NotchDashboardSupport.appOpening(pid: pid,
+                                                isRunning: NSRunningApplication(processIdentifier: pid_t(pid)) != nil,
+                                                bundleIdentifier: bundleIdentifier) {
+        case .activate(let pid):
+            NSRunningApplication(processIdentifier: pid_t(pid))?.activate()
+        case .open(let identifier):
+            guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: identifier) else { return }
+            NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration(),
+                                               completionHandler: nil)
+        case .none:
+            break
+        }
     }
 
     /// The app's own mark, from the process that reports the track.
@@ -241,12 +320,17 @@ struct NotchDashboardView: View {
                 }
                 .accessibilityLabel(phaseTitle)
                 Spacer(minLength: 0)
-                timerPauseButton
+                timerControl(symbol: timer.session.isPaused ? "play.fill" : "pause.fill",
+                             title: timer.session.isPaused ? activityText.resume : l10n.s.actionPause,
+                             filled: true,
+                             disabled: !timer.session.isRunning && !timer.session.isPaused,
+                             identifier: "notch.dashboard.timer.pause") { timer.pauseOrResume() }
                 // The card's own way out: it ends the session, and asks nothing
                 // of the players, whose cards stay as they are.
-                NotchIconButton(symbol: "xmark",
-                                title: timer.session.completed ? l10n.s.supportIntroDoneButton : l10n.s.mediaCancel) { timer.cancel() }
-                    .accessibilityIdentifier("notch.dashboard.timer.close")
+                timerControl(symbol: "xmark",
+                             title: timer.session.completed ? l10n.s.supportIntroDoneButton : l10n.s.mediaCancel,
+                             filled: false, disabled: false,
+                             identifier: "notch.dashboard.timer.close") { timer.cancel() }
             }
         }
         .tint(.orange)
@@ -294,24 +378,46 @@ struct NotchDashboardView: View {
             .accessibilityValue(value)
     }
 
-    /// The pause and the start of the session the card shows. A finished
-    /// timer has nothing to hold, so the card offers the page's dismissal.
-    private var timerPauseButton: some View {
-        let session = timer.session
-        let symbol = session.isPaused ? "play.fill" : "pause.fill"
-        let title = session.isPaused ? activityText.resume : l10n.s.actionPause
-        return Button { timer.pauseOrResume() } label: {
-            Image(systemName: symbol)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.orange)
-                .frame(width: 24, height: 24)
-                .background(.orange.opacity(0.22), in: Circle())
-                .contentShape(Circle())
+    /// The timer card's control, of the size and shape the layout names: the same
+    /// 28pt box, the same rounded square, the same place in the row. The pause
+    /// carries the timer's colour because it holds the session; the close is
+    /// quiet and lights that same shape under the pointer. A finished timer has
+    /// nothing to hold, so the card offers the page's dismissal instead.
+    private struct NotchDashboardTimerControl: View {
+        let symbol: String
+        let title: String
+        let filled: Bool
+        let disabled: Bool
+        let identifier: String
+        let action: () -> Void
+        @Environment(\.accessibilityReduceMotion) private var reduceMotion
+        @State private var hover = false
+
+        private var shape: RoundedRectangle {
+            RoundedRectangle(cornerRadius: NotchDashboardLayout.timerControlCorner, style: .continuous)
         }
-        .buttonStyle(NotchButtonStyle(cornerRadius: 12))
-        .disabled(!session.isRunning && !session.isPaused)
-        .accessibilityLabel(title)
-        .help(title)
+
+        var body: some View {
+            Button(action: action) {
+                Image(systemName: symbol)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(filled ? .orange : .white.opacity(hover ? 0.95 : 0.65))
+                    .contentTransition(.symbolEffect(.replace))
+                    .animation(reduceMotion ? nil : .smooth(duration: 0.24), value: symbol)
+                    .frame(width: NotchDashboardLayout.timerControlSide,
+                           height: NotchDashboardLayout.timerControlSide)
+                    .background(filled ? AnyShapeStyle(.orange.opacity(0.22))
+                                       : AnyShapeStyle(.white.opacity(hover ? 0.12 : 0)), in: shape)
+                    .contentShape(shape)
+            }
+            .buttonStyle(NotchButtonStyle(cornerRadius: NotchDashboardLayout.timerControlCorner))
+            .disabled(disabled)
+            .onHover { hover = $0 }
+            .animation(reduceMotion ? nil : .smooth(duration: 0.2), value: hover)
+            .accessibilityLabel(title)
+            .help(title)
+            .accessibilityIdentifier(identifier)
+        }
     }
 
     // MARK: - System Monitoring
@@ -460,6 +566,15 @@ private extension NotchPlaybackCommand {
         case .toggle: return "play.pause"
         case .next: return "forward.fill"
         default: return "play.fill"
+        }
+    }
+
+    var dashboardName: String {
+        switch self {
+        case .previous: return "previous"
+        case .toggle: return "toggle"
+        case .next: return "next"
+        default: return "command"
         }
     }
 

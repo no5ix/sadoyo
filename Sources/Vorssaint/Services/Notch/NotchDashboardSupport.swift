@@ -167,6 +167,23 @@ enum NotchDashboardLayout {
     static let activityCardPadding: CGFloat = 10
     /// A card that carries one line of its own, with the edge on every side.
     static var timerCardHeight: CGFloat { activityCardPadding * 2 + activityArtwork - 12 }
+    /// The timer card's two controls are one control: the same box, the same
+    /// rounded shape, the same place in the row. The pause is filled with the
+    /// timer's colour because it holds the session; the close is quiet and
+    /// lights that same shape when the pointer is on it.
+    static let timerControlSide: CGFloat = 28
+    static let timerControlCorner: CGFloat = 9
+    static let timerControlGap: CGFloat = 8
+    /// A player card's transport: three marks of the size the primary card's
+    /// compact transport uses, so a player's row and the player above it read
+    /// as the same control.
+    static let transportMarkSide: CGFloat = 22
+    static let transportCorner: CGFloat = 7
+    /// The mark of the app that plays, and the shape it is a button of: the
+    /// artwork of the player in effect and the icon of the others are both a
+    /// way to that app.
+    static let appMarkSide: CGFloat = 26
+    static let appMarkCorner: CGFloat = 6
 
     // MARK: System Monitoring
 
@@ -303,32 +320,6 @@ enum NotchDashboardLayout {
         return heights
     }
 
-    /// How many of the readings the page draws so that the page fits the island:
-    /// all of them where the island is tall enough, then one row, then none. The
-    /// month, the players, the timer and the way to the sections keep their
-    /// room, because the page is read top to bottom and ends at the sections;
-    /// the grid is the part that gives way, and it is the part the System page
-    /// draws in full. A page that fits needs no scroll, and the sections are
-    /// there without one.
-    static func tilesFittingPage(activities: [NotchDashboardActivity], calendar: Bool,
-                                 tiles: Int, exploreCount: Int, width: CGFloat,
-                                 available: CGFloat, primaryPlayerID: Int? = nil) -> Int {
-        // The shapes the grid draws, most to least: all of it, one row of the
-        // columns, nothing. The page takes the first that fits.
-        var steps: [Int] = [tiles]
-        if tiles > metricColumns { steps.append(metricColumns) }
-        steps.append(0)
-        for shown in steps {
-            let needed = contentHeight(activities: activities, calendar: calendar, metrics: shown,
-                                       exploreCount: exploreCount, width: width,
-                                       primaryPlayerID: primaryPlayerID)
-            if needed <= available { return shown }
-        }
-        // Not even a page without the grid fits: the island is shorter than the
-        // page can be, so it scrolls at its own height.
-        return -1
-    }
-
     /// The tallest page the island draws on a display of the given height: the
     /// display less the island's chrome - the screen's own limit, the row of
     /// levels at its top, and the page's edges. The page is measured against
@@ -386,6 +377,42 @@ enum NotchMenuBarRoute: Equatable {
 /// shows, which players and timers are in them, and what a click on a tile, a
 /// menu bar indicator, or the way back leads to.
 enum NotchDashboardSupport {
+
+    /// Where one click on a player card's control goes. The command is sent to
+    /// the player the click was aimed at: straight to it while it is the player
+    /// in effect, and by making it the player first - carrying the command to
+    /// it alone - when it is not. A command is never sent to a player the click
+    /// did not name, and a player the page does not report is refused.
+    enum PlayerCommand: Equatable {
+        /// The player is in effect: the command goes now, in its own context.
+        case send
+        /// The player is not in effect: select it, and send the command only
+        /// once its own reading has arrived.
+        case selectFirst
+        /// Nothing to send: the pid is not a player the page reports.
+        case refuse
+    }
+
+    static func playerCommand(sourcePID: Int, inEffectPID: Int, reported: Bool) -> PlayerCommand {
+        guard reported, sourcePID > 0 else { return .refuse }
+        return sourcePID == inEffectPID ? .send : .selectFirst
+    }
+
+    /// How a card's mark opens the app that plays: a process that is running is
+    /// brought forward, and a player that is not running is opened by the
+    /// bundle the adapter named for it. A card with neither is asked nothing.
+    enum AppOpening: Equatable {
+        case activate(pid: Int)
+        case open(bundleIdentifier: String)
+        case none
+    }
+
+    static func appOpening(pid: Int, isRunning: Bool, bundleIdentifier: String?) -> AppOpening {
+        if pid > 0, isRunning { return .activate(pid: pid) }
+        if let bundleIdentifier, !bundleIdentifier.isEmpty { return .open(bundleIdentifier: bundleIdentifier) }
+        return .none
+    }
+
     /// The activity cards, in order: every player that is playing, in the
     /// order they were found, then the timer.
     ///
