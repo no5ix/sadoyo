@@ -13,9 +13,6 @@ dist/
 *.mobileprovision
 *.keychain-db
 
-# Local-only working notes
-AGENTS.md
-CLAUDE.md
 
 # macOS noise
 .DS_Store
@@ -24,3 +21,5 @@ CLAUDE.md
 *.xcodeproj
 xcuserdata/
 .swiftpm/
+
+.idea
