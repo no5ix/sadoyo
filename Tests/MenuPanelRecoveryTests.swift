@@ -172,6 +172,11 @@ enum MenuPanelRecoveryTests {
         static var shared = NotchService()
         var running = false
         var acceptsSystemFeedback = false
+        /// The pages the island has open behind the click, read by the route
+        /// trace so a click that lands on the overview names the state that sent
+        /// it there.
+        var showingAppPanel = false
+        var selectedMetric: String? = nil
         /// The metric's own switch, as it is off when a reading is not shown.
         var metricAvailable = true
         /// Whether the island answers that it opened the reading's detail.
@@ -291,6 +296,7 @@ enum MenuPanelRecoveryTests {
         enum menuBarLog {
             static var messages: [String] = []
             static func log(_ message: String) { messages.append(message) }
+            static func warning(_ message: String) { messages.append(message) }
         }
         // The production trace goes to `NSLog`; the harness keeps the same lines
         // so a click's route can be read back from the log it wrote.

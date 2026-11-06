@@ -718,9 +718,40 @@ enum MenuBarRenderer {
                            metrics: [MenuBarMetric],
                            allowStacked: Bool = true,
                            linePrefix: String = "") -> NSAttributedString {
-        let result = NSMutableAttributedString()
         let stacked = usesStackedLayout(for: snapshot, metrics: metrics, allowStacked: allowStacked)
-        for segment in segments(for: snapshot, metrics: metrics, allowStacked: allowStacked) {
+        return attributed(segments: segments(for: snapshot, metrics: metrics, allowStacked: allowStacked),
+                          stacked: stacked,
+                          linePrefix: linePrefix)
+    }
+
+    /// The width, in menu bar points, each metric's block takes in the title
+    /// `attributed(for:metrics:)` writes, in the order the metrics are written.
+    /// A metric that renders nothing takes no room, and a metric after the
+    /// first carries the glue that separates it from its neighbour, so the
+    /// widths add up to the title and a click can be placed on a reading.
+    static func metricWidths(for snapshot: SystemSnapshot,
+                             metrics: [MenuBarMetric],
+                             style: MenuBarBlockStyle = .dense) -> [CGFloat] {
+        let font = statusFont(stacked: false)
+        var widths: [CGFloat] = []
+        var consumed = 0
+        for index in metrics.indices {
+            let all = segments(for: snapshot, metrics: Array(metrics[0...index]), allowStacked: false)
+            let own = Array(all.dropFirst(consumed))
+            consumed = all.count
+            guard !own.isEmpty else { widths.append(0); continue }
+            let line = attributed(segments: own, stacked: false, linePrefix: "")
+            line.addAttribute(.font, value: font, range: NSRange(location: 0, length: line.length))
+            widths.append(line.size().width)
+        }
+        return widths
+    }
+
+    private static func attributed(segments: [MenuBarSegment],
+                                   stacked: Bool,
+                                   linePrefix: String) -> NSMutableAttributedString {
+        let result = NSMutableAttributedString()
+        for segment in segments {
             switch segment {
             case let .text(string):
                 let rendered = string == "\n" && !linePrefix.isEmpty ? "\n" + linePrefix : string

@@ -22,6 +22,9 @@ final class StatusItemController {
     private var clipboardPreviewStatusItem: NSStatusItem?
     private var metricStatusItems: [String: NSStatusItem] = [:]
     private var metricStatusItemFocus: [String: MenuBarMetric] = [:]
+    /// Where each reading's block sits in the combined menu bar item, so a
+    /// click on a number opens that reading's page instead of the overview.
+    private var combinedMetricHitRanges: [MenuBarMetricHitRange] = []
     private var cancellables = Set<AnyCancellable>()
     private var titleTimer: Timer?
     private var defaultsObserver: NSObjectProtocol?
@@ -420,10 +423,35 @@ final class StatusItemController {
     @objc private func clicked() {
         if NSApp.currentEvent?.type == .rightMouseUp {
             onRightClick?(statusItem.button)
-        } else {
-            onLeftClick?()
+            return
         }
+        // One item, several readings: the number under the pointer is the
+        // reading the click is aimed at, and it opens that reading's page.
+        // Anywhere else on the item, the click stays the app panel's.
+        if let button = statusItem.button {
+            let hit = MenuBarMetricHitSupport.mainItemClick(x: titleTextX(in: button),
+                                                            in: combinedMetricHitRanges)
+            if case let .metric(raw) = hit, let metric = MenuBarMetric(rawValue: raw) {
+                onMetricClick?(metric, button)
+                return
+            }
+        }
+        onLeftClick?()
     }
+
+    /// The pointer's place inside the item's own title, in the same points as
+    /// `MenuBarRenderer.metricWidths`. The status button draws its title a few
+    /// points from the window's left edge, and the blocks are wide, so that
+    /// offset keeps the seam between two readings honest.
+    private func titleTextX(in button: NSStatusBarButton) -> CGFloat? {
+        guard let window = button.window else { return nil }
+        let point = button.convert(window.convertPoint(fromScreen: NSEvent.mouseLocation), from: nil)
+        return point.x - Self.titleLeftInset
+    }
+
+    /// The status button's own title padding: its title starts this far from
+    /// the window's left edge.
+    static let titleLeftInset: CGFloat = 4
 
     /// The item a right-click menu opens from: the main one while it is in
     /// the bar, otherwise the item that was clicked. A menu set on an item
@@ -508,6 +536,7 @@ final class StatusItemController {
         }
 
         if title.length == 0 {
+            combinedMetricHitRanges = []
             if button.attributedTitle.length != 0 {
                 button.attributedTitle = NSAttributedString(string: "")
             }
@@ -540,6 +569,21 @@ final class StatusItemController {
             let stacked = full.string.contains("\n")
             let font = MenuBarRenderer.statusFont(stacked: stacked)
             full.addAttribute(.font, value: font, range: NSRange(location: 0, length: full.length))
+            // The combined item is one button over several readings, so write
+            // where each reading's block sits, measured the way the title is
+            // written: a click on a number then answers for that reading.
+            if !separateMetrics, !metrics.isEmpty, !stacked {
+                let prefix = glyphHidden ? "" : " "
+                let prefixWidth = prefix.isEmpty ? 0
+                    : NSAttributedString(string: prefix, attributes: [.font: font]).size().width
+                combinedMetricHitRanges = MenuBarMetricHitSupport.ranges(
+                    metrics: metrics.map { $0.rawValue },
+                    widths: MenuBarRenderer.metricWidths(for: snapshot, metrics: metrics),
+                    leadingInset: prefixWidth
+                )
+            } else {
+                combinedMetricHitRanges = []
+            }
             if stacked {
                 let paragraph = NSMutableParagraphStyle()
                 paragraph.alignment = .left

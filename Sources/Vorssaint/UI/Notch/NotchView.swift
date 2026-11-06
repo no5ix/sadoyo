@@ -563,15 +563,21 @@ struct NotchView: View {
     }
 
     @ViewBuilder private var content: some View {
-        if service.showingAppPanel {
-            MenuPanelView(notchSize: pageSize)
-        } else if let metric = service.selectedMetric {
+        // A reading's detail page is the page the island draws, with the panel
+        // open behind it or not: the menu bar's indicator of a reading and the
+        // System page's card of the same reading land on one page, and the
+        // panel is never the destination of a reading's own click.
+        if NotchDashboardLayout.showsMetricDetail(metricSelected: service.selectedMetric != nil,
+                                                  appPanel: service.showingAppPanel),
+           let metric = service.selectedMetric {
             if metric == .fan {
                 NotchFanControlView()
                     .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { service.updateFanDetailHeight($0) }
             } else {
                 MetricDetailView(kind: metric)
             }
+        } else if service.showingAppPanel {
+            MenuPanelView(notchSize: pageSize)
         } else if service.modules.isEmpty {
             NotchEmptyView(symbol: "slider.horizontal.3", message: text.empty) {
                 NotchPillButton(title: l10n.s.menuSettings, prominent: true, action: service.openSettings)

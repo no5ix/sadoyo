@@ -420,11 +420,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     static let menuBarLog = Logger(subsystem: Bundle.main.bundleIdentifier ?? "vorssaint",
                                    category: "menubar")
 
-    /// The metric click's own trace, written with `NSLog`. A click that lands on
-    /// the wrong page has to be readable in the log on any Mac: the app's own
-    /// `Logger` categories are not always stored, while these lines always are.
+    /// The menu bar's own trace: which indicator was clicked, which page the
+    /// click chose, and the island state that chose it. A click that lands on
+    /// the overview instead of the reading's page has to be explainable from
+    /// the log on any Mac, so this writes at the level the log store keeps.
     static func traceMenuBar(_ message: String) {
-        NSLog("[menubar] %@", message)
+        menuBarLog.warning("\(message, privacy: .public)")
     }
     private static let updateLog = Logger(subsystem: Bundle.main.bundleIdentifier ?? "vorssaint",
                                           category: "update")
@@ -533,7 +534,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         // conditions are written down, so a click that lands on the panel says
         // which state of the island sent it there.
         let (route, reason) = island.menuBarMetricRoute(for: detailKind)
-        Self.menuBarLog.log("metric \(metric.rawValue, privacy: .public) route=\(route.logName, privacy: .public) blockedBy=\(reason ?? "none", privacy: .public) appPanel=\(NotchSupport.routesAppPanel(), privacy: .public)")
+        Self.menuBarLog.warning("metric \(metric.rawValue, privacy: .public) route=\(route.logName, privacy: .public) blockedBy=\(reason ?? "none", privacy: .public) appPanel=\(NotchSupport.routesAppPanel(), privacy: .public) islandAccepts=\(island.acceptsSystemFeedback, privacy: .public) panelOpen=\(island.showingAppPanel, privacy: .public) detail=\(island.selectedMetric.map { String(describing: $0) } ?? "none", privacy: .public)")
         Self.traceMenuBar("metric \(detailKind) route=\(route.logName) blockedBy=\(reason ?? "none")"
             + " appPanel=\(NotchSupport.routesAppPanel()) islandRunning=\(island.running)")
         if route == .islandDetail, island.showMetric(detailKind, toggle: true) { return }

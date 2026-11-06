@@ -18,6 +18,7 @@ struct MetricsTests {
                 MetricsFeatureTests.run(suite)
                 DiskCapacityTests.run(suite)
                 MenuBarBatteryWarningTests.run(suite)
+                MenuBarMetricHitTests.run(suite)
                 ProcessNameContract.run(suite)
                 SystemMonitorCPUTests.run(suite)
                 SystemMonitorPlanTests.run(suite)
