@@ -47,6 +47,17 @@ final class NotchTimerService: ObservableObject {
         scheduleCompletion()
     }
 
+    /// The card's restart of a countdown: the same session, its own length,
+    /// from the top. No second timer is started and nothing is reconfigured -
+    /// a session that is not a countdown, or none at all, is left alone.
+    func reset() {
+        guard !suspended, NotchTimerSupport.isEnabled() else { return }
+        guard session.reset(at: now) else { return }
+        alert.stop()
+        scheduleCompletion()
+        NotchService.shared.reactMascot(.ready)
+    }
+
     func startNext() {
         guard !suspended, NotchTimerSupport.isEnabled() else { return }
         guard session.canStartNext else { return }

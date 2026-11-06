@@ -12,6 +12,7 @@ enum NotchActivityTests {
         lowBatteryContracts(suite)
         pomodoroContracts(suite)
         stopwatchContracts(suite)
+        timerResetContracts(suite)
         modePickerContracts(suite)
         rulerContracts(suite)
         compactTimerContracts(suite)
@@ -436,6 +437,73 @@ enum NotchActivityTests {
                && geometry.contentSize(for: setup).height <= geometry.contentBudget
                && geometry.contentSize(for: active).height == NotchLayout.timerRulerHeight && active.height < setup.height,
                "the Pomodoro setup fits the strip with its readouts under the ruler; running, its progress is in the top row and the island shortens")
+    }
+
+    /// The countdown's reset: its own length again from the top, running, paused
+    /// or finished, and nothing at all where there is no countdown. The Pomodoro
+    /// cycle and the stopwatch are left exactly as they were, mark for mark.
+    private static func timerResetContracts(_ suite: TestSuite) {
+        var session = NotchTimerSession()
+        session.start(mode: .timer, minutes: 30, now: 10_000)
+        suite.expect(session.reading(at: 10_720) == 1_080,
+               "a 30 minute countdown reads 18:00 left when 12:00 has gone")
+        suite.expect(session.reset(at: 10_720), "a running countdown answers a reset")
+        suite.expect(session.isRunning && !session.isPaused && session.reading(at: 10_720) == 1_800
+                           && session.deadline == 12_520,
+                     "resetting a running countdown takes its full 30:00 again from the instant it was reset")
+        suite.expect(session.mode == .timer && session.phase == .timer && session.duration == 1_800,
+                     "the reset countdown is the same countdown: its mode, its phase, its length")
+        suite.expect(NotchTimerSupport.clockText(for: session, at: 10_720) == "30:00",
+                     "the clock reads the whole length again, not the time that was left")
+        session.pause(at: 11_000)
+        suite.expect(session.isPaused && session.reading(at: 20_000) == 1_520,
+               "a reset countdown pauses and holds its reading across sleep")
+        suite.expect(session.reset(at: 20_000), "a paused countdown answers a reset")
+        suite.expect(session.isRunning && !session.isPaused && session.reading(at: 20_000) == 1_800,
+               "resetting a paused countdown runs its full length again, with no resume first")
+        session.pause(at: 20_600)
+        suite.expect(session.reading(at: 25_000) == 1_200, "a reset countdown pauses like any other")
+        session.resume(at: 25_000)
+        suite.expect(session.isRunning && session.reading(at: 25_060) == 1_140,
+               "a reset countdown resumes from the reading it held, not from the wall clock gap")
+
+        var finished = NotchTimerSession()
+        finished.start(mode: .timer, minutes: 1, now: 0)
+        suite.expect(finished.finishIfDue(at: 70), "the countdown finishes at its deadline")
+        suite.expect(finished.reset(at: 70), "a finished countdown answers a reset")
+        suite.expect(!finished.completed && finished.isRunning && finished.reading(at: 70) == 60,
+               "reset lifts the finish and runs the length again")
+
+        var idle = NotchTimerSession()
+        suite.expect(!idle.reset(at: 0) && !idle.hasSession, "an idle page starts no timer by reset")
+        var running = NotchTimerSession()
+        running.start(mode: .timer, minutes: 5, now: 0)
+        suite.expect(!running.reset(at: .nan) && running.deadline == 300,
+               "an unreadable clock cannot reset a countdown, and leaves its deadline alone")
+
+        var stopwatch = NotchTimerSession()
+        stopwatch.start(mode: .stopwatch, minutes: 30, now: 100)
+        suite.expect(!stopwatch.reset(at: 400), "a stopwatch is not answered by the countdown's reset")
+        suite.expect(stopwatch.isRunning && stopwatch.countsUp && stopwatch.duration == 0
+                           && stopwatch.reading(at: 400) == 300,
+                     "the stopwatch keeps counting from exactly where it was")
+
+        var pomodoro = NotchTimerSession()
+        pomodoro.start(mode: .pomodoro, minutes: 25, now: 0,
+                       configuration: NotchPomodoroConfiguration(focusMinutes: 25, shortBreakMinutes: 5,
+                                                                 longBreakMinutes: 15, longBreakInterval: 2,
+                                                                 totalSessions: 4))
+        let before = pomodoro
+        suite.expect(!pomodoro.reset(at: 600), "a Pomodoro cycle is not answered by the countdown's reset")
+        suite.expect(pomodoro == before, "the Pomodoro's phase, length and anchor are exactly as they were")
+        suite.expect(pomodoro.finishIfDue(at: 1_600) && pomodoro.completedFocuses == 1,
+               "the Pomodoro's own cycle, and its start next, are untouched")
+
+        for language in AppLanguage.allCases {
+            let label = FeatureStrings.notchActivities(language).reset
+            suite.expect(!label.isEmpty && !label.contains("\n"),
+                         "\(language): the reset mark has a name")
+        }
     }
 
     private static func stopwatchContracts(_ suite: TestSuite) {

@@ -167,6 +167,21 @@ struct NotchTimerSession: Equatable {
         anchor = countsUp ? now - reading : now + reading
     }
 
+    /// The countdown's own restart: the length it was given, not the time left
+    /// on it. Running, paused or finished, it takes that length again from the
+    /// top, keeping its mode, its phase and its configuration. A pomodoro
+    /// cycle and a stopwatch are not answered here - the first's phases are
+    /// phases the user starts, the second has no length to restore - so their
+    /// sessions are left exactly as they were.
+    @discardableResult
+    mutating func reset(at now: TimeInterval) -> Bool {
+        guard mode == .timer, hasSession, duration > 0, now.isFinite else { return false }
+        completed = false
+        pausedReading = nil
+        anchor = now + duration
+        return true
+    }
+
     var nextPhase: NotchTimerPhase {
         phase == .focus ? (completedFocuses.isMultiple(of: configuration.longBreakInterval) ? .longBreak : .shortBreak) : .focus
     }

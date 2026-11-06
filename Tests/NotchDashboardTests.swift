@@ -477,6 +477,25 @@ enum NotchDashboardTests {
                          "the controls sit inside the card's own edge")
         }
 
+        suite.run("the countdown's card offers its restart, the other modes do not") {
+            // The marks are one decision, read in row order: a countdown is
+            // started again, held and ended, and the restart is the first of
+            // them. A Pomodoro cycle and a stopwatch keep the marks they have
+            // always had, so their cards grow no button of their own.
+            suite.expect(NotchDashboardLayout.timerCardControls(countdown: true) == [.reset, .pause, .close],
+                         "a countdown's card resets, holds and ends its session, in that row order")
+            suite.expect(NotchDashboardLayout.timerCardControls(countdown: false) == [.pause, .close],
+                         "a Pomodoro cycle and a stopwatch keep the two marks they had")
+            suite.expect(NotchDashboardLayout.timerCardControls(countdown: true).first == .reset,
+                         "the restart sits left of the mark that holds the clock, as the reference lays it out")
+            // Three marks of one diameter at one gap, inside the card's edge,
+            // still fit the page's width beside the clock.
+            let marks = 3 * NotchDashboardLayout.timerControlSide + 2 * NotchDashboardLayout.timerControlGap
+            suite.expect(marks < NotchDashboardLayout.naturalContentWidth
+                             - 2 * NotchDashboardLayout.activityCardPadding - 120,
+                         "the three marks, at their gap and edges, leave the clock its room")
+        }
+
         suite.run("the page keeps its readings and its sections whatever runs") {
             let width = NotchDashboardLayout.naturalContentWidth
             let grid = NotchDashboardLayout.metricsHeight(tiles: 8)

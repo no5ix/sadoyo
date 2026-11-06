@@ -60,6 +60,13 @@ enum NotchDashboardActivity: Hashable, Identifiable {
     }
 }
 
+/// The marks a timer card offers, in the row order the page draws them.
+enum NotchDashboardTimerControl: Equatable {
+    case reset
+    case pause
+    case close
+}
+
 /// What one monitoring tile stands for. Kept apart from `MetricDetailKind`,
 /// which lives with the panel's detail views, so the dashboard's composition
 /// can be compiled and tested without them.
@@ -177,6 +184,15 @@ enum NotchDashboardLayout {
     static let timerControlSide: CGFloat = 28
     static var timerControlCorner: CGFloat { timerControlSide / 2 }
     static let timerControlGap: CGFloat = 8
+
+    /// The marks a timer card offers, in their row order: reset first, then the
+    /// mark that holds the clock, then the close that ends the session. A
+    /// countdown can be started again; a Pomodoro cycle and a stopwatch keep the
+    /// two marks they have always had, because a Pomodoro's phases are started
+    /// by the user and a stopwatch has no length to restore.
+    static func timerCardControls(countdown: Bool) -> [NotchDashboardTimerControl] {
+        countdown ? [.reset, .pause, .close] : [.pause, .close]
+    }
     /// A player card's transport: three marks of the size the primary card's
     /// compact transport uses, in the same circle, so a player's row and the
     /// player above it read as the same control.

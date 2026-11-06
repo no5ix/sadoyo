@@ -336,6 +336,19 @@ struct NotchDashboardView: View {
                 }
                 .accessibilityLabel(phaseTitle)
                 Spacer(minLength: 0)
+                // The countdown's own restart: its length again, from the top,
+                // running or paused. The marks a card offers are the layout's
+                // decision, so a Pomodoro cycle and a stopwatch keep the two
+                // marks they have always had.
+                if timerCardControls.contains(.reset) {
+                    NotchCircularIconButton(symbol: "arrow.triangle.2.circlepath",
+                                            title: activityText.reset,
+                                            side: NotchDashboardLayout.timerControlSide, filled: true, tint: .orange,
+                                            disabled: !timer.session.hasSession) {
+                        timer.reset()
+                    }
+                    .accessibilityIdentifier("notch.dashboard.timer.reset")
+                }
                 NotchCircularIconButton(symbol: timer.session.isPaused ? "play.fill" : "pause.fill",
                                         title: timer.session.isPaused ? activityText.resume : l10n.s.actionPause,
                                         side: NotchDashboardLayout.timerControlSide, filled: true, tint: .orange,
@@ -357,6 +370,11 @@ struct NotchDashboardView: View {
         .tint(.orange)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("notch.dashboard.timer")
+    }
+
+    /// The marks this session's card offers, as the page's layout decides them.
+    private var timerCardControls: [NotchDashboardTimerControl] {
+        NotchDashboardLayout.timerCardControls(countdown: timer.session.mode == .timer)
     }
 
     private var timerSymbol: String {
