@@ -1005,7 +1005,6 @@ struct NotchSettings: View {
         }.disabled(!available)
     }
 
-    /// An option with its icon, one line and a switch, like every other page.
     /// The alarm's sound, listed like the snippet sound and previewed on change.
     private var timerSoundPicker: some View {
         let snippets = FeatureStrings.snippets(l10n.language)
@@ -1035,6 +1034,7 @@ struct NotchSettings: View {
         .onDisappear { timerSoundPreview?.stop() }
     }
 
+    /// An option with its icon, one line and a switch, like every other page.
     private func switchRow(_ symbol: String, _ title: String, caption: String? = nil, isOn: Binding<Bool>) -> some View {
         SettingsRow(symbol: symbol, title: title, caption: caption) {
             Toggle(title, isOn: isOn).labelsHidden().toggleStyle(.switch)
