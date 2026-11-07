@@ -92,6 +92,18 @@ enum MenuBarHiderSupport {
     /// Slack added on top of the usable width so the last item clears the edge.
     static let expansionMargin: Double = 8.0
 
+    /// Largest spacer length a menu bar on these screens can legitimately ask
+    /// for. Spacers are sized to the strip of the screen they occupy, and a
+    /// notch display's auxiliary strip can measure wider than the full frame
+    /// AppKit reports for the widest display, so every screen contributes
+    /// both its full width and its strips.
+    static func maximumSpacerWidth(screenWidths: [Double],
+                                   stripWidths: [Double] = [],
+                                   margin: Double = expansionMargin) -> Double {
+        ((screenWidths + stripWidths).filter { $0.isFinite && $0 > 0 }.max()
+            ?? fallbackUsableWidth) + margin
+    }
+
     /// Fallback usable width when no screen can be measured.
     static let fallbackUsableWidth: Double = 1440.0
 

@@ -293,6 +293,105 @@ enum MenuBarOrganizerTests {
                 suite.expect(!(field.value as! String).isEmpty, "every organizer label is localized for \(language): \(field.label ?? "")")
             }
         }
+
+        // MARK: System-hosted third-party identification (the WeChat class)
+
+        func hostedRecord(_ id: CGWindowID, title: String, x: CGFloat = 3_256) -> MenuBarOrganizerWindowRecord {
+            .init(windowID: id, ownerPID: 700, ownerName: "Control Center",
+                  ownerBundleIdentifier: MenuBarOrganizerSupport.controlCenterBundleIdentifier,
+                  title: title, frame: CGRect(x: x, y: -531, width: 38, height: 30),
+                  layer: 25, alpha: 1, isOnScreen: true)
+        }
+        func runningApp(_ id: String) -> (pid: pid_t, name: String)? {
+            id == "com.tencent.xinWeChat" ? (722, "WeChat") : nil
+        }
+        let wechatRecord = hostedRecord(10_310, title: "com.tencent.xinWeChat")
+        let promoted = MenuBarOrganizerSupport.hostedSourceIdentity(from: wechatRecord, runningApp: runningApp)
+        suite.expect(promoted?.bundleIdentifier == "com.tencent.xinWeChat" && promoted?.pid == 722,
+                     "a hosted window named for a running app resolves its creating app")
+        suite.expect(MenuBarOrganizerSupport.hostedSourceIdentity(
+            from: hostedRecord(1, title: "com.apple.menuextra.battery"), runningApp: { _ in (1, "Battery") }) == nil,
+                     "an Apple system extra is never promoted to a movable identity")
+        suite.expect(MenuBarOrganizerSupport.hostedSourceIdentity(
+            from: hostedRecord(2, title: "Item-3"), runningApp: { _ in (1, "X") }) == nil,
+                     "a generic hosted slot stays unresolved")
+        suite.expect(MenuBarOrganizerSupport.hostedSourceIdentity(
+            from: hostedRecord(3, title: "Com.Tencent.Xin We Chat"), runningApp: runningApp) == nil,
+                     "a humanized window title is not a bundle identifier and stays unresolved")
+        suite.expect(MenuBarOrganizerSupport.hostedSourceIdentity(
+            from: hostedRecord(4, title: "com.notrunning.app"), runningApp: runningApp) == nil,
+                     "a bundle identifier with no running app stays unresolved")
+        if let promoted {
+            let identities = MenuBarOrganizerSupport.identities(for: [wechatRecord], sources: [10_310: promoted])
+            suite.expect(identities[10_310]?.state == .stable
+                         && identities[10_310]?.id.bundleIdentifier == "com.tencent.xinWeChat",
+                         "the proven source makes the hosted item's identity stable")
+        } else {
+            suite.expect(false, "the identity chain has a promoted WeChat source to classify")
+        }
+        suite.expect(!MenuBarOrganizerSupport.isSystemImmovable(bundleIdentifier: "com.tencent.xinWeChat", title: ""),
+                     "a resolved third-party app is not a system host")
+        suite.expect(MenuBarOrganizerSupport.isSystemImmovable(bundleIdentifier: MenuBarOrganizerSupport.controlCenterBundleIdentifier, title: ""),
+                     "the Control Center host itself stays protected")
+        suite.expect(MenuBarOrganizerPolicy.isOwnItem(ownerPID: 700, sourcePID: 722, bundleIdentifier: "com.tencent.xinWeChat",
+                                                      currentPID: 900, currentBundleIdentifier: "com.vorssaint.utils") == false,
+                     "a hosted third-party item is not treated as the app's own")
+
+        // MARK: Rendered separator resolution and routing (notched multi-display)
+
+        func barRecord(_ id: CGWindowID, title: String, x: CGFloat, width: CGFloat) -> MenuBarOrganizerWindowRecord {
+            .init(windowID: id, ownerPID: 700, ownerName: "Control Center",
+                  ownerBundleIdentifier: MenuBarOrganizerSupport.controlCenterBundleIdentifier,
+                  title: title, frame: CGRect(x: x, y: -531, width: width, height: 30),
+                  layer: 25, alpha: 1, isOnScreen: true)
+        }
+        let spacer = barRecord(20, title: "VorssaintMenuBarHider.alwaysHidden", x: 1_158, width: 1_944)
+        let separator = barRecord(21, title: "VorssaintMenuBarHider.separator", x: 3_140, width: 17)
+        let toggle = barRecord(22, title: "VorssaintMenuBarHider.toggle", x: 3_157, width: 32)
+        let hiddenItem = barRecord(23, title: "com.tencent.xinWeChat", x: 3_102, width: 38)
+        let barRecords = [spacer, separator, toggle, hiddenItem]
+        suite.expect(MenuBarOrganizerPolicy.physicalSeparatorRecord(
+            matching: CGRect(x: 1_165, y: -528, width: 1_930, height: 24),
+            in: barRecords, minimumWidthFraction: 0.5)?.windowID == 20,
+                     "an expanded spacer's cross-display logical frame resolves to its rendered window")
+        suite.expect(MenuBarOrganizerPolicy.physicalSeparatorRecord(
+            matching: CGRect(x: 3_109, y: -528, width: 3, height: 24),
+            in: barRecords, maximumWidthSlack: 24)?.windowID == 21,
+                     "a narrow separator matches its rendered window, not the wide spacer covering the same point")
+        suite.expect(MenuBarOrganizerPolicy.physicalSeparatorRecord(
+            matching: CGRect(x: 5_000, y: -528, width: 1_930, height: 24),
+            in: barRecords, minimumWidthFraction: 0.5) == nil,
+                     "a spacer with no rendered window fails closed")
+        suite.expect(MenuBarOrganizerPolicy.windowRecord(under: CGPoint(x: 3_145, y: -516), in: barRecords)?.windowID == 21,
+                     "an insertion point routes to the window under the pointer")
+        suite.expect(MenuBarOrganizerPolicy.windowRecord(under: CGPoint(x: 900, y: -516), in: barRecords) == nil,
+                     "an insertion point over empty space routes nowhere")
+        suite.expect(MenuBarHiderSupport.maximumSpacerWidth(screenWidths: [1_920, 1_920], stripWidths: [1_922]) >= 1_930,
+                     "a spacer sized to a notch strip wider than the widest full display stays valid")
+        suite.expect(MenuBarHiderSupport.maximumSpacerWidth(screenWidths: [1_440]) == 1_448,
+                     "without strips the bound follows the widest display")
+
+        // MARK: Move verification survives host window recycling
+
+        let wechat = item(id: "com.tencent.xinWeChat", window: 10_310, x: 3_000, section: .hidden)
+        let neighbor = item(id: "com.netease.uuremote", window: 200, x: 2_900, section: .hidden)
+        let relocated = item(id: "com.tencent.xinWeChat", window: 10_999, x: 3_000, section: .hidden)
+        let movedFirst = item(id: "com.tencent.xinWeChat", window: 10_999, x: 2_800, section: .hidden)
+        suite.expect(MenuBarOrganizerPolicy.verifiedPlacement(of: wechat.id, before: neighbor.id,
+                                                              section: .hidden, items: [movedFirst, neighbor]),
+                     "placement verification survives a host-assigned window number change")
+        suite.expect(MenuBarOrganizerPolicy.verifiedPlacement(of: wechat.id, before: nil,
+                                                              section: .hidden, items: [neighbor, relocated]),
+                     "an appended item verifies as last in its section")
+        suite.expect(!MenuBarOrganizerPolicy.verifiedPlacement(of: wechat.id, before: neighbor.id,
+                                                               section: .hidden, items: [neighbor, relocated]),
+                     "a misordered landing is refused")
+        suite.expect(!MenuBarOrganizerPolicy.verifiedPlacement(of: wechat.id, before: nil,
+                                                               section: .visible, items: [relocated]),
+                     "landing in the wrong section is refused")
+        suite.expect(MenuBarOrganizerPolicy.verifiedMove(windowID: 10_999, before: 200, section: .hidden,
+                                                         items: [movedFirst, neighbor]),
+                     "the window-number entry point keeps the same placement verdict")
     }
 
     private static func item(id: String, window: CGWindowID, x: CGFloat, occurrence: Int = 0,

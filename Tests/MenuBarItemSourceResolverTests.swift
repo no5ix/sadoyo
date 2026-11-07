@@ -92,6 +92,17 @@ enum MenuBarItemSourceResolverTests {
         suite.expect(staleRemoval.isEmpty, "an empty inventory invalidates a pending scan")
         let reappeared = await resolver.resolve(records: [original])
         suite.expect(reappeared[1]?.pid == 110, "a reappearing window cannot reuse a removed scan result")
+
+        // A bundle-shaped window name for an app that is not running is not
+        // fabricated; the Accessibility scan stays the fallback.
+        let ghost = MenuBarOrganizerWindowRecord(
+            windowID: 5, ownerPID: 10, ownerName: "Control Center",
+            ownerBundleIdentifier: MenuBarOrganizerSupport.controlCenterBundleIdentifier,
+            title: "com.vorssaint.tests.ghost", frame: CGRect(x: 500, y: 0, width: 20, height: 24),
+            layer: 25, alpha: 1, isOnScreen: true)
+        let ghostly = await resolver.resolve(records: [ghost])
+        suite.expect(ghostly[5]?.bundleIdentifier == "test.source",
+                     "a window name that matches no running app falls through to the Accessibility scan")
     }
 
     private static func record(owner: pid_t = 10, x: CGFloat = 100) -> MenuBarOrganizerWindowRecord {

@@ -117,8 +117,11 @@ final class MenuBarHiderService: NSResponder, ObservableObject {
         func windowID(_ item: NSStatusItem?) -> CGWindowID? {
             item?.button?.window.flatMap { MenuBarHiderSupport.statusWindowID($0.windowNumber) }
         }
-        let maximumSpacerWidth = (NSScreen.screens.map { $0.frame.width }.max()
-            ?? MenuBarHiderSupport.fallbackUsableWidth) + MenuBarHiderSupport.expansionMargin
+        let maximumSpacerWidth = MenuBarHiderSupport.maximumSpacerWidth(
+            screenWidths: NSScreen.screens.map { Double($0.frame.width) },
+            stripWidths: NSScreen.screens.flatMap {
+                [Double($0.auxiliaryTopLeftArea?.width ?? 0), Double($0.auxiliaryTopRightArea?.width ?? 0)]
+            })
         let ids = [windowID(toggleItem), windowID(physicalSeparatorItem), windowID(physicalAlwaysHiddenItem)]
         if let hiddenID = windowID(separatorItem), let alwaysID = windowID(alwaysHiddenItem),
            let hidden = MenuBarWindowServerBridge.frame(of: hiddenID),
@@ -131,7 +134,10 @@ final class MenuBarHiderService: NSResponder, ObservableObject {
         // Resolve our labelled controls through AX instead of using cached frames.
         guard AXIsProcessTrusted(),
               let normalHelp = separatorItem?.button?.toolTip,
-              let permanentHelp = alwaysHiddenItem?.button?.toolTip else { return nil }
+              let permanentHelp = alwaysHiddenItem?.button?.toolTip else {
+            MenuBarOrganizerService.logDiagnostic("geometry: ids=\(ids) trusted=\(AXIsProcessTrusted()) tips=\(String(describing: separatorItem?.button?.toolTip))/\(String(describing: alwaysHiddenItem?.button?.toolTip))")
+            return nil
+        }
         let pids = MenuBarHiderAccessibility.hostPIDs(
             currentPID: ProcessInfo.processInfo.processIdentifier,
             runningPIDs: { NSRunningApplication.runningApplications(withBundleIdentifier: $0).map(\.processIdentifier) })
@@ -144,15 +150,34 @@ final class MenuBarHiderService: NSResponder, ObservableObject {
             }
         }
         guard isEnabled, !Task.isCancelled, expectedGeneration == separatorMeasurementGeneration,
-              expectedRoles == separatorRolesSwapped, let positions,
-              MenuBarOrganizerPolicy.validSpacerFrame(positions.normal, maximumWidth: maximumSpacerWidth),
-              MenuBarOrganizerPolicy.validSpacerFrame(positions.permanent, maximumWidth: maximumSpacerWidth) else { return nil }
+              expectedRoles == separatorRolesSwapped, let positions else {
+            MenuBarOrganizerService.logDiagnostic("geometry: ax path nil (generation=\(expectedGeneration == separatorMeasurementGeneration) roles=\(expectedRoles == separatorRolesSwapped) positions=\(String(describing: positions)))")
+            return nil
+        }
+        // Accessibility reports AppKit's logical frames. With system-hosted
+        // items an expanded spacer's logical frame can begin left of its own
+        // menu bar and span displays, so resolve each separator to the window
+        // actually rendered inside one bar before trusting any coordinate.
+        let publicRecords = await MenuBarWindowProvider().publicMenuBarWindows()
+        let normalRecord = MenuBarOrganizerPolicy.physicalSeparatorRecord(
+            matching: positions.normal, in: publicRecords, maximumWidthSlack: 24)
+        let permanentRecord = MenuBarOrganizerPolicy.physicalSeparatorRecord(
+            matching: positions.permanent, in: publicRecords, minimumWidthFraction: 0.5)
+        guard let normal = normalRecord, let permanent = permanentRecord,
+              normal.windowID != permanent.windowID,
+              MenuBarOrganizerPolicy.validSpacerFrame(normal.frame, maximumWidth: maximumSpacerWidth),
+              MenuBarOrganizerPolicy.validSpacerFrame(permanent.frame, maximumWidth: maximumSpacerWidth) else {
+            MenuBarOrganizerService.logDiagnostic("geometry: separators unresolvable (normal=\(String(describing: normalRecord?.frame)) permanent=\(String(describing: permanentRecord?.frame)) maxW=\(maximumSpacerWidth))")
+            return nil
+        }
         var excluded = Set(ids.compactMap { $0 })
+        excluded.insert(normal.windowID)
+        excluded.insert(permanent.windowID)
         for id in MenuBarWindowServerBridge.menuBarWindowIDs() ?? [] {
             guard let frame = MenuBarWindowServerBridge.frame(of: id) else { continue }
-            if frame == positions.normal || frame == positions.permanent { excluded.insert(id) }
+            if frame == normal.frame || frame == permanent.frame { excluded.insert(id) }
         }
-        return (positions.normal, positions.permanent, excluded)
+        return (normal.frame, permanent.frame, excluded)
     }
 
     func resumeAfterOrganizerOperation() {
@@ -182,6 +207,25 @@ final class MenuBarHiderService: NSResponder, ObservableObject {
 
     var organizerDisplayState: MenuBarHiderSupport.DisplayState {
         isCollapsed ? .collapsed : .expanded
+    }
+
+    private var revealedAlwaysHiddenLength: CGFloat?
+
+    /// Reveals the always-hidden zone for one organizer move. The permanent
+    /// spacer is the only thing pushing those items off the bar, so resting
+    /// it to the thin width lets the mover pick the item up; the caller
+    /// restores the spacer when the operation ends.
+    func revealAlwaysHiddenForOrganizer() {
+        guard isEnabled, !isConfiguring, let item = alwaysHiddenItem,
+              revealedAlwaysHiddenLength == nil else { return }
+        revealedAlwaysHiddenLength = item.length
+        item.length = CGFloat(MenuBarHiderSupport.normalSeparatorWidth)
+    }
+
+    func restoreAlwaysHiddenAfterOrganizerReveal() {
+        guard let length = revealedAlwaysHiddenLength else { return }
+        revealedAlwaysHiddenLength = nil
+        alwaysHiddenItem?.length = length
     }
 
     func restoreAfterOrganizerActivation(_ state: MenuBarHiderSupport.DisplayState) {

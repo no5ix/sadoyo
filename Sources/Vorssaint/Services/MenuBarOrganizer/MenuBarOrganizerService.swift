@@ -207,6 +207,9 @@ final class MenuBarOrganizerService: ObservableObject {
 
     private func uniqueItem(_ id: MenuBarItemIdentity, allowProtected: Bool = false) throws -> ManagedMenuBarItem {
         guard let item = MenuBarOrganizerPolicy.uniquelyIdentified(id, in: items, allowProtected: allowProtected) else {
+            let matches = items.filter { $0.id.bundleIdentifier == id.bundleIdentifier && $0.id.title == id.title }
+            let match = matches.first
+            diagnostic("identity recheck: \(matches.count) matches, state=\(match?.identityState.rawValue ?? "none"), protected=\(match?.isProtected ?? false), movable=\(match?.isMovable ?? false), framesValid=\(matches.allSatisfy { MenuBarOrganizerPolicy.validFrame($0.frame) })")
             throw MenuBarItemMoveError.itemUnavailable
         }
         return item
@@ -219,6 +222,7 @@ final class MenuBarOrganizerService: ObservableObject {
         refreshTask = nil
         needsIdentityRefresh = true // Revalidate identities once before new input.
         isBusy = true // Reserve before scheduling so rapid drops cannot overlap.
+        let priorDisplayState = hider.organizerDisplayState
         hider.beginOrganizerOperation()
         message = nil
         let expected = generation
@@ -235,26 +239,46 @@ final class MenuBarOrganizerService: ObservableObject {
             }
             do { try await action(expected); completed = true }
             catch is CancellationError { }
-            catch { if generation == expected { report(error) } }
+            catch {
+                if generation == expected {
+                    hider.restoreAlwaysHiddenAfterOrganizerReveal()
+                    report(error)
+                    // A move expands the bar for reachable source frames. When
+                    // it fails, leave the bar as the user had it, never stuck
+                    // expanded with recovery hidden behind the spacer.
+                    hider.restoreAfterOrganizerActivation(priorDisplayState)
+                }
+            }
         }
     }
 
     func move(id: MenuBarItemIdentity, before target: MenuBarItemIdentity?, to section: MenuBarOrganizerSection) {
         guard id != target else { return }
         let anchor = target.flatMap { target in items.first(where: { $0.id == target }).map(MenuBarItemAnchor.init) }
-        guard target == nil || anchor != nil else { report(MenuBarItemMoveError.itemUnavailable); return }
+        guard target == nil || anchor != nil else { diagnostic("move: anchor unresolved"); report(MenuBarItemMoveError.itemUnavailable); return }
+        let sourceWasAlwaysHidden = items.first { $0.id == id }?.section == .alwaysHidden
         run { [weak self] expected in
             guard let self else { return }
             hider.prepareForOrganizerOperation()
+            // Always-hidden items rest off the bar behind the permanent
+            // spacer; expanding the bar pushes them further away. Rest the
+            // spacer so the mover can pick the item up from the bar itself.
+            if sourceWasAlwaysHidden { hider.revealAlwaysHiddenForOrganizer() }
             try await Task.sleep(for: .milliseconds(180))
-            guard await snapshot(expected: expected) != nil else { throw MenuBarItemMoveError.itemUnavailable }
+            guard await snapshot(expected: expected) != nil else { diagnostic("move: pre-move snapshot unavailable"); throw MenuBarItemMoveError.itemUnavailable }
+            let probe = items.filter { $0.id == id }.first
+            let probeText = probe.map { "\($0.displayName)@\($0.section.rawValue)/\($0.identityState.rawValue)" } ?? "absent"
+            diagnostic("move: pre items=\(items.count) target=\(probeText) sections=\(Dictionary(grouping: items, by: { $0.section.rawValue }).mapValues(\.count))")
             let original = try uniqueItem(id)
+            let originalSection = sourceWasAlwaysHidden ? MenuBarOrganizerSection.alwaysHidden : original.section
             let ordered = MenuBarOrganizerSupport.orderedItems(items, in: original.section)
             let index = ordered.firstIndex { $0.windowID == original.windowID }!
-            let neighbor = index + 1 < ordered.count ? MenuBarItemAnchor(ordered[index + 1]) : nil
+            let neighbor = originalSection == .alwaysHidden || index + 1 >= ordered.count
+                ? nil : MenuBarItemAnchor(ordered[index + 1])
             try await relocate(id: id, before: anchor, to: section, expected: expected)
-            undo = (id, original.section, neighbor)
+            undo = (id, originalSection, neighbor)
             canUndo = true
+            hider.restoreAlwaysHiddenAfterOrganizerReveal()
             hider.resumeAfterOrganizerOperation()
         }
     }
@@ -278,16 +302,16 @@ final class MenuBarOrganizerService: ObservableObject {
         for attempt in 0..<2 {
             try checkAccess()
             guard await snapshot(expected: expected) != nil,
-                  let geometry = await hider.organizerGeometry() else { throw MenuBarItemMoveError.itemUnavailable }
+                  let geometry = await hider.organizerGeometry() else { diagnostic("relocate: snapshot/geometry unavailable"); throw MenuBarItemMoveError.itemUnavailable }
             let item = try uniqueItem(id)
-            guard item.isMovable else { throw MenuBarItemMoveError.itemNotMovable }
+            guard item.isMovable else { diagnostic("relocate: item not movable"); throw MenuBarItemMoveError.itemNotMovable }
             let targetItem = target?.resolve(in: items)
-            guard target == nil || targetItem != nil else { throw MenuBarItemMoveError.itemUnavailable }
-            if let targetItem, targetItem.section != section { throw MenuBarItemMoveError.itemUnavailable }
+            guard target == nil || targetItem != nil else { diagnostic("relocate: destination anchor unresolved"); throw MenuBarItemMoveError.itemUnavailable }
+            if let targetItem, targetItem.section != section { diagnostic("relocate: destination anchor in other section"); throw MenuBarItemMoveError.itemUnavailable }
             if requiresVisibleDestination {
                 guard let targetItem, let strip = visibleStrip(containing: geometry.hidden),
                       MenuBarOrganizerPolicy.activationTarget(for: item, in: items, strip: strip)?.id == targetItem.id
-                else { throw MenuBarItemMoveError.itemUnavailable }
+                else { diagnostic("relocate: activation target unresolved"); throw MenuBarItemMoveError.itemUnavailable }
             }
             let divider: CGRect?
             switch section {
@@ -296,30 +320,51 @@ final class MenuBarOrganizerService: ObservableObject {
             }
             let lastVisible = section == .visible && targetItem == nil
                 ? MenuBarOrganizerSupport.orderedItems(items, in: .visible).last(where: { $0.id != id }) : nil
-            guard let destination = targetItem?.frame ?? lastVisible?.frame ?? divider else { throw MenuBarItemMoveError.itemUnavailable }
-            let destinationWindowID = targetItem?.windowID ?? lastVisible?.windowID
-                ?? (MenuBarWindowServerBridge.menuBarWindowIDs() ?? []).first {
-                    MenuBarWindowServerBridge.frame(of: $0) == destination
-                }
-            guard let destinationWindowID else { throw MenuBarItemMoveError.itemUnavailable }
+            guard let destination = targetItem?.frame ?? lastVisible?.frame ?? divider else { diagnostic("relocate: no destination frame"); throw MenuBarItemMoveError.itemUnavailable }
             let placeAfter = targetItem == nil && section == .visible
             let insertion = MenuBarOrganizerPolicy.insertionFrame(destination, after: placeAfter)
             let quartzDestination = CGRect(x: insertion.minX, y: item.frame.minY,
                                            width: insertion.width, height: item.frame.height)
             // A native item belongs to one menu bar; do not drag across displays.
-            guard abs(destination.midY - item.frame.midY) < 8 else { throw MenuBarItemMoveError.itemUnavailable }
+            guard abs(destination.midY - item.frame.midY) < 8 else { diagnostic("relocate: destination on another bar (\(destination.midY) vs \(item.frame.midY))"); throw MenuBarItemMoveError.itemUnavailable }
+            // The drag ends on the window that is under the insertion point.
+            // For a divider destination on a system-hosted bar, the app's own
+            // WindowServer connection cannot name that window, so resolve it
+            // from the public list: exact frame first, then window under point.
+            let insertionPoint = CGPoint(x: placeAfter ? destination.maxX + 2 : destination.minX - 2,
+                                         y: destination.midY)
+            let exactDestinationWindowID = targetItem?.windowID ?? lastVisible?.windowID
+                ?? (MenuBarWindowServerBridge.menuBarWindowIDs() ?? []).first {
+                    MenuBarWindowServerBridge.frame(of: $0) == destination
+                }
+            var routedDestinationWindowID = exactDestinationWindowID
+            if routedDestinationWindowID == nil {
+                routedDestinationWindowID = MenuBarOrganizerPolicy.windowRecord(
+                    under: insertionPoint,
+                    in: await provider.publicMenuBarWindows())?.windowID
+            }
+            let destinationWindowID = routedDestinationWindowID
+            guard let destinationWindowID else {
+                diagnostic("relocate: destination window unresolved (divider frame=\(destination), point=\(insertionPoint))")
+                throw MenuBarItemMoveError.itemUnavailable
+            }
             try await mover.move(item: item, destinationFrame: quartzDestination,
                                  destinationWindowID: destinationWindowID,
                                  placeAfter: placeAfter,
                                  onDragStart: { [weak self] in self?.activationRecovery?.mayBeDisplaced = true })
             try await Task.sleep(for: .milliseconds(180 + attempt * 80))
-            guard await snapshot(expected: expected) != nil else { throw MenuBarItemMoveError.itemUnavailable }
+            guard await snapshot(expected: expected) != nil else { diagnostic("relocate: post-move snapshot unavailable"); throw MenuBarItemMoveError.itemUnavailable }
+            // A system host may re-wrap a moved item in a fresh window, so the
+            // post-move proof is the stable identity and its owning process,
+            // not the window number. Placement is proven by verifiedMove.
             guard let refreshed = MenuBarOrganizerPolicy.uniquelyIdentified(id, in: items),
-                  refreshed.windowID == item.windowID, refreshed.ownerPID == item.ownerPID else {
+                  refreshed.ownerPID == item.ownerPID, refreshed.sourcePID == item.sourcePID else {
+                diagnostic("relocate: identity changed after move (window=\(item.windowID) pid=\(item.ownerPID))")
                 throw MenuBarItemMoveError.itemUnavailable
             }
-            if MenuBarOrganizerPolicy.verifiedMove(windowID: item.windowID, before: targetItem?.windowID,
-                                                   section: section, items: items) { return }
+            if MenuBarOrganizerPolicy.verifiedPlacement(of: refreshed.id,
+                                                        before: targetItem?.id,
+                                                        section: section, items: items) { return }
         }
         throw MenuBarItemMoveError.verificationFailed
     }
@@ -420,6 +465,12 @@ final class MenuBarOrganizerService: ObservableObject {
     }
 
     private func diagnostic(_ message: String) {
+        if ProcessInfo.processInfo.environment["VORSSAINT_MENU_BAR_DIAGNOSTICS"] == "1" {
+            NSLog("Menu bar %@", message)
+        }
+    }
+
+    static func logDiagnostic(_ message: String) {
         if ProcessInfo.processInfo.environment["VORSSAINT_MENU_BAR_DIAGNOSTICS"] == "1" {
             NSLog("Menu bar %@", message)
         }

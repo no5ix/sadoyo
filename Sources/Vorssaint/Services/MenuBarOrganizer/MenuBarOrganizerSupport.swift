@@ -144,6 +144,28 @@ enum MenuBarOrganizerSupport {
     static let controlCenterBundleIdentifier = "com.apple.controlcenter"
     static let systemUIServerBundleIdentifier = "com.apple.systemuiserver"
 
+    /// System hosts name each hosted status window with the bundle identifier
+    /// of the app that created the item. When that name resolves to a running
+    /// app it is a proven source identity — no frame guessing — so the item
+    /// is movable. Apple-owned hosts stay protected, and an ambiguous name
+    /// never promotes an item.
+    static func hostedSourceIdentity(
+        from record: MenuBarOrganizerWindowRecord,
+        runningApp: (String) -> (pid: pid_t, name: String)?
+    ) -> MenuBarItemSourceIdentity? {
+        let title = record.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let pattern = "^[A-Za-z0-9]([A-Za-z0-9_-]*[.])+[A-Za-z]{2,}$"
+        guard title.range(of: pattern, options: [.regularExpression, .caseInsensitive]) != nil else { return nil }
+        guard !title.lowercased().hasPrefix("com.apple.") else { return nil }
+        guard let app = runningApp(title) else { return nil }
+        return MenuBarItemSourceIdentity(
+            pid: app.pid,
+            bundleIdentifier: title,
+            name: app.name,
+            axIdentifier: nil,
+            axTitle: title)
+    }
+
     // An AX-proven app with exactly one status item has an unambiguous slot even
     // when AppKit supplies neither a title nor an identifier. Multiple untitled
     // slots must remain provisional; window-number ordering cannot identify them.

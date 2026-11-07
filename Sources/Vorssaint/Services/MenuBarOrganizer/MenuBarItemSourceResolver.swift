@@ -52,9 +52,31 @@ actor MenuBarItemSourceResolver {
         cachedRecords = Dictionary(uniqueKeysWithValues: records.map { ($0.windowID, $0) })
 
         var result = cache
-        let unresolvedHosted = records.filter {
+        var unresolvedHosted = records.filter {
             $0.ownerBundleIdentifier == MenuBarOrganizerSupport.controlCenterBundleIdentifier
                 && result[$0.windowID] == nil
+        }
+
+        if !unresolvedHosted.isEmpty {
+            // The system host names each status window with the bundle
+            // identifier of the app that created the item. When that name
+            // matches a running app the source is proven, not guessed.
+            let running = Dictionary(
+                NSWorkspace.shared.runningApplications.compactMap { app -> (String, (pid: pid_t, name: String))? in
+                    guard !app.isTerminated, let id = app.bundleIdentifier, !id.isEmpty else { return nil }
+                    return (id, (app.processIdentifier, app.localizedName ?? id))
+                },
+                uniquingKeysWith: { first, _ in first })
+            for record in unresolvedHosted where result[record.windowID] == nil {
+                if let source = MenuBarOrganizerSupport.hostedSourceIdentity(from: record, runningApp: { running[$0] }) {
+                    result[record.windowID] = source
+                    cache[record.windowID] = source
+                }
+            }
+            unresolvedHosted = records.filter {
+                $0.ownerBundleIdentifier == MenuBarOrganizerSupport.controlCenterBundleIdentifier
+                    && result[$0.windowID] == nil
+            }
         }
 
         for record in records

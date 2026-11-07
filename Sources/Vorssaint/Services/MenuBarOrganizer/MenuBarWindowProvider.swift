@@ -101,6 +101,27 @@ final class MenuBarWindowProvider {
         }
     }
 
+    /// Every on-screen window from the public list, without the inventory
+    /// filters. The organizer resolves system-hosted dividers through this:
+    /// the app's own WindowServer connection cannot name those windows, and
+    /// Accessibility reports AppKit's logical frames, not what is rendered.
+    func publicMenuBarWindows() async -> [MenuBarOrganizerWindowRecord] {
+        await withCheckedContinuation { continuation in
+            queue.async {
+                let options: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
+                guard let raw = CGWindowListCopyWindowInfo(
+                    options, kCGNullWindowID) as? [[String: Any]]
+                else {
+                    continuation.resume(returning: [])
+                    return
+                }
+                continuation.resume(returning: raw.compactMap {
+                    Self.record(from: $0, bridge: MenuBarWindowServerBridge.self)
+                })
+            }
+        }
+    }
+
     private static func enumerate(
         using bridge: MenuBarWindowServerBridge.Type
     ) -> EnumerationResult {

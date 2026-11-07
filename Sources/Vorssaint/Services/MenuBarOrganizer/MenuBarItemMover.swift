@@ -31,11 +31,13 @@ final class MenuBarItemMover {
         guard MenuBarOrganizerPolicy.supportsAdvancedBackend else { throw MenuBarItemMoveError.itemUnavailable }
         try Task.checkCancellation()
         guard AXIsProcessTrusted() else { throw MenuBarItemMoveError.permissionMissing }
-        guard MenuBarOrganizerPolicy.validFrame(item.frame), MenuBarOrganizerPolicy.validFrame(destinationFrame) else { throw MenuBarItemMoveError.itemUnavailable }
+        guard MenuBarOrganizerPolicy.validFrame(item.frame), MenuBarOrganizerPolicy.validFrame(destinationFrame) else { MenuBarOrganizerService.logDiagnostic("mover: invalid frame item=\(item.frame) dest=\(destinationFrame)"); throw MenuBarItemMoveError.itemUnavailable }
         guard item.identityState == .stable else {
+            MenuBarOrganizerService.logDiagnostic("mover: provisional identity \(item.bundleIdentifier)/\(item.title)")
             throw MenuBarItemMoveError.provisionalIdentity
         }
         guard item.isMovable, !item.isProtected else {
+            MenuBarOrganizerService.logDiagnostic("mover: not movable/protected \(item.bundleIdentifier)/\(item.title)")
             throw MenuBarItemMoveError.itemNotMovable
         }
         guard !isMoving else { throw MenuBarItemMoveError.busy }
@@ -56,6 +58,8 @@ final class MenuBarItemMover {
         guard !Self.hasOpenMenu(for: relevantPIDs) else { throw MenuBarItemMoveError.menuOpen }
         guard let fresh = MenuBarWindowServerBridge.frame(of: item.windowID),
               abs(fresh.midX - item.frame.midX) < 2, abs(fresh.midY - item.frame.midY) < 2 else {
+            let freshFrame = MenuBarWindowServerBridge.frame(of: item.windowID)
+            MenuBarOrganizerService.logDiagnostic("mover: fresh frame mismatch window=\(item.windowID) fresh=\(String(describing: freshFrame)) cached=\(item.frame)")
             throw MenuBarItemMoveError.itemUnavailable
         }
         let originalPointer = CGEvent(source: nil)?.location

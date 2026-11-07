@@ -59,6 +59,60 @@ enum MenuBarOrganizerPolicy {
                width: 1, height: frame.height)
     }
 
+    /// Our own separator controls report AppKit's logical frame through
+    /// Accessibility. With system-hosted status items an expanded spacer's
+    /// logical frame can begin left of its own menu bar and span two displays,
+    /// so route destinations and exclusions must use the window actually
+    /// rendered inside one display. A window qualifies only when it sits in
+    /// the logical frame's band and mostly fits inside it; no qualifying
+    /// window is a fail-closed nil, never a guessed rectangle.
+    static func physicalSeparatorRecord(matching logical: CGRect,
+                                        in records: [MenuBarOrganizerWindowRecord],
+                                        maximumWidthSlack: CGFloat = 0,
+                                        minimumWidthFraction: CGFloat = 0) -> MenuBarOrganizerWindowRecord? {
+        guard logical.width > 0, logical.height > 0,
+              [logical.minX, logical.minY, logical.midY].allSatisfy(\.isFinite) else { return nil }
+        var best: (record: MenuBarOrganizerWindowRecord, score: CGFloat)?
+        for record in records where record.isOnScreen && record.alpha > 0 {
+            guard [record.frame.minX, record.frame.midY].allSatisfy(\.isFinite),
+                  record.frame.width > 0, record.frame.height > 0 else { continue }
+            // A resting separator is a narrow control; a spacer is a wide
+            // strip. A window of the other class covering the same logical
+            // frame is a neighbour, never the control itself.
+            let isNarrowControl = maximumWidthSlack > 0
+            if isNarrowControl, record.frame.width > logical.width + maximumWidthSlack { continue }
+            if minimumWidthFraction > 0, record.frame.width < logical.width * minimumWidthFraction { continue }
+            guard abs(record.frame.midY - logical.midY)
+                    <= max(record.frame.height, logical.height) / 2 + 4 else { continue }
+            var score: CGFloat
+            if isNarrowControl {
+                // AppKit's slot math and the host's rendered window differ by
+                // the spacer clamping, so a narrow control is matched by
+                // horizontal proximity, not by frame overlap.
+                let xGap = max(record.frame.minX, logical.minX) - min(record.frame.maxX, logical.maxX)
+                guard xGap <= 64 else { continue }
+                score = -max(xGap, 0)
+            } else {
+                let overlap = record.frame.intersection(logical)
+                guard !overlap.isNull else { continue }
+                guard overlap.width >= min(record.frame.width, logical.width) * 0.6,
+                      overlap.height >= min(record.frame.height, logical.height) * 0.6 else { continue }
+                score = overlap.width * overlap.height
+            }
+            if best == nil || score > best!.score { best = (record, score) }
+        }
+        return best?.record
+    }
+
+    /// The frontmost on-screen window covering an insertion point. Synthetic
+    /// events route by "window under the pointer", and the app's own
+    /// WindowServer connection cannot name a system-hosted divider, so the
+    /// public list resolves it. Records arrive front-to-back.
+    static func windowRecord(under point: CGPoint,
+                             in records: [MenuBarOrganizerWindowRecord]) -> MenuBarOrganizerWindowRecord? {
+        records.first { $0.isOnScreen && $0.alpha > 0 && $0.frame.contains(point) }
+    }
+
     /// Search all words in order within the name, then prefer contiguous matches.
     static func searchScore(query: String, name: String) -> Int? {
         let query = query.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
@@ -93,11 +147,23 @@ enum MenuBarOrganizerPolicy {
                              section: MenuBarOrganizerSection, items: [ManagedMenuBarItem]) -> Bool {
         let matches = items.filter { $0.windowID == windowID }
         guard matches.count == 1, let item = matches.first, item.section == section else { return false }
+        let targetIdentity: MenuBarItemIdentity? = targetID.flatMap { target in
+            items.first { $0.windowID == target }.map(\.id)
+        }
+        return verifiedPlacement(of: item.id, before: targetIdentity, section: section, items: items)
+    }
+
+    /// A system host may re-wrap a moved item in a fresh window, so placement
+    /// is verified by stable identity, not by window number.
+    static func verifiedPlacement(of movedID: MenuBarItemIdentity, before targetID: MenuBarItemIdentity?,
+                                  section: MenuBarOrganizerSection, items: [ManagedMenuBarItem]) -> Bool {
+        let matches = items.filter { $0.id == movedID }
+        guard matches.count == 1, let item = matches.first, item.section == section else { return false }
         let ordered = MenuBarOrganizerSupport.orderedItems(items, in: section)
-        guard let targetID else { return ordered.last?.windowID == windowID }
-        guard let index = ordered.firstIndex(where: { $0.windowID == windowID }),
+        guard let targetID else { return ordered.last?.id == movedID }
+        guard let index = ordered.firstIndex(where: { $0.id == movedID }),
               index + 1 < ordered.count else { return false }
-        return ordered[index + 1].windowID == targetID
+        return ordered[index + 1].id == targetID
     }
 
     /// Inserting before an item leaves that item's right-anchored position
