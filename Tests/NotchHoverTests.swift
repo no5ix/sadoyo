@@ -188,6 +188,12 @@ enum NotchHoverTests {
             suite.expect(condition, message)
         }
         let volume = NotchNotice(event: .volume, title: "Volume", detail: "50%", symbol: "speaker.wave.2.fill", level: 0.5)
+        // A mirrored notification is the person's own message, so the pointer
+        // holds it and opens its card in place; the island's page stays closed.
+        let message = NotchNotice(event: .systemNotification, title: "Alex", detail: "Hello", symbol: "bell.fill",
+                                  notification: NotchNotificationContent(app: "Chat", title: "Alex", subtitle: "",
+                                                                         body: "Hello"),
+                                  notificationID: UUID())
         func fixture(physical: Bool = false) -> Service {
             DispatchQueue.main = NotchScreenRefreshContract.Scheduler()
             UserDefaults.standard = UserDefaults.Preferences()
@@ -683,18 +689,20 @@ enum NotchHoverTests {
             follow(to: CGPoint(x: top.midX, y: top.maxY + 300))
             suite.expect(!silent.hoverEmphasized && NSEvent.global.isEmpty && NSEvent.local.isEmpty,
                          "an unreported exit to the display above still clears the emphasis and its observers")
-            // A notice that holds back a preview leaves the island emphasized
-            // under a resting pointer, so following goes on past the deadline.
+            // A mirrored notification the pointer holds open in place leaves
+            // the island emphasized under a resting pointer, so following goes
+            // on past the deadline. The island's own banners do not hold the
+            // opening back; the page opens over them.
             let interrupted = fixture()
             UserDefaults.standard.expands = false
             NSEvent.mouseLocation = CGPoint(x: top.midX, y: top.maxY - 1)
             interrupted.hover(true)
-            interrupted.notice = volume
+            interrupted.notice = message
             DispatchQueue.main.advance(1)
             interrupted.notice = nil
             suite.expect(!interrupted.peeking && interrupted.hoverWork == nil && interrupted.hoverEmphasized
                          && NSEvent.global.count == 1 && NSEvent.local.count == 1,
-                         "a preview a notice held back keeps following the emphasized island")
+                         "the preview of a notification the pointer holds keeps following the emphasized island")
             follow(to: CGPoint(x: top.midX, y: top.maxY + 300))
             suite.expect(!interrupted.hoverEmphasized && !interrupted.inside
                          && NSEvent.global.isEmpty && NSEvent.local.isEmpty,
@@ -1003,7 +1011,7 @@ enum NotchHoverTests {
         for protect: (Service) -> Void in [
             { $0.pinned = true }, { $0.heldDrag = true }, { $0.keepsWorkingSurface = true },
             { $0.captureControls = true }, { $0.hoverState.close(pointerInside: true) },
-            { $0.notice = volume }, { $0.dragPlaceholder = true }, { $0.suspended = true }, { $0.running = false },
+            { $0.notice = message }, { $0.dragPlaceholder = true }, { $0.suspended = true }, { $0.running = false },
             { _ in UserDefaults.standard.enabled = false }
         ] {
             let protected = fixture()
@@ -1055,6 +1063,130 @@ enum NotchHoverTests {
         musicStripClickContracts(fixture: fixture, leave: leave, expect: expect)
         musicStripCapsuleSizingContracts(fixture: fixture, leave: leave, expect: expect)
         shelfDragContracts(fixture: fixture, expect: expect)
+        temporaryPresentationContracts(fixture: fixture, leave: leave, expect: expect)
+    }
+
+    /// A deliberate hover goes past whatever the island is showing at the
+    /// moment — a countdown that ended, a song changing, a strip at rest, two
+    /// activities at once, a level's reading — and opens the island's page.
+    /// The presentation it goes past is left as it was: the banner keeps its
+    /// place and its own dismissal, the song a skip held stays held, and the
+    /// opening decides nothing about the activity behind it, so a ringing
+    /// countdown keeps ringing and a changing song keeps changing.
+    private static func temporaryPresentationContracts(fixture: (Bool) -> Service, leave: (Service) -> Void,
+                                                       expect: (Bool, String) -> Void) {
+        let finished = NotchNotice(event: .timer, title: "Time is up", detail: "Timer", symbol: "timer")
+        let changing = NotchNotice(event: .track, title: "The song after", detail: "An artist", symbol: "music.note")
+        let level = NotchNotice(event: .volume, title: "Volume", detail: "50%",
+                                symbol: "speaker.wave.2.fill", level: 0.5)
+        for physical in [false, true] {
+            for banner in [finished, changing, level] {
+                let service = fixture(physical)
+                service.notice = banner
+                service.scheduleNoticeDismissal(after: banner.event.duration)
+                service.updateBounds()
+                let dismissal = service.noticeWork
+                service.hover(true)
+                expect(service.hoverWork != nil,
+                       "a hover over the island's own \(banner.event) banner schedules the opening, \(physical)")
+                DispatchQueue.main.advance(0.20)
+                expect(service.openings == 0 && !service.expanded,
+                       "the banner's own moment does not shorten the hover's delay")
+                DispatchQueue.main.advance(0.06)
+                expect(service.openings == 1 && service.expanded && service.openedByHover,
+                       "the hover opens the island's page over the \(banner.event) banner")
+                expect(service.notice == banner && service.noticeWork === dismissal && !service.noticeExpanded,
+                       "and leaves the banner in place with the dismissal it already had")
+                leave(service)
+                DispatchQueue.main.advance(UserDefaults.standard.closeDelay + 0.01)
+                expect(service.closures == 1 && !service.expanded,
+                       "leaving collapses the page as any hover opening does")
+                expect(service.notice == banner && service.noticeWork === dismissal,
+                       "the banner outlives the page it opened, untouched by the hover")
+            }
+            for activity in [NotchCompactActivity.timer, .watch, .downloads, .agents, .calendar, .music, .keepAwake] {
+                let strip = fixture(physical)
+                strip.compactActivity = activity
+                strip.compactActivities = [activity]
+                strip.updateBounds()
+                strip.hover(true)
+                DispatchQueue.main.advance(0.26)
+                expect(strip.openings == 1 && strip.requestedModule == nil,
+                       "a hover over the \(activity) strip opens the island, naming no page, \(physical)")
+                expect(strip.compactActivity == activity,
+                       "the activity the strip shows is left running behind the page")
+                leave(strip)
+                DispatchQueue.main.advance(UserDefaults.standard.closeDelay + 0.01)
+                expect(strip.closures == 1, "and the page closes as the pointer leaves")
+            }
+            // Two activities at once, and a banner over an activity: the page
+            // holds every activity, so a hover goes straight to it.
+            let paired = fixture(physical)
+            paired.compactActivity = .timer
+            paired.compactActivities = [.timer, .music]
+            paired.notice = changing
+            paired.heldMusic = NotchCompactMusicSnapshot(title: "The song before")
+            paired.updateBounds()
+            paired.hover(true)
+            DispatchQueue.main.advance(0.26)
+            expect(paired.openings == 1 && paired.expanded,
+                   "a hover opens the page over two activities and a banner, \(physical)")
+            expect(paired.compactActivity == .timer && paired.compactActivities == [.timer, .music]
+                   && paired.heldMusic?.title == "The song before" && paired.notice == changing,
+                   "and asks nothing of the activities, the song a skip held, or the banner")
+        }
+        // A song leaving for the next one: the hover opens the page while the
+        // transition plays out, and the strip's song stays held behind it.
+        let transitioning = fixture(false)
+        transitioning.compactActivity = .music
+        transitioning.presentedMusic = NotchCompactMusicSnapshot(title: "The song before")
+        transitioning.heldMusic = NotchCompactMusicSnapshot(title: "The song before")
+        transitioning.notice = changing
+        transitioning.updateBounds()
+        transitioning.hover(true)
+        DispatchQueue.main.advance(0.26)
+        expect(transitioning.openings == 1 && transitioning.notice?.event == .track
+               && transitioning.heldMusic?.title == "The song before"
+               && transitioning.presentedMusic?.title == "The song before"
+               && transitioning.compactActivity == .music,
+               "a hover through a song's transition opens the page and leaves the transition to finish")
+        // A mirrored notification is the person's own message, so it is held
+        // under the pointer, where the hover opens its whole card in place.
+        let banner = NotchNotice(event: .systemNotification, title: "Alex", detail: "Hello", symbol: "bell.fill",
+                                 notification: NotchNotificationContent(app: "Chat", title: "Alex", subtitle: "",
+                                                                        body: "Hello"),
+                                 notificationID: UUID())
+        let message = fixture(false)
+        message.notice = banner
+        message.scheduleNoticeDismissal(after: banner.event.duration)
+        message.updateBounds()
+        message.hover(true)
+        DispatchQueue.main.advance(0.26)
+        expect(message.noticeExpanded && message.openings == 0,
+               "a mirrored notification is opened in place, as its own expansion")
+        // A pinned island, a dialog, a drag and the capture controls keep what
+        // they hold against a hover; the page is not opened over them.
+        for hold: (Service) -> Void in [{ $0.pinned = true }, { $0.heldDrag = true },
+                                        { $0.keepsWorkingSurface = true }, { $0.captureControls = true }] {
+            let held = fixture(false)
+            held.notice = finished
+            held.updateBounds()
+            held.hover(true)
+            hold(held)
+            DispatchQueue.main.advance(1)
+            expect(held.openings == 0 && held.notice == finished,
+                   "pinning, a drag, a dialog or the capture controls keep the island against a hover over a banner")
+        }
+        // An island the person closed by hand under the pointer stays closed,
+        // and a banner on it does not change that.
+        let closed = fixture(false)
+        closed.notice = finished
+        closed.updateBounds()
+        closed.hoverState.close(pointerInside: true)
+        closed.hover(true)
+        DispatchQueue.main.advance(1)
+        expect(closed.openings == 0 && closed.notice == finished,
+               "a hover suppressed by an explicit close stays suppressed over a banner")
     }
 
     /// A shelf tile dragged out of the open island closes it once the tile

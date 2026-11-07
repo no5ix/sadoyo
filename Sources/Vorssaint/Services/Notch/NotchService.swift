@@ -1742,7 +1742,8 @@ final class NotchService: ObservableObject {
         hoverWork?.cancel(); hoverWork = nil
         if inside {
             if holdsNotification, let id = notice?.notificationID { holdNotification(id); return }
-            guard !hoverState.suppressed, (notice == nil || hiddenUntilHover), !expanded, !peeking, !dragPlaceholder,
+            guard !hoverState.suppressed, hoverOpensThroughNotice || notice == nil || hiddenUntilHover,
+                  !expanded, !peeking, !dragPlaceholder,
                   hoverOpeningEnabled else { return }
             if !hiddenInFullscreen, compactActivity != nil, compactActivityGeometry.compactActivityWingWidth > 0,
                !UserDefaults.standard.bool(forKey: DefaultsKey.notchHoverExpands) { return }
@@ -1754,7 +1755,8 @@ final class NotchService: ObservableObject {
                 // decides whether it is still needed.
                 guard self.running, !self.suspended, self.inside, !self.hoverState.suppressed,
                       !self.expanded, !self.peeking, !self.pinned, !self.heldDrag, !self.keepsWorkingSurface,
-                      self.captureControls == nil, (self.notice == nil || self.hiddenUntilHover), !self.dragPlaceholder,
+                      self.captureControls == nil,
+                      (self.notice?.notificationID == nil || self.hiddenUntilHover), !self.dragPlaceholder,
                       self.hoverOpeningEnabled,
                       self.windowHost?.blocksHoverReveal() == false,
                       self.geometry.contains(NSEvent.mouseLocation, in: self.watchesHiddenHover ? self.geometry.collapsed : self.surfaceSize) else { return }
@@ -1831,6 +1833,21 @@ final class NotchService: ObservableObject {
     private func removeHoverExitMonitors() {
         hoverExitMonitors.forEach(NSEvent.removeMonitor)
         hoverExitMonitors.removeAll()
+    }
+
+    /// Whether what the island is showing lets a hover go on to its page.
+    ///
+    /// An event's own banner — a countdown ending, a song changing, a
+    /// download finishing — is a temporary presentation the person did not ask
+    /// for, so a deliberate hover goes past it to the page, exactly as it goes
+    /// past a resting strip, an activity, or a companion. The banner and the
+    /// activity behind it are left alone: the page is drawn over them and the
+    /// banner keeps its own dismissal, so a ringing countdown keeps ringing and
+    /// a changing song keeps changing. A mirrored notification is the person's
+    /// own message, not the island's, and it is held under the pointer, where a
+    /// deliberate hover opens its whole card in place; that is its expansion.
+    private var hoverOpensThroughNotice: Bool {
+        notice?.notificationID == nil
     }
 
     /// A mirrored banner the pointer can hold: on screen and not covered.
@@ -2159,6 +2176,15 @@ final class NotchService: ObservableObject {
         guard detailContentHeight != measured else { return }
         detailContentHeight = measured
         refreshPresentation()
+    }
+
+    /// A measured reading taller than the panel has room for. The page
+    /// scrolls to its last row then, and only then: a reading that fits the
+    /// display is drawn whole, with no scroll view and no scroller in it.
+    var detailOverflows: Bool {
+        guard selectedMetric != nil, !showingAppPanel, !showingSections,
+              let detailContentHeight else { return false }
+        return detailContentHeight + 4 > contentSize.height
     }
 
     /// A detail that has not been measured yet takes the page's own height, so
