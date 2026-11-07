@@ -65,11 +65,24 @@ enum NotchClipboardPageTests {
         opening.appeared()
         suite.expect(opening.searching && !opening.searchOpen && opening.highlightedID == first.id,
                      "the clipboard page opens on its first entry with the hidden search field focused")
+        // The island's height follows the page: it is told the cards it draws,
+        // and the search field's row when the field opens.
+        suite.expect(opening.service.reports.last?.0 == 2 && opening.service.reports.last?.1 == false,
+                     "the page reports the cards it draws, so the panel is as tall as they are")
+        opening.searchOpen = true
+        opening.service.updateClipboardContent(entries: opening.entries.count, searchOpen: true)
+        suite.expect(opening.service.reports.last?.0 == 2 && opening.service.reports.last?.1 == true,
+                     "and reports the search field's row when it opens")
+        opening.service.forgetClipboardContent()
+        suite.expect(opening.service.reports.last?.0 == -1,
+                     "and says so when the page is left, so the whole history sizes it again")
         let preview = Page()
         preview.preview = true
         preview.appeared()
         suite.expect(!preview.searching && preview.highlightedID == nil,
                      "the clipboard page drawn in Settings leaves the keyboard alone")
+        suite.expect(preview.service.reports.isEmpty,
+                     "and asks for no height of its own, which the island's preview sizes")
         opening.keysMoved = true
         opening.queryChanged("n")
         suite.expect(opening.searchOpen && !opening.keysMoved,

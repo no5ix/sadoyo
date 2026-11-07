@@ -70,8 +70,12 @@ enum NotchTests {
                && !NotchLayout.railFits(columns: 6, itemWidth: 76, spacing: 8, width: 495),
                "a rail spreads its items over the fewest columns its rows allow and fits once they all do")
         let compact = NotchGeometry(screen: CGRect(x: 0, y: 0, width: 1440, height: 900), safeAreaTop: 32, cameraWidth: 180)
-        suite.expect(compact.toolFlow(count: 8) == .rows(columns: 4) && compact.toolFlow(count: 12) == .columns(rows: 2),
-                     "the launcher's arrows read across the rows that fit and follow the columns once the rail scrolls")
+        suite.expect(compact.toolFlow(count: 8) == .rows(columns: 4) && compact.toolFlow(count: 12) == .rows(columns: 4),
+                     "the launcher's arrows read across the rows the island makes room for, at the display's limit")
+        let shortRail = NotchGeometry(screen: CGRect(x: 0, y: 0, width: 1440, height: 260), safeAreaTop: 32, cameraWidth: 180)
+        suite.expect(shortRail.toolFlow(count: 12) == .columns(rows: shortRail.toolRows(count: 12))
+                         && shortRail.toolRows(count: 12) < 3,
+                     "and follow the columns once the rail scrolls on a display too short for its rows")
         let single = (0..<5).map { QuickToolsSupport.gridIndex(after: 2, count: 5, flow: .columns(rows: 1),
                                                                 direction: [.left, .right, .up, .down, .left][$0]) }
         suite.expect(single == [1, 3, 2, 2, 1], "in one row the side arrows walk the tiles and the vertical pair stays put")
@@ -836,12 +840,11 @@ enum NotchTests {
                                     width: content.width, height: content.height).height)
                                 let layout = NotchLayout.controls(hasCards: music, levelRow: below, shortcutCount: count,
                                                                   width: content.width, height: pageHeight)
-                                // The most the island gives the rail, and the rows that held at the full gap.
+                                // The most the island gives the rail is the page it drew
+                                // for this content, not a preset's strip.
                                 let levelRow: CGFloat = NotchLayout.levelRowHeight + NotchLayout.rowSpacing
                                 let card: CGFloat = NotchLayout.minimumCardHeight + NotchLayout.rowSpacing
-                                var room = page.contentBudget
-                                if below && size != .custom { room += levelRow }
-                                var rail = room
+                                var rail = content.height
                                 if below { rail -= levelRow }
                                 if music { rail -= card }
                                 let perRow = NotchLayout.railCapacity(width: content.width, itemWidth: tile, spacing: spacing)
@@ -859,14 +862,13 @@ enum NotchTests {
                                 if scrolls, closedRows <= rail {
                                     closed += 1
                                     if layout.shortcutRows != full + 1 { taken = taken ?? name() }
-                                    if abs(content.height - room) > 0.001 { filled = filled ?? name() }
+                                    if content.height > page.contentCeiling + 0.001 { filled = filled ?? name() }
                                 } else if layout.shortcutRows != full || layout.shortcutRowSpacing != spacing {
                                     kept = kept ?? name()
                                 }
                                 let rowGap = layout.shortcutRowSpacing
                                 let outside = rowGap < CGFloat(6) || rowGap > spacing
-                                let presetMoved = size != .custom && rowGap != spacing
-                                if outside || presetMoved || layout.height > pageHeight + CGFloat(0.001) {
+                                if outside || layout.height > pageHeight + CGFloat(0.001) {
                                     tight = tight ?? name()
                                 }
                             }
@@ -879,8 +881,8 @@ enum NotchTests {
                      "a home page rail that would scroll takes the row it is a few points short of, its rows closed: \(taken ?? "") (\(closed) closed)")
         suite.expect(kept == nil, "any other home page rail keeps its rows and their gaps: \(kept ?? "")")
         suite.expect(tight == nil,
-                     "rows close no further than 6 points, never in a preset, and stay inside the page: \(tight ?? "")")
-        suite.expect(filled == nil, "an island whose rows close takes the height chosen for it: \(filled ?? "")")
+                     "rows close no further than 6 points, and stay inside the page: \(tight ?? "")")
+        suite.expect(filled == nil, "a page whose rows close never asks for more than the display allows: \(filled ?? "")")
         // The report: eight shortcuts and no player in the smallest custom
         // island, its row below a 32-point camera, 2 points short of a second
         // row. Its rows close to 6 points and hold all eight, four across.
@@ -2739,16 +2741,17 @@ enum NotchTests {
             suite.expect(geometry.sectionPickerSize(count: 1).height < geometry.sectionPickerSize(count: allModules.count).height,
                    "a short search result shrinks the gallery instead of reserving empty rows")
         }
-        suite.expect(compact.sectionRows(count: allModules.count) == 3 && spacious.sectionRows(count: allModules.count) == 3
-               && compact.contentSize(for: compact.sectionPickerSize(count: allModules.count)).height <= compact.pageBudget
+        suite.expect(compact.sectionRows(count: allModules.count) == 4 && spacious.sectionRows(count: allModules.count) == 4
+               && compact.contentSize(for: compact.sectionPickerSize(count: allModules.count)).height
+                   == NotchLayout.railHeight(rows: 4, rowHeight: NotchLayout.sectionTileHeight, spacing: NotchLayout.sectionSpacing)
                && tall.sectionRows(count: allModules.count) > spacious.sectionRows(count: allModules.count)
                && tall.sectionRows(count: allModules.count)
                    <= NotchSectionPaging.rows(count: allModules.count, columns: tall.sectionColumns),
-               "the gallery is a page: presets show three whole rows and a tall island shows more")
+               "the gallery draws every tile it has room for, and steps to more rows where the display gives more")
         suite.expect(compact.sectionColumns == 4 && spacious.sectionColumns == 5
-               && compact.sectionColumns * compact.sectionRows(count: allModules.count) < allModules.count
-               && spacious.sectionColumns * (spacious.sectionRows(count: allModules.count) + 1) >= allModules.count,
-               "a compact island steps rows to reach its last sections and a spacious one steps at most one")
+               && compact.sectionColumns * compact.sectionRows(count: allModules.count) >= allModules.count
+               && spacious.sectionColumns * spacious.sectionRows(count: allModules.count) >= allModules.count,
+               "a gallery at the display's limit reaches its last section in whole rows")
         suite.expect(NotchLayout.sectionTileHeight * 2 + NotchLayout.sectionSpacing <= NotchLayout.compactContentHeight
                && NotchLayout.sectionTileHeight * 3 + NotchLayout.sectionSpacing * 2 <= NotchLayout.pageContentHeight,
                "two rows fit the compact strip and three rows fit the gallery's page exactly or better")
@@ -2779,9 +2782,14 @@ enum NotchTests {
             let geometry = NotchGeometry(screen: frames[0], safeAreaTop: 32, cameraWidth: 210, layout: layout)
             for module in NotchModule.allCases {
                 let content = geometry.contentSize(for: geometry.expandedSize(module: module)).height
-                suite.expect(content <= geometry.contentBudget && content > 0,
-                       "every page stays inside its preset's strip: \(layout) \(module)")
+                // A preset is a floor beneath a page, never a ceiling over it:
+                // the page's own measure rules, up to the display's limit.
+                suite.expect(content <= geometry.contentCeiling && content > 0,
+                       "every page stays inside the page the display allows: \(layout) \(module)")
             }
+            suite.expect(geometry.contentSize(for: geometry.expandedSize(module: .timer)).height < geometry.contentBudget
+                   && geometry.contentSize(for: geometry.expandedSize(module: .clipboard)).height < geometry.contentBudget,
+                   "a page with less to draw than a preset's strip is drawn short, not padded to the preset: \(layout)")
             suite.expect(geometry.contentSize(for: geometry.expandedSize(module: .tools, panel: true)).height == geometry.pageBudget
                    && geometry.contentSize(for: geometry.expandedSize(module: .system, detail: true)).height == geometry.pageBudget
                    && geometry.pageBudget >= geometry.contentBudget,
@@ -2790,9 +2798,9 @@ enum NotchTests {
                 geometry.contentSize(for: geometry.expandedSize(module: .system, detail: true, panel: panel,
                                                                 detailHeight: height)).height
             }
-            suite.expect(detail(140, false) == 144 && detail(900, false) == geometry.pageBudget
+            suite.expect(detail(140, false) == 144 && detail(900, false) == geometry.contentCeiling
                    && detail(140, true) == geometry.pageBudget,
-                   "a measured detail such as Fan Control fits its card within the page instead of a tall empty page: \(layout)")
+                   "a measured detail such as Fan Control fits its card, and a long one fills the page and scrolls: \(layout)")
         }
         suite.expect(compact.contentBudget == NotchLayout.compactContentHeight && spacious.contentBudget == NotchLayout.spaciousContentHeight
                && compact.expanded.height < compact.expanded.width && spacious.expanded.height < spacious.expanded.width,
@@ -2816,17 +2824,18 @@ enum NotchTests {
         let onlyShortcuts = compact.expandedSize(module: .controls, shortcutCount: 3, sliderCount: 2, controlsHaveMusic: false)
         let onlyPlayer = compact.expandedSize(module: .controls, shortcutCount: 0, sliderCount: 2, controlsHaveMusic: true)
         let onlyLevels = compact.expandedSize(module: .controls, shortcutCount: 0, sliderCount: 2, controlsHaveMusic: false)
-        suite.expect(fullControls == fewerShortcuts && fewerShortcuts.height > onlyShortcuts.height
+        suite.expect(fullControls.height > fewerShortcuts.height && fewerShortcuts.height > onlyShortcuts.height
                && fewerShortcuts.height > onlyPlayer.height && onlyPlayer.height > onlyLevels.height,
-               "a compact island runs extra shortcuts sideways and drops the rows nobody enabled")
+               "the home page grows for the rails its shortcuts need and drops the rows nobody enabled")
         suite.expect(compact.contentSize(for: onlyLevels).height == 0,
                "two levels alone sit in the top row and leave the page nothing to hold")
         suite.expect(compact.contentSize(for: fullControls).height
-                   == NotchLayout.cardHeight + NotchLayout.rowSpacing + NotchLayout.shortcutHeight
-               && compact.expanded == fullControls
+                   == NotchLayout.cardHeight + NotchLayout.rowSpacing
+                       + NotchLayout.railHeight(rows: 2, rowHeight: NotchLayout.shortcutHeight, spacing: NotchLayout.shortcutSpacing)
+               && compact.expanded.height < fullControls.height
                && spacious.expandedSize(module: .controls, shortcutCount: 10).height
-                   > spacious.expandedSize(module: .controls, shortcutCount: 3).height,
-               "the default home page is the player over one rail while a spacious island adds a second shortcut row first")
+                   >= spacious.expandedSize(module: .controls, shortcutCount: 3).height,
+               "the default home page is the player over the rails its shortcuts need")
         suite.expect(compact.contentSize(for: compact.expandedSize(module: .controls, shortcutCount: 0, sliderCount: 0,
                                                                    controlsHaveMusic: false)).height == NotchLayout.emptyHeight,
                "hiding every control leaves the empty-state guidance its own row")
@@ -2843,15 +2852,19 @@ enum NotchTests {
                         let band = NotchBand(geometry: geometry, contentWidth: geometry.contentWidth)
                         let levelRow = NotchLayout.bandLevelCount(sliders, band: band) < sliders
                         let planned = NotchLayout.controls(hasCards: music, levelRow: levelRow, shortcutCount: shortcuts,
-                                                           width: geometry.contentWidth, height: geometry.contentBudget)
+                                                           width: geometry.contentWidth, height: geometry.contentCeiling)
                         let drawn = NotchLayout.controls(hasCards: music, levelRow: levelRow, shortcutCount: shortcuts,
                                                          width: content.width, height: content.height)
                         let empty = !music && sliders == 0 && shortcuts == 0
-                        suite.expect(content.height == min(geometry.contentBudget, empty ? NotchLayout.emptyHeight : planned.height),
-                               "the home page takes the rows it needs and never more than the custom budget")
+                        // The page takes the rows its content needs, up to the
+                        // height chosen for the island, which is its limit.
+                        suite.expect(content.height == min(geometry.contentCeiling,
+                                                           empty ? NotchLayout.emptyHeight : planned.height),
+                               "the home page takes the rows it needs and never more than the island's limit")
                         suite.expect(planned == drawn, "the page rebuilds the same rows from the height it receives")
-                        suite.expect(planned.shortcutRows == 0 || planned.height <= geometry.contentBudget || planned.cardRow == NotchLayout.minimumCardHeight,
-                               "a tight budget shortens the card row before it drops the shortcut rail")
+                        suite.expect(planned.shortcutRows == 0 || planned.height <= geometry.contentCeiling
+                               || planned.cardRow == NotchLayout.minimumCardHeight,
+                               "a tight island shortens the card row before it drops the shortcut rail")
                         suite.expect(frames[0].contains(geometry.frame(for: size)),
                                "the full controls surface stays inside the display")
                     }
@@ -2864,14 +2877,19 @@ enum NotchTests {
                     let custom = NotchGeometry(screen: frame, safeAreaTop: 32, cameraWidth: 210,
                                                layout: .custom, customWidth: width, customHeight: height)
                     let available = height - custom.headerTopInset - custom.headerChromeHeight
-                    suite.expect(custom.contentBudget == available, "a custom island's budget is what its height leaves below the chrome")
+                    suite.expect(custom.contentBudget == available,
+                           "a custom island's page height is what its chosen height leaves below the chrome")
+                    suite.expect(custom.surfaceCeiling == min(available + custom.chromeHeight,
+                                                              NotchHeightPolicy.maximumHeight(displayHeight: frame.height),
+                                                              frame.height - 48),
+                           "the chosen height is this island's limit, under the display's 80%")
                     for module in NotchModule.allCases {
                         let size = custom.expandedSize(module: module)
                         suite.expect(size.width == min(width, frame.width - 24 - NotchQuickAccessLayout.gutter * 2) && size.height <= height
                                && frame.contains(custom.frame(for: size)),
                                "custom dimensions fit every module and respect the display and height limit")
                         suite.expect(custom.contentSize(for: size).height <= available && custom.contentSize(for: size).height > 0,
-                               "every page keeps inside the custom budget")
+                               "every page keeps inside the island's own limit")
                     }
                     for count in [0, 1, 9, allModules.count] {
                         let picker = custom.sectionPickerSize(count: count)
@@ -2879,15 +2897,23 @@ enum NotchTests {
                                && frame.contains(custom.frame(for: picker)),
                                "gallery dimensions respect the display and the user's height limit at every item count")
                     }
-                    suite.expect(custom.expandedSize(module: .clipboard).height == min(height, frame.height - 48),
-                           "long lists use the chosen height without overflowing a shorter display")
+                    let longHistory = custom.expandedSize(module: .clipboard,
+                                                          content: NotchPageContent(clipboardEntries: 60, clipboardComfortable: true))
+                    suite.expect(longHistory.height == custom.surfaceCeiling
+                           && custom.scrolls(contentHeight: NotchNaturalContent.height(module: .clipboard,
+                                                                                        items: NotchPageContent(clipboardEntries: 60, clipboardComfortable: true),
+                                                                                        width: custom.contentWidth)),
+                           "a long list uses the chosen height, without overflowing a shorter display, and scrolls")
+                    suite.expect(custom.expandedSize(module: .clipboard).height < longHistory.height,
+                           "and an empty list takes only the page that names itself")
                     var music = custom
                     music.pageTop = NotchModule.music.pageTop
                     suite.expect(music.contentSize(for: music.expandedSize(module: .music)).height
-                           == NotchLayout.musicPlayerHeight(band: music.musicBandHeight),
-                           "custom sizes keep the whole player, the same as the presets'")
+                           == min(NotchLayout.musicPlayerHeight(band: music.musicBandHeight), music.contentCeiling),
+                           "custom sizes keep the whole player, and scroll to it where the island is shorter")
                     suite.expect(music.contentSize(for: music.expandedSize(module: .music, musicHasContent: false)).height
-                           == NotchLayout.musicPlayerHeight(band: music.musicBandHeight, playing: false),
+                           == min(NotchLayout.musicPlayerHeight(band: music.musicBandHeight, playing: false),
+                                  music.contentCeiling),
                            "empty music keeps its message and buttons at every custom height")
                 }
             }
@@ -3310,8 +3336,16 @@ enum NotchTests {
                 let preview = geometry.expandedSize(module: .captures, capturePreviewHeight: 210)
                 let shared = geometry.expandedSize(module: .captures, capturePreviewHeight: 268)
                 suite.expect(geometry.contentSize(for: preview).height == 214
-                       && geometry.contentSize(for: history).height == geometry.contentBudget,
-                       "a single capture reserves its measured preview and scroll inset while the history fills the strip in every layout")
+                       && geometry.contentSize(for: history).height == NotchLayout.emptyHeight,
+                       "a single capture reserves its measured preview, and an empty history takes only its own page, in every layout")
+                let fullHistory = geometry.expandedSize(module: .captures,
+                                                        content: NotchPageContent(captureTiles: 40))
+                suite.expect(geometry.contentSize(for: fullHistory).height == geometry.contentCeiling
+                       && geometry.scrolls(contentHeight: NotchNaturalContent.rail(count: 40, itemWidth: NotchLayout.captureCardWidth,
+                                                                                   itemHeight: NotchLayout.captureCardHeight,
+                                                                                   spacing: NotchLayout.cardSpacing,
+                                                                                   width: geometry.contentWidth)),
+                       "a history taller than the island fills it and scrolls to its last capture")
                 suite.expect(shared.height - preview.height == 58,
                        "sharing adds only the link row and removing it restores the compact preview height")
                 suite.expect(geometry.expandedSize(module: .timer, capturePreviewHeight: 210)

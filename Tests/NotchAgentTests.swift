@@ -3213,12 +3213,13 @@ enum NotchAgentTests {
         let geometry = NotchGeometry(screen: CGRect(x: 0, y: 0, width: 1512, height: 982), safeAreaTop: 32,
                                      cameraWidth: 185, layout: .spacious, compactSideRoom: 200)
         suite.expect(geometry.expandedSize(module: .agents, agentsHeight: 96).height
-                        == geometry.headerTopInset + geometry.headerChromeHeight + 96
+                        == geometry.chromeHeight + 96
                         && geometry.expandedSize(module: .agents, agentsHeight: 900).height
-                        == geometry.headerTopInset + geometry.headerChromeHeight + geometry.contentBudget
+                        == geometry.surfaceCeiling
+                        && geometry.scrolls(contentHeight: 900)
                         && geometry.expandedSize(module: .agents, agentsHeight: 0).height
-                        == geometry.headerTopInset + geometry.headerChromeHeight + NotchLayout.emptyHeight,
-                     "a short set of cards leaves a short island and a long one scrolls inside the budget")
+                        == geometry.chromeHeight + NotchLayout.emptyHeight,
+                     "a short set of cards leaves a short island, and a long one fills the page the display allows and scrolls")
         let strip = geometry.compactAgentGeometry(wing: 72)
         suite.expect(!strip.compactActivityUsesFooter && strip.compactActivityWingWidth == 72,
                      "a working agent stays beside the camera")

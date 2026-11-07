@@ -139,7 +139,7 @@ struct NotchDownloadsView: View {
                     .frame(maxHeight: .infinity)
             } else {
                 ScrollView {
-                    LazyVStack(spacing: 8) {
+                    LazyVStack(spacing: NotchLayout.cardSpacing) {
                         ForEach(downloads.items) { item in
                             downloadCard(item)
                         }

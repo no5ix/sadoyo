@@ -165,6 +165,13 @@ final class NotchService: ObservableObject {
     /// The last ⌘1–⌘9 pressed on the Clipboard page, which the page turns
     /// into a paste of the entry at that place.
     @Published private(set) var clipboardPastePress: NotchClipboardPastePress?
+    /// Whether the Clipboard page shows its search field, which takes a row of
+    /// its own. The page says when it opens, so the island is as tall as the
+    /// field and the cards under it, and no taller.
+    @Published private(set) var clipboardSearchOpen = false
+    /// The entries the Clipboard page draws, which a search narrows. Nil keeps
+    /// the history's whole count, which is what the page draws with no search.
+    @Published private(set) var clipboardVisibleEntries: Int?
     /// Whether the island panel holds the keyboard. Opened by hover, or left
     /// open while another app is active, it does not, and its shortcuts then
     /// reach the app in front instead.
@@ -922,29 +929,68 @@ final class NotchService: ObservableObject {
     }
 
     var expandedSize: CGSize {
+        let geometry = expandedGeometry
         if showingSections {
             return geometry.sectionPickerSize(count: filteredSections.count)
         }
         if showsDashboard {
             return geometry.dashboardSize(content: dashboardContentHeight, width: dashboardContentWidth)
         }
-        let musicExtras = NotchLyricsSupport.isEnabled() || NotchQueueSupport.isEnabled()
-        let launcher = QuickLauncherService.shared
-        return pageSize(in: expandedGeometry, module: showingAppPanel ? .tools : selected,
-                        detail: selectedMetric != nil, panel: showingAppPanel,
-                        detailHeight: detailContentHeight,
-                        musicExtraHeight: musicExtras && musicDetailVisible ? geometry.musicExtrasHeight : 0,
-                        fileMediaHeight: !choosingFileDropDestination && AppFeature.mediaTools.isAvailable
-                            && NotchFileToolsService.shared.mediaPresented ? NotchFileToolsService.shared.mediaContentHeight : nil,
-                        toolCount: launcher.isEditing || launcher.activeUtility != nil ? nil : launcher.visibleItems.count,
-                        capturePreviewHeight: captureContent == nil ? nil : captureContentHeight)
+        return CGSize(width: geometry.expandedWidth, height: pageResolution(in: geometry).surfaceHeight)
+    }
+
+    /// Whether the open page scrolls: it measures taller than the page the
+    /// display allows, so its last row is reached by scrolling. Every page asks
+    /// the same question of the same rule: a page that fits is drawn whole, with
+    /// no scroll view and no scroller in it.
+    var expandedScrolls: Bool {
+        let geometry = expandedGeometry
+        if showingSections {
+            return geometry.scrolls(contentHeight: geometry.sectionsContentHeight(count: filteredSections.count),
+                                    minimumContentHeight: NotchLayout.sectionTileHeight)
+        }
+        if showsDashboard {
+            return geometry.scrolls(contentHeight: dashboardContentHeight, minimumContentHeight: NotchLayout.emptyHeight)
+        }
+        return pageResolution(in: geometry).scrolls
+    }
+
+    /// What the page on screen has to show, read from the services that own it.
+    ///
+    /// The island's height follows these counts, and the island's own height
+    /// never enters: a page that gains a card grows, and one that loses a card
+    /// shrinks, whatever the panel showed a moment before.
+    var pageContent: NotchPageContent {
+        var items = NotchPageContent()
+        items.clipboardEntries = clipboardVisibleEntries ?? ClipboardHistoryService.shared.entries.count
+        items.clipboardSearch = clipboardSearchOpen
+        items.clipboardComfortable = NotchClipboardCardSize(stored: UserDefaults.standard
+            .string(forKey: DefaultsKey.notchClipboardCardSize)) == .comfortable
+        items.notificationCards = NotchNotificationService.shared.items.count
+        items.downloadCards = NotchDownloadService.shared.items.count
+        items.shelfTiles = AppFeature.shelf.isAvailable ? ShelfService.shared.visibleItems.count : 0
+        items.captureTiles = RecentCapturesView.visible(RecentCaptureService.shared.entries).count
+        items.systemCards = NotchSupport.systemCardCount(hasBattery: PowerSampler.hasInternalBattery,
+                                                         fans: SystemMonitor.shared.snapshot.fanSpeeds.count)
+        items.mixerMicrophone = AudioInputDeviceManager.shared.inputVolume != nil
+        let geometry = expandedGeometry
+        // The calendar draws the month beside its agenda when the page has the
+        // width and the room for the grid: the display's limit decides that, not
+        // the height the island happens to be showing.
+        items.calendarMonth = geometry.contentWidth >= 420
+            && geometry.contentCeiling >= NotchLayout.calendarMonthPageHeight
+        return items
     }
 
     /// The open island as Settings previews a section: at rest, with no
     /// detail, app panel, capture or media editor in front of the page.
     func previewSize(for module: NotchModule) -> CGSize {
-        pageSize(in: previewGeometry(for: module), module: module, detail: false, panel: false, detailHeight: nil, musicExtraHeight: 0,
-                 fileMediaHeight: nil, toolCount: QuickLauncherService.shared.visibleItems.count, capturePreviewHeight: nil)
+        let geometry = previewGeometry(for: module)
+        return CGSize(width: geometry.expandedWidth,
+                      height: pageResolution(in: geometry, module: module, detail: false, panel: false,
+                                             detailHeight: nil, musicExtraHeight: 0, fileMediaHeight: nil,
+                                             toolCount: QuickLauncherService.shared.visibleItems.count,
+                                             capturePreviewHeight: nil).surfaceHeight)
     }
 
     /// The island around a previewed section, with the top row its page has.
@@ -972,25 +1018,57 @@ final class NotchService: ObservableObject {
     /// below its row.
     var previewLargestSize: CGSize { previewGeometry(for: .calendar).expandedSize(module: .calendar) }
 
-    private func pageSize(in geometry: NotchGeometry, module: NotchModule, detail: Bool, panel: Bool,
-                          detailHeight: CGFloat?, musicExtraHeight: CGFloat, fileMediaHeight: CGFloat?, toolCount: Int?,
-                          capturePreviewHeight: CGFloat?) -> CGSize {
+    /// The island's height for the page on screen: what it measures, the
+    /// island's chrome, and the display's limit over both.
+    private func pageResolution(in geometry: NotchGeometry) -> NotchSurfaceHeight {
+        let musicExtras = NotchLyricsSupport.isEnabled() || NotchQueueSupport.isEnabled()
+        let launcher = QuickLauncherService.shared
+        return pageResolution(in: geometry, module: showingAppPanel ? .tools : selected,
+                              detail: selectedMetric != nil, panel: showingAppPanel,
+                              detailHeight: detailContentHeight,
+                              musicExtraHeight: musicExtras && musicDetailVisible ? geometry.musicExtrasHeight : 0,
+                              fileMediaHeight: !choosingFileDropDestination && AppFeature.mediaTools.isAvailable
+                                  && NotchFileToolsService.shared.mediaPresented
+                                  ? NotchFileToolsService.shared.mediaContentHeight : nil,
+                              toolCount: launcher.isEditing || launcher.activeUtility != nil
+                                  ? nil : launcher.visibleItems.count,
+                              capturePreviewHeight: captureContent == nil ? nil : captureContentHeight)
+    }
+
+    /// The one page's measure, chrome and limit, at one geometry. The size and
+    /// the page's need to scroll both come from this, so the two can never
+    /// disagree about what the display allows.
+    private func pageResolution(in geometry: NotchGeometry, module: NotchModule, detail: Bool, panel: Bool,
+                                detailHeight: CGFloat?, musicExtraHeight: CGFloat, fileMediaHeight: CGFloat?,
+                                toolCount: Int?, capturePreviewHeight: CGFloat?) -> NotchSurfaceHeight {
         let controls = NotchSupport.controls()
         let sliders = controls.filter(\.isLevel).count
         let shortcuts = controls.filter { !$0.isLevel && $0 != .music }.count
-        return geometry.expandedSize(module: module, detail: detail, panel: panel, detailHeight: detailHeight,
-                                     shortcutCount: shortcuts,
-                                     sliderCount: sliders, controlsHaveMusic: controls.contains(.music), musicHasContent: NotchMusicService.shared.playback != nil,
-                                     musicShowsVolume: musicShowsVolume,
-                                     musicExtraHeight: musicExtraHeight, fileMediaHeight: fileMediaHeight,
-                                     systemCards: NotchSupport.systemCardCount(hasBattery: PowerSampler.hasInternalBattery,
-                                                                               fans: SystemMonitor.shared.snapshot.fanSpeeds.count),
-                                     toolCount: toolCount, capturePreviewHeight: capturePreviewHeight,
-                                     timerHasSession: NotchTimerService.shared.session.hasSession,
-                                     timerMode: NotchTimerService.shared.session.hasSession
-                                        ? NotchTimerService.shared.session.mode : NotchTimerSupport.savedMode(),
-                                     agentsHeight: module == .agents && !detail && !panel
-                                        ? agentsContentHeight(width: geometry.contentWidth) : nil)
+        let content = pageContent
+        let natural = geometry.naturalContentHeight(module: module, detail: detail, panel: panel,
+                                                    detailHeight: detailHeight,
+                                                    shortcutCount: shortcuts, sliderCount: sliders,
+                                                    controlsHaveMusic: controls.contains(.music),
+                                                    musicHasContent: NotchMusicService.shared.playback != nil,
+                                                    musicShowsVolume: musicShowsVolume,
+                                                    musicExtraHeight: musicExtraHeight,
+                                                    fileMediaHeight: fileMediaHeight,
+                                                    systemCards: content.systemCards,
+                                                    toolCount: toolCount,
+                                                    capturePreviewHeight: capturePreviewHeight,
+                                                    timerHasSession: NotchTimerService.shared.session.hasSession,
+                                                    timerMode: NotchTimerService.shared.session.hasSession
+                                                        ? NotchTimerService.shared.session.mode : NotchTimerSupport.savedMode(),
+                                                    agentsHeight: module == .agents && !detail && !panel
+                                                        ? agentsContentHeight(width: geometry.contentWidth) : nil,
+                                                    content: content)
+        return geometry.resolveHeight(contentHeight: natural,
+                                      minimumContentHeight: geometry.minimumContentHeight(module: module, detail: detail,
+                                                                                         panel: panel,
+                                                                                         detailHeight: detailHeight,
+                                                                                         fileMediaHeight: fileMediaHeight,
+                                                                                         capturePreviewHeight: capturePreviewHeight,
+                                                                                         content: content))
     }
 
     /// The AI page is as tall as the cards it shows; nil while the logs are
@@ -1116,11 +1194,14 @@ final class NotchService: ObservableObject {
     }
 
     /// The open island around the Command Bar: the bar's width within the
-    /// island's margins, and its height below the camera.
+    /// island's margins, and its height below the camera, under the same limit
+    /// every other page has.
     var commandBarSurfaceSize: CGSize {
         let width = max(geometry.cameraWidth + 80, CommandBarView.width + NotchLayout.horizontalInset * 2)
-        let height = geometry.safeContentTop + (commandBarHeight ?? CommandBarView.fieldHeight) + NotchLayout.bottomInset
-        return CGSize(width: min(geometry.screen.width - 24, width), height: min(geometry.screen.height - 48, height))
+        let resolved = NotchHeightPolicy.resolve(contentHeight: commandBarHeight ?? CommandBarView.fieldHeight,
+                                                 chromeHeight: geometry.safeContentTop + NotchLayout.bottomInset,
+                                                 displayHeight: geometry.screen.height, clearance: 48)
+        return CGSize(width: min(geometry.screen.width - 24, width), height: resolved.surfaceHeight)
     }
 
     /// A floating capsule's closed strips run from one round end to the
@@ -2165,6 +2246,36 @@ final class NotchService: ObservableObject {
     func updateFanDetailHeight(_ height: CGFloat) {
         guard selectedMetric == .fan, !showingAppPanel, !showingSections else { return }
         updateDetailHeight(height)
+    }
+
+    /// The Clipboard page's search field, which takes a row of the page. The
+    /// page says when it opens and closes, so the island grows and shrinks with
+    /// the field above its cards.
+    func setClipboardSearchOpen(_ open: Bool) {
+        guard clipboardSearchOpen != open else { return }
+        clipboardSearchOpen = open
+        refreshPresentation()
+    }
+
+    /// What the Clipboard page draws: its cards and whether its search field is
+    /// open. A search narrows the cards, so the island follows the page's own
+    /// count rather than the history's whole count, and shrinks when the search
+    /// leaves fewer entries.
+    func updateClipboardContent(entries: Int, searchOpen: Bool) {
+        let measured = max(0, entries)
+        guard clipboardVisibleEntries != measured || clipboardSearchOpen != searchOpen else { return }
+        clipboardVisibleEntries = measured
+        clipboardSearchOpen = searchOpen
+        refreshPresentation()
+    }
+
+    /// Leaving the page leaves its count behind: the history's own count sizes
+    /// the page the next time it is drawn.
+    func forgetClipboardContent() {
+        guard clipboardVisibleEntries != nil else { return }
+        clipboardVisibleEntries = nil
+        clipboardSearchOpen = false
+        refreshPresentation()
     }
 
     /// What the detail on screen measures, in points. The island sizes itself

@@ -52,6 +52,10 @@ enum NotchCompactTests {
             return result
         }
         func perform(_ action: () -> Void) { action() }
+        /// The page reports the cards it draws and its search field, which the
+        /// island's height follows; the fixture only has to accept them.
+        func updateClipboardContent(entries: Int, searchOpen: Bool) {}
+        func forgetClipboardContent() {}
     }
     final class NotchTimerService {
         static let shared = NotchTimerService()
@@ -746,13 +750,27 @@ enum NotchCompactTests {
                     page.music.playback = playing ? true : nil
                     for showVolume in [false, true] {
                         page.service.musicShowsVolume = showVolume
-                        let minimum = NotchLayout.musicPlayerHeight(band: page.service.expandedGeometry.musicBandHeight,
-                                                                    playing: playing, showVolume: showVolume)
-                        for available: CGFloat in [100, minimum, 300] {
-                            page.service.contentSize = CGSize(width: 304, height: available)
-                            suite.expect(page.pageSize == CGSize(width: 304, height: max(available, minimum)),
-                                         "the music page keeps all controls reachable in short islands and adds no scrolling when they fit: \(layout), notched \(notched), playing \(playing), volume \(showVolume)")
-                        }
+                        let geometry = page.service.expandedGeometry
+                        // The player's controls are the page's content, so the
+                        // island is as tall as they are and never shorter, and
+                        // the page adds no scrolling when they fit the display.
+                        let size = geometry.expandedSize(module: .music, musicHasContent: playing,
+                                                         musicShowsVolume: showVolume)
+                        let natural = geometry.naturalContentHeight(module: .music, musicHasContent: playing,
+                                                                    musicShowsVolume: showVolume)
+                        let fits = natural <= geometry.contentCeiling
+                        // Fitted, the page is drawn whole with no scroller.
+                        // Taller than the display allows, it scrolls to them.
+                        suite.expect(fits ? geometry.contentSize(for: size).height == natural
+                                        && !geometry.scrolls(contentHeight: natural)
+                                        : geometry.contentSize(for: size).height == geometry.contentCeiling
+                            && geometry.scrolls(contentHeight: natural),
+                                     "the player is drawn whole when the display holds it, and scrolls when it does not: \(layout), notched \(notched), playing \(playing), volume \(showVolume)")
+                        suite.expect(fits || geometry.scrolls(contentHeight: natural),
+                                     "its controls stay reachable, by scrolling on a short island: \(layout), notched \(notched)")
+                        page.service.contentSize = geometry.contentSize(for: size)
+                        suite.expect(page.pageSize == page.service.contentSize,
+                                     "the page is drawn at the height the island measured for it")
                     }
                 }
             }
@@ -767,11 +785,19 @@ enum NotchCompactTests {
                                          menuBarHeight: bar, customWidth: 360, customHeight: 260)
             for module in [NotchModule.controls, .timer, .calendar, .files, .music, .clipboard, .camera, .mixer] {
                 page.service.selected = module
-                page.service.contentSize = geometry.contentSize(for: geometry.expandedSize(module: module))
+                let size = geometry.expandedSize(module: module)
+                page.service.contentSize = geometry.contentSize(for: size)
                 let layout = page.pageSize
-                suite.expect(layout.width == page.service.contentSize.width
-                             && layout.height >= page.service.contentSize.height,
-                             "\(module) keeps the chosen width and exposes any vertically overflowing content")
+                suite.expect(layout == page.service.contentSize,
+                             "\(module) is drawn at the one height the shared rule measured for it")
+                suite.expect(size.height <= geometry.surfaceCeiling,
+                             "\(module) stays inside the display's limit at menu height \(bar)")
+                // Each page's shortest usable layout is a floor inside the
+                // shared rule, kept under the display's limit: a short island
+                // scrolls to the rest of the page rather than pushing it off.
+                suite.expect(geometry.contentSize(for: size).height
+                                 >= min(NotchPageFloor.contentHeight(module: module), geometry.contentCeiling),
+                             "\(module) keeps its shortest complete page at menu height \(bar)")
                 if module == .controls {
                     // Playback keeps the card row; the levels sit in the top row.
                     let required = NotchLayout.controls(hasCards: page.controls.contains(.music), shortcutCount: 1,
@@ -779,25 +805,30 @@ enum NotchCompactTests {
                     suite.expect(required.height <= layout.height, "home buttons fit their scrollable layout at menu height \(bar)")
                 } else if module == .timer {
                     // Each mode sizes the island for itself, the Pomodoro a line taller.
+                    var natural: [NotchTimerMode: CGFloat] = [:]
                     for mode in NotchTimerMode.allCases {
                         page.timerMode = mode
-                        page.service.contentSize = geometry.contentSize(for: geometry.expandedSize(module: module, timerMode: mode))
-                        let layout = page.pageSize
-                        let required = NotchLayout.timer(mode: mode, hasSession: false, height: layout.height)
-                        suite.expect(required <= layout.height && layout.height >= page.service.contentSize.height,
+                        let modeSize = geometry.expandedSize(module: module, timerMode: mode)
+                        let pageHeight = geometry.contentSize(for: modeSize).height
+                        natural[mode] = geometry.naturalContentHeight(module: module, timerMode: mode)
+                        let required = NotchLayout.timer(mode: mode, hasSession: false, height: pageHeight)
+                        suite.expect(required <= pageHeight,
                                      "timer controls remain reachable at menu height \(bar): \(mode)")
                     }
-                    // A page shorter than every mode needs scrolls to the
-                    // mode it shows, which only the page's own mode decides.
-                    let short = CGSize(width: page.service.contentSize.width, height: 60)
-                    let heights = NotchTimerMode.allCases.map { mode -> CGFloat in
-                        page.timerMode = mode
-                        page.service.contentSize = short
-                        return page.pageSize.height
+                    // A page shorter than a mode needs scrolls to that mode's
+                    // controls, which only the page's own mode decides.
+                    let short = NotchGeometry(screen: CGRect(x: 0, y: 0, width: 360, height: 152), safeAreaTop: 0,
+                                              cameraWidth: 0, layout: .custom, menuBarHeight: bar,
+                                              customWidth: 360, customHeight: 260)
+                    for mode in NotchTimerMode.allCases {
+                        suite.expect(short.scrolls(contentHeight: short.naturalContentHeight(module: .timer,
+                                                                                             timerMode: mode))
+                                         == (NotchLayout.timer(mode: mode, hasSession: false, height: 60)
+                                                > short.contentCeiling),
+                                     "a short page scrolls to its own mode's controls at menu height \(bar): \(mode)")
                     }
-                    suite.expect(heights == NotchTimerMode.allCases.map { NotchLayout.timer(mode: $0, hasSession: false, height: 60) }
-                                 && heights[1] > heights[0],
-                                 "a short page scrolls to its own mode's controls at menu height \(bar): \(heights)")
+                    suite.expect((natural[.pomodoro] ?? 0) > (natural[.timer] ?? 0),
+                                 "the Pomodoro's readouts make the island taller than the timer's")
                     page.timerMode = .timer
                 } else if module == .calendar {
                     let required = NotchLayout.calendarMonthWeekdayHeight
@@ -808,7 +839,7 @@ enum NotchCompactTests {
                                  "a short clipboard page keeps a complete card reachable")
                 } else if module == .camera || module == .mixer {
                     // The mixer's controls sit in the top row, so its faders take the whole page.
-                    let minimum = module == .camera ? 144 : NotchLayout.mixerMinimumHeight
+                    let minimum = module == .camera ? NotchLayout.cameraMinimumHeight : NotchLayout.mixerFaderHeight
                     suite.expect(layout.height >= minimum, "camera and mixer controls keep a usable height in a short island")
                     if page.service.contentSize.height >= minimum {
                         suite.expect(layout.height == page.service.contentSize.height,

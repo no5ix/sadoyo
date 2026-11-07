@@ -112,10 +112,10 @@ struct RecentCapturesView: View {
                 .panelCard()
         } else if let notchSize {
             let rows = NotchLayout.railRows(count: visibleEntries.count,
-                                            perRow: NotchLayout.railCapacity(width: notchSize.width, itemWidth: 236, spacing: 8),
-                                            rowHeight: 88, spacing: 8, height: notchSize.height)
-            let cardHeight = (notchSize.height - CGFloat(rows - 1) * 8) / CGFloat(rows)
-            NotchRail(items: visibleEntries, rows: rows, itemWidth: 236, width: notchSize.width) { entry in
+                                            perRow: NotchLayout.railCapacity(width: notchSize.width, itemWidth: NotchLayout.captureCardWidth, spacing: NotchLayout.cardSpacing),
+                                            rowHeight: NotchLayout.captureCardHeight, spacing: NotchLayout.cardSpacing, height: notchSize.height)
+            let cardHeight = (notchSize.height - CGFloat(rows - 1) * NotchLayout.cardSpacing) / CGFloat(rows)
+            NotchRail(items: visibleEntries, rows: rows, itemWidth: NotchLayout.captureCardWidth, width: notchSize.width) { entry in
                 row(entry).frame(height: cardHeight)
             }
         } else {

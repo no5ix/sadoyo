@@ -33,10 +33,10 @@ struct NotchNotificationsView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 let rows = NotchLayout.railRows(count: service.items.count,
-                                                perRow: NotchLayout.railCapacity(width: size.width, itemWidth: 240, spacing: 8),
-                                                rowHeight: 120, spacing: 8, height: size.height)
-                let cardHeight = (size.height - CGFloat(rows - 1) * 8) / CGFloat(rows)
-                NotchRail(items: service.items, rows: rows, itemWidth: 240, width: size.width) { item in
+                                                perRow: NotchLayout.railCapacity(width: size.width, itemWidth: NotchLayout.notificationCardWidth, spacing: NotchLayout.cardSpacing),
+                                                rowHeight: NotchLayout.notificationCardHeight, spacing: NotchLayout.cardSpacing, height: size.height)
+                let cardHeight = (size.height - CGFloat(rows - 1) * NotchLayout.cardSpacing) / CGFloat(rows)
+                NotchRail(items: service.items, rows: rows, itemWidth: NotchLayout.notificationCardWidth, width: size.width) { item in
                     NotchNotificationRow(item: item, service: service, text: text)
                         .frame(height: cardHeight)
                 }
