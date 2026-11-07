@@ -51,6 +51,7 @@ struct NotchSystemView: View {
                         grid(cards: cards, rows: rows).padding(inset)
                             .contentShape(Rectangle())
                     }
+                    .notchScrollIndicator()
                 } else {
                     grid(cards: cards, rows: rows).padding(inset)
                 }

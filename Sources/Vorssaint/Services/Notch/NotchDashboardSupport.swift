@@ -359,7 +359,12 @@ enum NotchDashboardLayout {
     /// this, so the readings and the way to the sections are on the page by
     /// default and not under a scroll a person has to find.
     static func maxPageHeight(screenHeight: CGFloat) -> CGFloat {
-        screenHeight - 48 - quickControlsHeight - 20
+        // The one ceiling every page shares: four fifths of the display, and
+        // never more than the room the display keeps under its menu bar and
+        // safe area. Past it the page scrolls to its last section.
+        let panel = min(screenHeight * NotchPanelSizing.maximumHeightFraction,
+                        screenHeight - NotchGeometry.displayEdgeReserve)
+        return panel - quickControlsHeight - 20
     }
 
     static func contentHeight(activities: [NotchDashboardActivity], calendar: Bool, metrics: Int,

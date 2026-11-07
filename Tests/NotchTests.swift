@@ -2790,9 +2790,9 @@ enum NotchTests {
                 geometry.contentSize(for: geometry.expandedSize(module: .system, detail: true, panel: panel,
                                                                 detailHeight: height)).height
             }
-            suite.expect(detail(140, false) == 144 && detail(900, false) == geometry.pageBudget
+            suite.expect(detail(140, false) == 144 && detail(900, false) == geometry.maximumPanelContentHeight
                    && detail(140, true) == geometry.pageBudget,
-                   "a measured detail such as Fan Control fits its card within the page instead of a tall empty page: \(layout)")
+                   "a measured detail such as Fan Control fits its card within the page, and a long one is bounded by the display: \(layout)")
         }
         suite.expect(compact.contentBudget == NotchLayout.compactContentHeight && spacious.contentBudget == NotchLayout.spaciousContentHeight
                && compact.expanded.height < compact.expanded.width && spacious.expanded.height < spacious.expanded.width,
@@ -2879,7 +2879,7 @@ enum NotchTests {
                                && frame.contains(custom.frame(for: picker)),
                                "gallery dimensions respect the display and the user's height limit at every item count")
                     }
-                    suite.expect(custom.expandedSize(module: .clipboard).height == min(height, frame.height - 48),
+                    suite.expect(custom.expandedSize(module: .clipboard).height == min(height, custom.maximumPanelHeight),
                            "long lists use the chosen height without overflowing a shorter display")
                     var music = custom
                     music.pageTop = NotchModule.music.pageTop

@@ -319,15 +319,24 @@ struct NotchView: View {
                     .padding(.bottom, 4)
                     .contentShape(Rectangle())
             }
-            .scrollIndicators(.automatic)
+            .notchScrollIndicator()
             .notchScrollEdgeFade()
         } else {
             content
+                // Measured outside the scroll view as well. A reading's own
+                // height is what sizes the island, so the page that turns out
+                // taller than the panel gets its scroll view on the next
+                // layout: no row of a reading is ever left under the panel's
+                // edge with no way to reach it.
+                .onGeometryChange(for: CGFloat.self) { $0.size.height }
+                action: { service.updateDetailHeight($0) }
         }
     }
 
-    /// The island's one page. It scrolls only where the display, or a height
-    /// chosen by hand, leaves the sections taller than the island.
+    /// The island's one page. It scrolls only where the reading it holds is
+    /// taller than the panel the display allows, and the page keeps every row
+    /// of itself: the panel grows to the applications a reading lists up to
+    /// four fifths of the display, and only past that does the page scroll.
     @ViewBuilder private var dashboard: some View {
         if service.dashboardContentHeight > service.contentSize.height {
             ScrollView {
@@ -336,7 +345,7 @@ struct NotchView: View {
                     .padding(.bottom, 4)
                     .contentShape(Rectangle())
             }
-            .scrollIndicators(.automatic)
+            .notchScrollIndicator()
             .notchScrollEdgeFade()
         } else {
             NotchDashboardView(service: service)
@@ -513,7 +522,9 @@ struct NotchView: View {
 
     private var scrollsVertically: Bool {
         guard !service.showingAppPanel else { return false }
-        return contentOverflows || service.selectedMetric != nil
+        // A reading scrolls only when it is taller than the panel allows, so a
+        // short list of applications is drawn whole, with no scroller in it.
+        return contentOverflows || service.detailOverflows
             || (service.selected == .captures && service.captureContent != nil)
             || (service.selected == .tools && launcher.isEditing && launcher.activeUtility == nil)
     }

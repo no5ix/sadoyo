@@ -2255,7 +2255,22 @@ struct NotchNoticeWings: Equatable {
     var widest: CGFloat { max(leading, trailing) }
 }
 
+/// The one rule every System Monitoring page shares for its height: a panel
+/// is as tall as the content it actually draws, up to four fifths of the
+/// display it sits on, and scrolls inside itself beyond that. No page picks its
+/// own ceiling, and no page drops a section, a card, or an application to make
+/// a page fit.
+enum NotchPanelSizing {
+    /// Four fifths of the display, which is where a panel stops growing and
+    /// its content starts to scroll.
+    static let maximumHeightFraction: CGFloat = 0.8
+}
+
 struct NotchGeometry: Equatable {
+    /// The room the display keeps clear of the island: the menu bar and the
+    /// safe area above it, and the room the floating buttons ask for below.
+    static let displayEdgeReserve: CGFloat = 48
+
     let screen: CGRect
     /// How far the island's centre sits right of the camera's: a closed
     /// notice reaches further toward its wider side. Zero everywhere else.
@@ -2701,6 +2716,23 @@ struct NotchGeometry: Equatable {
         return min(max(preferred, cameraWidth + 36), screen.width - 24 - NotchQuickAccessLayout.gutter * 2)
     }
     var contentWidth: CGFloat { max(0, expandedWidth - NotchLayout.horizontalInset * 2) }
+    /// The tallest panel this display holds: four fifths of its own height,
+    /// and never more than the room the menu bar, the safe area and the
+    /// floating buttons leave under the top edge. The display the panel is
+    /// drawn on decides the number, so a panel moved to a taller display gets
+    /// a taller ceiling with it.
+    var maximumPanelHeight: CGFloat {
+        max(0, min(screen.height * NotchPanelSizing.maximumHeightFraction,
+                   screen.height - Self.displayEdgeReserve - quickAccessBottomInset))
+    }
+
+    /// What a panel of that height has room to show, past its header, its row
+    /// and the margins around the page. This is the content's ceiling: below
+    /// it the page is drawn whole, above it the page scrolls to its end.
+    var maximumPanelContentHeight: CGFloat {
+        max(0, maximumPanelHeight - headerTopInset - headerChromeHeight)
+    }
+
     /// Content height available before a page needs to scroll.
     var contentBudget: CGFloat {
         switch layout {
@@ -2760,7 +2792,18 @@ struct NotchGeometry: Equatable {
         let showsFileMedia = module == .files && !detail && fileMediaHeight != nil
         let contentHeight: CGFloat
         if detail, !panel, let detailHeight {
-            contentHeight = min(pageBudget, max(0, detailHeight) + 4)
+            // A reading is as tall as the reading: a short list of
+            // applications - the fan control, a machine with little to show -
+            // gets a short panel, and a reading that fills the strip its
+            // layout chose takes the tallest page the display allows, four
+            // fifths of itself, and scrolls to its last row below that. The
+            // page a reading is drawn on is pinned to that height once it
+            // overflows, so a page is never sized by its own measurement: it
+            // keeps the whole page and scrolls the rest.
+            let ceiling = maximumPanelContentHeight
+            let strip = min(pageBudget, ceiling)
+            let measured = max(0, detailHeight) + 4
+            contentHeight = measured < strip ? measured : ceiling
         } else if detail || panel {
             contentHeight = pageBudget
         } else if showsFileMedia {
@@ -2812,9 +2855,14 @@ struct NotchGeometry: Equatable {
             }
         }
         var preferredHeight = headerTopInset + headerChromeHeight + contentHeight
-        if layout == .custom { preferredHeight = min(preferredHeight, customHeight) }
+        // A height chosen by hand is the island's on the pages that fill a
+        // budget. A System Monitoring page measures the readings it draws, so
+        // the display is its ceiling: the panel grows to the applications it
+        // lists, and a height chosen for the other pages never cuts that list
+        // off in the middle.
+        if layout == .custom, !(detail && !panel) { preferredHeight = min(preferredHeight, customHeight) }
         return CGSize(width: expandedWidth,
-                      height: min(preferredHeight, screen.height - 48 - quickAccessBottomInset))
+                      height: min(preferredHeight, maximumPanelHeight))
     }
 
     /// Leave room for the row indicator without narrowing the tiles below
@@ -2836,7 +2884,8 @@ struct NotchGeometry: Equatable {
         let content = min(pageBudget, count == 0 ? NotchLayout.emptyHeight
             : NotchLayout.railHeight(rows: sectionRows(count: count), rowHeight: NotchLayout.sectionTileHeight, spacing: NotchLayout.sectionSpacing))
         let desiredHeight = headerTopInset + headerChromeHeight + content
-        return CGSize(width: expandedWidth, height: min(desiredHeight, screen.height - 48 - quickAccessBottomInset))
+        return CGSize(width: expandedWidth, height: min(desiredHeight,
+                                                        screen.height - Self.displayEdgeReserve - quickAccessBottomInset))
     }
 
     /// The open island holding the one-page dashboard, at the height the page's
@@ -2856,9 +2905,7 @@ struct NotchGeometry: Equatable {
         // The island is as wide as the page it holds, and never wider than the
         // preset's own island: a narrow display narrows the page with it.
         let pageWidth = min(expandedWidth, width + NotchLayout.horizontalInset * 2)
-        return CGSize(width: pageWidth,
-                      height: min(preferredHeight,
-                                  screen.height - 48 - quickAccessBottomInset))
+        return CGSize(width: pageWidth, height: min(preferredHeight, maximumPanelHeight))
     }
 
     func contentSize(for size: CGSize) -> CGSize {
@@ -2869,9 +2916,7 @@ struct NotchGeometry: Equatable {
     /// How much content the dashboard can be shown at all: the tallest island
     /// the display allows, less its header. Below this the page cannot be drawn
     /// whole and scrolls, with every section still drawn.
-    var dashboardContentLimit: CGFloat {
-        max(0, screen.height - 48 - quickAccessBottomInset - headerTopInset - headerChromeHeight)
-    }
+    var dashboardContentLimit: CGFloat { maximumPanelContentHeight }
     var appPanelSize: CGSize { contentSize(for: expandedSize(module: .tools, panel: true)) }
     func frame(for size: CGSize) -> CGRect {
         CGRect(x: screen.midX + surfaceShift - size.width / 2,

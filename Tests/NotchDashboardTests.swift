@@ -309,10 +309,12 @@ enum NotchDashboardTests {
             suite.expect(oneSize.height == one + small.headerTopInset + small.headerChromeHeight
                              && threeSize.height == three + small.headerTopInset + small.headerChromeHeight,
                          "the island is the page, its header, and nothing else")
-            // The display is the only ceiling, and the page scrolls below it.
+            // The display is the only ceiling - four fifths of it - and the
+            // page scrolls below there, with every section drawn.
             let tall = small.dashboardSize(content: 4000, width: 568)
-            suite.expect(tall.height == 1117 - 48 - small.quickAccessBottomInset,
-                         "the display bounds the island, which is where the page starts to scroll")
+            suite.expect(tall.height == 1117 * NotchPanelSizing.maximumHeightFraction
+                         && tall.height == small.maximumPanelHeight,
+                         "the display bounds the island at four fifths of itself, which is where the page starts to scroll")
             suite.expect(small.dashboardContentLimit == tall.height - small.headerTopInset - small.headerChromeHeight,
                          "the page's own limit is that island less its header")
             let wideOne = wide.dashboardSize(content: one, width: 568)
@@ -747,8 +749,9 @@ enum NotchDashboardTests {
             let long = geometry.expandedSize(module: .system, detail: true, panel: false, detailHeight: 10_000)
             suite.expect(short.height < unmeasured.height,
                          "a detail measured short gives a short island, not a page of empty space")
-            suite.expect(long.height <= unmeasured.height,
-                         "a detail taller than the display is capped by the page, which scrolls inside it")
+            suite.expect(long.height == geometry.maximumPanelHeight
+                         && long.height == 956 * NotchPanelSizing.maximumHeightFraction,
+                         "a detail taller than the display stops at four fifths of it, and scrolls inside that")
             suite.expect(long.height < 10_000, "the island never grows past the display for a long detail")
             let page = geometry.contentSize(for: long)
             suite.expect(page.height > 0 && page.height < 956, "the detail's page stays on the display")

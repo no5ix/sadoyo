@@ -125,6 +125,7 @@ struct MetricsTests {
                 NotchCompactTests.run(suite)
                 NotchDashboardTests.run(suite)
                 NotchCapsuleTests.run(suite)
+                NotchPanelSizingTests.run(suite)
                 PlainTextLineMoverTests.run(suite)
                 NotchVolumeKeyTests.run(suite)
                 NotchSettingsTabRowTests.run(suite)
