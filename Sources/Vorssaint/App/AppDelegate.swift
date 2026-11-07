@@ -314,6 +314,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
 
     func applicationWillTerminate(_ notification: Notification) {
         isTerminating = true
+        MenuBarOrganizerService.shared.stop()
         CommandBarService.shared.restoreBorrowedInputSource()
         if AppFeature.notch.isAvailable { NotchService.shared.stop(restoreCapture: false) }
         // Quitting properly means the start worked, whenever it happened.
@@ -458,7 +459,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             .joined(separator: ",")
         let visible = statusController?.statusItem.isVisible ?? false
         let manager = Self.runningMenuBarManagerName() ?? "none"
-        Self.menuBarLog.log("reshow \(stage, privacy: .public) window=\(window != nil) frame=\(placement, privacy: .public) visible=\(visible) screens=\(screens, privacy: .public) organizer=\(manager, privacy: .public)")
+        let hiderState: String
+        if AppFeature.menuBarHider.isAvailable {
+            let hider = MenuBarHiderService.shared
+            hiderState = hider.isEnabled ? (hider.isCollapsed ? "collapsed" : "expanded") : "off"
+        } else {
+            hiderState = "off"
+        }
+        Self.menuBarLog.log("reshow \(stage, privacy: .public) window=\(window != nil) frame=\(placement, privacy: .public) visible=\(visible) screens=\(screens, privacy: .public) organizer=\(manager, privacy: .public) hider=\(hiderState, privacy: .public)")
     }
 
     func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool { true }
@@ -2064,6 +2072,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         UserDefaults.standard.set(false, forKey: DefaultsKey.notchHidesMenuBarIcon)
         guard !isReshowingStatusItem else { return }
         isReshowingStatusItem = true
+        if AppFeature.menuBarHider.isAvailable {
+            MenuBarHiderService.shared.revealForStatusItemRecovery()
+        }
         statusController?.recreateStatusItem()
         verifyIconReappeared(attemptsLeft: Self.reshowVerifyAttempts)
     }
