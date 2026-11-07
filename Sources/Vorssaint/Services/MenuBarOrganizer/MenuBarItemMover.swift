@@ -40,7 +40,7 @@ final class MenuBarItemMover {
             MenuBarOrganizerService.logDiagnostic("mover: not movable/protected \(item.bundleIdentifier)/\(item.title)")
             throw MenuBarItemMoveError.itemNotMovable
         }
-        guard !isMoving else { throw MenuBarItemMoveError.busy }
+        guard !isMoving else { MenuBarOrganizerService.logDiagnostic("mover: busy at move entry \(item.displayName) -> \(destinationWindowID)"); throw MenuBarItemMoveError.busy }
         let targetPID = MenuBarOrganizerSupport.eventTargetPID(
             ownerPID: item.ownerPID,
             ownerBundleIdentifier: item.ownerBundleIdentifier,
@@ -50,7 +50,8 @@ final class MenuBarItemMover {
             throw MenuBarItemMoveError.menuOpen
         }
         isMoving = true
-        defer { inputCleanup.finish(); isMoving = false }
+        MenuBarOrganizerService.logDiagnostic("mover: drag begin \(item.displayName) \(item.frame) -> \(destinationFrame) win=\(destinationWindowID)")
+        defer { inputCleanup.finish(); isMoving = false; MenuBarOrganizerService.logDiagnostic("mover: drag end") }
 
         try await waitForIdleInput()
         try Task.checkCancellation()
@@ -139,6 +140,7 @@ final class MenuBarItemMover {
                !buttonsDown {
                 return
             }
+            MenuBarOrganizerService.logDiagnostic("mover: waiting input flags=\(flags.rawValue) buttons=\(buttonsDown)")
             try await Task.sleep(for: .milliseconds(50))
         }
         throw MenuBarItemMoveError.busy

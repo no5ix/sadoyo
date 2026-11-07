@@ -237,9 +237,11 @@ final class MenuBarOrganizerService: ObservableObject {
                     updateRefreshTimer()
                 }
             }
-            do { try await action(expected); completed = true }
-            catch is CancellationError { }
+            do { try await action(expected); completed = true
+                diagnostic("op: completed generation=\(generation == expected)") }
+            catch is CancellationError { diagnostic("op: cancelled") }
             catch {
+                diagnostic("op: threw \(error) generation=\(generation == expected)")
                 if generation == expected {
                     hider.restoreAlwaysHiddenAfterOrganizerReveal()
                     report(error)
@@ -264,7 +266,7 @@ final class MenuBarOrganizerService: ObservableObject {
             // spacer; expanding the bar pushes them further away. Rest the
             // spacer so the mover can pick the item up from the bar itself.
             if sourceWasAlwaysHidden { hider.revealAlwaysHiddenForOrganizer() }
-            try await Task.sleep(for: .milliseconds(180))
+            try await Task.sleep(for: .milliseconds(sourceWasAlwaysHidden ? 420 : 180))
             guard await snapshot(expected: expected) != nil else { diagnostic("move: pre-move snapshot unavailable"); throw MenuBarItemMoveError.itemUnavailable }
             let probe = items.filter { $0.id == id }.first
             let probeText = probe.map { "\($0.displayName)@\($0.section.rawValue)/\($0.identityState.rawValue)" } ?? "absent"
@@ -300,6 +302,7 @@ final class MenuBarOrganizerService: ObservableObject {
                           to section: MenuBarOrganizerSection, expected: UInt64,
                           requiresVisibleDestination: Bool = false) async throws {
         for attempt in 0..<2 {
+            diagnostic("relocate: attempt \(attempt)")
             try checkAccess()
             guard await snapshot(expected: expected) != nil,
                   let geometry = await hider.organizerGeometry() else { diagnostic("relocate: snapshot/geometry unavailable"); throw MenuBarItemMoveError.itemUnavailable }
@@ -318,10 +321,15 @@ final class MenuBarOrganizerService: ObservableObject {
             case .visible, .hidden: divider = geometry.hidden
             case .alwaysHidden: divider = geometry.always
             }
-            let lastVisible = section == .visible && targetItem == nil
-                ? MenuBarOrganizerSupport.orderedItems(items, in: .visible).last(where: { $0.id != id }) : nil
-            guard let destination = targetItem?.frame ?? lastVisible?.frame ?? divider else { diagnostic("relocate: no destination frame"); throw MenuBarItemMoveError.itemUnavailable }
-            let placeAfter = targetItem == nil && section == .visible
+            let appendAnchor = section == .visible && targetItem == nil
+                ? MenuBarOrganizerSupport.orderedItems(items, in: .visible).first(where: { $0.id != id && !$0.isProtected }) : nil
+            guard let destination = targetItem?.frame ?? appendAnchor?.frame ?? divider else { diagnostic("relocate: no destination frame"); throw MenuBarItemMoveError.itemUnavailable }
+            // Appending to the visible group inserts at the first third-party
+            // item, i.e. immediately right of the app's toggle. The gap between
+            // the separator and the toggle is zero-width, and the far-right
+            // slots belong to Control Center's own stack; drops in either land
+            // parked off-bar when the bar re-lays out.
+            let placeAfter = targetItem == nil && appendAnchor == nil
             let insertion = MenuBarOrganizerPolicy.insertionFrame(destination, after: placeAfter)
             let quartzDestination = CGRect(x: insertion.minX, y: item.frame.minY,
                                            width: insertion.width, height: item.frame.height)
@@ -333,7 +341,7 @@ final class MenuBarOrganizerService: ObservableObject {
             // from the public list: exact frame first, then window under point.
             let insertionPoint = CGPoint(x: placeAfter ? destination.maxX + 2 : destination.minX - 2,
                                          y: destination.midY)
-            let exactDestinationWindowID = targetItem?.windowID ?? lastVisible?.windowID
+            let exactDestinationWindowID = targetItem?.windowID ?? appendAnchor?.windowID
                 ?? (MenuBarWindowServerBridge.menuBarWindowIDs() ?? []).first {
                     MenuBarWindowServerBridge.frame(of: $0) == destination
                 }
@@ -348,6 +356,7 @@ final class MenuBarOrganizerService: ObservableObject {
                 diagnostic("relocate: destination window unresolved (divider frame=\(destination), point=\(insertionPoint))")
                 throw MenuBarItemMoveError.itemUnavailable
             }
+            diagnostic("relocate: dest=\(destination) insertion=\(insertion) routed=\(destinationWindowID) source=\(item.displayName)@\(item.section.rawValue)\(item.frame)")
             try await mover.move(item: item, destinationFrame: quartzDestination,
                                  destinationWindowID: destinationWindowID,
                                  placeAfter: placeAfter,
@@ -364,7 +373,11 @@ final class MenuBarOrganizerService: ObservableObject {
             }
             if MenuBarOrganizerPolicy.verifiedPlacement(of: refreshed.id,
                                                         before: targetItem?.id,
-                                                        section: section, items: items) { return }
+                                                        section: section, items: items) {
+                let landed = items.first { $0.id == refreshed.id }
+                diagnostic("relocate: verified \(refreshed.displayName)@\(landed?.section.rawValue ?? "?") frame=\(String(describing: landed?.frame))")
+                return
+            }
         }
         throw MenuBarItemMoveError.verificationFailed
     }

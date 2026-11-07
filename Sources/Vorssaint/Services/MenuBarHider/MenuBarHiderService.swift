@@ -216,10 +216,14 @@ final class MenuBarHiderService: NSResponder, ObservableObject {
     /// it to the thin width lets the mover pick the item up; the caller
     /// restores the spacer when the operation ends.
     func revealAlwaysHiddenForOrganizer() {
-        guard isEnabled, !isConfiguring, let item = alwaysHiddenItem,
-              revealedAlwaysHiddenLength == nil else { return }
+        guard isEnabled, let item = alwaysHiddenItem,
+              revealedAlwaysHiddenLength == nil else {
+            MenuBarOrganizerService.logDiagnostic("reveal: skipped (enabled=\(isEnabled) item=\(alwaysHiddenItem != nil) pending=\(revealedAlwaysHiddenLength != nil))")
+            return
+        }
         revealedAlwaysHiddenLength = item.length
         item.length = CGFloat(MenuBarHiderSupport.normalSeparatorWidth)
+        MenuBarOrganizerService.logDiagnostic("reveal: permanent spacer \(revealedAlwaysHiddenLength!) -> \(item.length)")
     }
 
     func restoreAlwaysHiddenAfterOrganizerReveal() {
