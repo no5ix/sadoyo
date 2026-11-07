@@ -1714,6 +1714,12 @@ def main():
           + "func activate(_ entry: ClipboardHistoryEntry) { activated.append(entry.id) }\n"
           # The list the page scrolls, which only records where it was asked to go.
           + "var size = CGSize(width: 504, height: 180)\n"
+          # The island's height follows what the page draws: it records the
+          # cards and the search field the page reports, and nothing else.
+          + "final class IslandService {\nvar reports: [(entries: Int, searchOpen: Bool)] = []\n"
+          + "func updateClipboardContent(entries: Int, searchOpen: Bool) { reports.append((entries, searchOpen)) }\n"
+          + "func forgetClipboardContent() { reports.append((-1, false)) }\n}\n"
+          + "var service = IslandService()\n"
           + "final class ScrollViewProxy {\nvar scrolls: [(id: UUID, anchor: UnitPoint?)] = []\n"
           + "func scrollTo(_ id: UUID, anchor: UnitPoint? = nil) { scrolls.append((id, anchor)) }\n}\n"
           + "".join(declaration(clipboard_view, prefix).replace("    private ", "    ", 1) for prefix in [

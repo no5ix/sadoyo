@@ -298,23 +298,30 @@ enum NotchDashboardTests {
                 NotchGeometry(screen: screen, safeAreaTop: 32, cameraWidth: 200,
                               layout: preset, customHeight: custom)
             }
-            let small = geometry(.custom, height: 220)
+            let small = geometry(.compact)
+            let chosen = geometry(.custom, height: 220)
             let wide = geometry(.spacious)
             let one: CGFloat = 420
             let three: CGFloat = 640
             let oneSize = small.dashboardSize(content: one, width: 568)
             let threeSize = small.dashboardSize(content: three, width: 568)
             suite.expect(threeSize.height > oneSize.height,
-                         "the island grows when the page does, at a preset height of its own")
-            suite.expect(oneSize.height == one + small.headerTopInset + small.headerChromeHeight
-                             && threeSize.height == three + small.headerTopInset + small.headerChromeHeight,
-                         "the island is the page, its header, and nothing else")
+                         "the island grows when the page does, on every preset")
+            suite.expect(oneSize.height == one + small.chromeHeight
+                             && threeSize.height == three + small.chromeHeight,
+                         "the island is the page, its chrome, and nothing else")
             // The display is the only ceiling, and the page scrolls below it.
             let tall = small.dashboardSize(content: 4000, width: 568)
-            suite.expect(tall.height == 1117 - 48 - small.quickAccessBottomInset,
-                         "the display bounds the island, which is where the page starts to scroll")
-            suite.expect(small.dashboardContentLimit == tall.height - small.headerTopInset - small.headerChromeHeight,
-                         "the page's own limit is that island less its header")
+            suite.expect(tall.height == NotchHeightPolicy.maximumHeight(displayHeight: 1117),
+                         "the display's 80% bounds the island, which is where the page starts to scroll")
+            suite.expect(small.scrolls(contentHeight: 4000, minimumContentHeight: NotchLayout.emptyHeight),
+                         "and the page scrolls to the sections below that limit")
+            suite.expect(small.dashboardContentLimit == tall.height - small.chromeHeight,
+                         "the page's own limit is that island less its chrome")
+            // A height chosen by hand is that island's own limit, under the rule.
+            suite.expect(chosen.dashboardSize(content: 4000, width: 568).height
+                             == chosen.surfaceCeiling,
+                         "a height chosen by hand bounds the dashboard, and the page scrolls inside it")
             let wideOne = wide.dashboardSize(content: one, width: 568)
             let wideThree = wide.dashboardSize(content: three, width: 568)
             suite.expect(wideThree.height - wideOne.height == three - one
@@ -747,8 +754,10 @@ enum NotchDashboardTests {
             let long = geometry.expandedSize(module: .system, detail: true, panel: false, detailHeight: 10_000)
             suite.expect(short.height < unmeasured.height,
                          "a detail measured short gives a short island, not a page of empty space")
-            suite.expect(long.height <= unmeasured.height,
-                         "a detail taller than the display is capped by the page, which scrolls inside it")
+            suite.expect(short.height == geometry.chromeHeight + 124,
+                         "the island is the reading it measured, plus its chrome")
+            suite.expect(long.height == geometry.surfaceCeiling && geometry.scrolls(contentHeight: 10_000),
+                         "a detail taller than the display stops at its 80%, and scrolls to its last row")
             suite.expect(long.height < 10_000, "the island never grows past the display for a long detail")
             let page = geometry.contentSize(for: long)
             suite.expect(page.height > 0 && page.height < 956, "the detail's page stays on the display")

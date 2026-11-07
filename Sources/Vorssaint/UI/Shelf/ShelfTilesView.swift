@@ -100,9 +100,12 @@ struct ShelfTilesView: NSViewRepresentable {
     /// continue past its edge, so a short strip never scrolls down.
     var sideways = false
 
-    static let tileSize = NSSize(width: 78, height: 88)
-    static let spacing: CGFloat = 10
-    static let inset: CGFloat = 4
+    /// The island's Files page and the island's own height read these from the
+    /// shared layout, so the tiles the page draws and the height the island
+    /// takes for them are the same arithmetic.
+    static let tileSize = NSSize(width: NotchLayout.shelfTileWidth, height: NotchLayout.shelfTileHeight)
+    static let spacing: CGFloat = NotchLayout.shelfTileSpacing
+    static let inset: CGFloat = NotchLayout.shelfTileInset
 
     func makeNSView(context: Context) -> NSScrollView {
         // A view built now has nothing to reveal: the docked shelf rebuilds

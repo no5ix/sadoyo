@@ -317,6 +317,21 @@ enum NotchLayout {
     /// One or two lines of the entry, until the pointer rests on it.
     static let clipboardCompactCardHeight: CGFloat = 52
     static let clipboardCardSpacing: CGFloat = 8
+    /// The cards a page of a list draws, shared by the page that lays them out
+    /// and the island that is as tall as they are.
+    static let cardSpacing: CGFloat = 8
+    static let notificationCardWidth: CGFloat = 240
+    static let notificationCardHeight: CGFloat = 120
+    /// A download with its name, its meter and its size.
+    static let downloadCardHeight: CGFloat = 72
+    /// A recent capture's card.
+    static let captureCardWidth: CGFloat = 236
+    static let captureCardHeight: CGFloat = 88
+    /// The shelf's tiles, which the Files page fills its rows with.
+    static let shelfTileWidth: CGFloat = 78
+    static let shelfTileHeight: CGFloat = 88
+    static let shelfTileSpacing: CGFloat = 10
+    static let shelfTileInset: CGFloat = 4
     static let emptyHeight: CGFloat = 140
     /// The player as a phone's island lays it out: a small cover, the song
     /// beside it, the timeline and one row of buttons across the island,
@@ -365,6 +380,22 @@ enum NotchLayout {
     /// The mixer's faders at their shortest, the whole page below the top
     /// row: each track still long enough to drag between its icon and level.
     static let mixerMinimumHeight: CGFloat = 104
+    /// The fader at the length the page draws it, and the rows of captions,
+    /// mutes and levels under it.
+    static let mixerFaderHeight: CGFloat = mixerMinimumHeight
+    static let mixerCaptionRowHeight: CGFloat = 22
+    /// The calendar's two pages: the month with the week's agenda beside it,
+    /// at the height the grid asks for, and the week strip with its agenda.
+    static let calendarMonthPageHeight: CGFloat = 300
+    static let calendarWeekPageHeight: CGFloat = 240
+    /// The camera's preview at the island's width, and the shortest page that
+    /// keeps its permission and its error messages reachable.
+    static func cameraPreviewHeight(width: CGFloat) -> CGFloat { max(0, width) * 9 / 16 }
+    static let cameraMinimumHeight: CGFloat = 144
+    /// The page of what to watch, and the page of text: each fills the page it
+    /// is given, so this is the height their own rows ask for.
+    static let watchPageHeight: CGFloat = 236
+    static let scratchpadPageHeight: CGFloat = 220
     /// Breathing room every compact strip keeps from its silhouette.
     static let compactEdgeGap: CGFloat = 5
     /// The compact player's equalizer, spaced by its own bar width.
@@ -2675,8 +2706,12 @@ struct NotchGeometry: Equatable {
         max(0, notificationPreviewWidth - NotchLayout.horizontalInset * 2)
     }
     func notificationPreviewSize(contentHeight: CGFloat) -> CGSize {
-        let height = safeContentTop + max(0, contentHeight) + NotchLayout.bottomInset
-        return CGSize(width: notificationPreviewWidth, height: min(height, screen.height - 48))
+        // The card is as tall as the notification it shows, and no taller than
+        // any other island surface: 80% of the display that hosts it.
+        let resolved = NotchHeightPolicy.resolve(contentHeight: max(0, contentHeight),
+                                                 chromeHeight: safeContentTop + NotchLayout.bottomInset,
+                                                 displayHeight: screen.height, clearance: 48)
+        return CGSize(width: notificationPreviewWidth, height: resolved.surfaceHeight)
     }
     var peek: CGSize {
         CGSize(width: min(screen.width - 24, max(cameraWidth + 110, 340)), height: safeContentTop + 52)
@@ -2701,16 +2736,52 @@ struct NotchGeometry: Equatable {
         return min(max(preferred, cameraWidth + 36), screen.width - 24 - NotchQuickAccessLayout.gutter * 2)
     }
     var contentWidth: CGFloat { max(0, expandedWidth - NotchLayout.horizontalInset * 2) }
-    /// Content height available before a page needs to scroll.
+
+    // MARK: The island's height
+
+    /// The tallest island the display that hosts it allows: 80% of its height.
+    /// Every page shares this one limit, and no page sets a maximum of its own.
+    var maximumSurfaceHeight: CGFloat { NotchHeightPolicy.maximumHeight(displayHeight: screen.height) }
+
+    /// The island's limit on this display: the rule's 80%, less what the
+    /// display's edge and the floating controls keep below the island, and under
+    /// a height the person chose by hand. Each of those lowers the rule's limit
+    /// where it must, and none of them raises it.
+    var surfaceCeiling: CGFloat {
+        let cap = layout == .custom ? min(maximumSurfaceHeight, max(0, customHeight)) : maximumSurfaceHeight
+        guard screen.height.isFinite, screen.height > 0 else { return cap }
+        return max(0, min(cap, screen.height - (48 + quickAccessBottomInset)))
+    }
+
+    /// The island's own height beyond its page: the row it opens with, the gap
+    /// below it, and the margin under the page. Every page's height is measured
+    /// inside this, so the row and the margins are never left out.
+    var chromeHeight: CGFloat { headerTopInset + headerChromeHeight }
+
+    /// The tallest page this display allows inside the island's chrome. A page
+    /// taller than it scrolls to its last row.
+    var contentCeiling: CGFloat { max(0, surfaceCeiling - chromeHeight) }
+
+    /// One page's height on this display: what its content measures, the
+    /// island's chrome around it, and this island's limit over both. The limit
+    /// is read here, from the display and the preset, and applied by the rule.
+    func resolveHeight(contentHeight natural: CGFloat, minimumContentHeight: CGFloat = 0) -> NotchSurfaceHeight {
+        NotchHeightPolicy.resolve(contentHeight: natural, chromeHeight: chromeHeight,
+                                  maximumSurfaceHeight: surfaceCeiling, minimumContentHeight: minimumContentHeight)
+    }
+
+    /// The page height a preset asks for, kept as a floor beneath a page that
+    /// measures less. A preset is never a ceiling over a page: the display's
+    /// limit is, and a page that measures more takes it up to that limit.
     var contentBudget: CGFloat {
         switch layout {
         case .compact: return NotchLayout.compactContentHeight
         case .spacious: return NotchLayout.spaciousContentHeight
-        case .custom: return max(0, customHeight - headerTopInset - headerChromeHeight)
+        case .custom: return max(0, customHeight - chromeHeight)
         }
     }
-    /// Room a vertical surface gets: the budget, or a readable page where a
-    /// preset's strip would leave it a few lines.
+    /// Room a vertical surface gets: the preset's floor, or a readable page
+    /// where a preset's strip would leave it a few lines.
     var pageBudget: CGFloat { layout == .custom ? contentBudget : max(contentBudget, NotchLayout.pageContentHeight) }
     /// Lyrics and the queue open below the player; custom heights keep them
     /// within the chosen limit and the page swaps the player out instead.
@@ -2726,10 +2797,22 @@ struct NotchGeometry: Equatable {
         NotchLayout.systemRowRanges(count: cards, width: contentWidth - NotchLayout.systemHoverInset(width: contentWidth) * 2).count
     }
 
+    /// The rows the launcher's rail draws: the island is as tall as the tiles it
+    /// shows, up to the display's limit, so the rows it draws are the rows it
+    /// has room for, and the tiles past them step sideways.
     func toolRows(count: Int) -> Int {
         NotchLayout.railRows(count: count,
                              perRow: NotchLayout.railCapacity(width: contentWidth, itemWidth: NotchLayout.toolWidth, spacing: NotchLayout.toolSpacing),
-                             rowHeight: NotchLayout.toolHeight, spacing: NotchLayout.toolSpacing, height: contentBudget)
+                             rowHeight: NotchLayout.toolHeight, spacing: NotchLayout.toolSpacing,
+                             height: toolsPageHeight(count: count))
+    }
+
+    /// The height the launcher's page comes to with `count` marks on it.
+    func toolsPageHeight(count: Int) -> CGFloat {
+        resolveHeight(contentHeight: NotchNaturalContent.rail(count: count, itemWidth: NotchLayout.toolWidth,
+                                                              itemHeight: NotchLayout.toolHeight,
+                                                              spacing: NotchLayout.toolSpacing, width: contentWidth),
+                      minimumContentHeight: NotchLayout.toolHeight).contentHeight
     }
 
     /// The arrows walk the tiles the way the rail draws them: reading order
@@ -2743,9 +2826,85 @@ struct NotchGeometry: Equatable {
             ? .rows(columns: columns) : .columns(rows: rows)
     }
 
-    /// `toolCount` is nil while the launcher edits its grid or hosts a
-    /// utility: those need the page, not a rail. `detailHeight` is a
-    /// detail's measured content, which it fits instead of the whole page.
+    /// The height one page's content measures, before the display's limit is
+    /// applied to it, at the width the island offers the page.
+    ///
+    /// Every page is measured here from what it has to show - its cards, its
+    /// rows, the spacing between them and the insets around them - or from a
+    /// height the page measured for itself (a reading's detail, a media editor,
+    /// a capture's preview). The island's own height never enters, so the limit
+    /// cannot inflate the measurement it is applied to.
+    ///
+    /// `toolCount` is nil while the launcher edits its grid or hosts a utility:
+    /// those need the page, not a rail.
+    func naturalContentHeight(module: NotchModule, detail: Bool = false, panel: Bool = false,
+                              detailHeight: CGFloat? = nil, shortcutCount: Int = 4,
+                              sliderCount: Int = 2, controlsHaveMusic: Bool = true, musicHasContent: Bool = true,
+                              musicShowsVolume: Bool = false,
+                              musicExtraHeight: CGFloat = 0,
+                              fileMediaHeight: CGFloat? = nil, systemCards: Int = 6, toolCount: Int? = 8,
+                              capturePreviewHeight: CGFloat? = nil,
+                              timerHasSession: Bool = false, timerMode: NotchTimerMode = .timer,
+                              agentsHeight: CGFloat? = nil,
+                              content: NotchPageContent = .empty) -> CGFloat {
+        if detail, !panel, let detailHeight { return max(0, detailHeight) + 4 }
+        // A hosted page - a metric's detail with nothing measured yet, the app
+        // panel, a utility - fills the page it is given, so it keeps a readable
+        // page rather than measuring one of its own.
+        if detail || panel { return pageBudget }
+        // A surface that has measured itself keeps that height.
+        if module == .files && !detail, let fileMediaHeight { return max(0, fileMediaHeight) }
+        if module == .captures && !detail, let capturePreviewHeight { return max(0, capturePreviewHeight) + 4 }
+        switch module {
+        case .controls:
+            // The levels sit in the top row; only playback, the shortcuts and
+            // the levels a camera's row cannot split evenly make the page.
+            let levels = max(0, sliderCount)
+            let band = NotchBand(geometry: self, contentWidth: contentWidth)
+            let levelRow = NotchLayout.bandLevelCount(levels, band: band) < levels
+            // The plan is drawn at the tallest page the display allows, so a
+            // card is only shortened by the display, never by a preset.
+            let room = contentCeiling + (levelRow ? NotchLayout.levelRowHeight + NotchLayout.rowSpacing : 0)
+            let home = NotchLayout.controls(hasCards: controlsHaveMusic, levelRow: levelRow,
+                                            shortcutCount: max(0, shortcutCount), width: contentWidth, height: room)
+            return !controlsHaveMusic && levels <= 0 && shortcutCount <= 0 ? NotchLayout.emptyHeight : home.height
+        case .music:
+            let player = NotchLayout.musicPlayerHeight(band: musicBandHeight, playing: musicHasContent)
+            let volume = musicShowsVolume ? NotchLayout.rowSpacing + NotchLayout.levelRowHeight : 0
+            return player + volume + max(0, musicExtraHeight)
+        case .timer:
+            return NotchLayout.timer(mode: timerMode, hasSession: timerHasSession, height: contentCeiling)
+        case .agents:
+            // Only the cards a person chose; a short set leaves a short island.
+            return agentsHeight.map { $0 > 0 ? $0 : NotchLayout.emptyHeight } ?? contentCeiling
+        default:
+            var items = content
+            items.systemCards = systemCards
+            if let toolCount { items.tools = toolCount }
+            return NotchNaturalContent.height(module: module, items: items, width: contentWidth)
+        }
+    }
+
+    /// The shortest page a section stays usable at, under the display's limit.
+    ///
+    /// A surface that has measured itself - a reading's detail, a media editor,
+    /// a capture's preview - keeps exactly the height it measured: a short one
+    /// gives a short island, not a page of empty space.
+    func minimumContentHeight(module: NotchModule, detail: Bool = false, panel: Bool = false,
+                              detailHeight: CGFloat? = nil, fileMediaHeight: CGFloat? = nil,
+                              capturePreviewHeight: CGFloat? = nil,
+                              content: NotchPageContent = .empty) -> CGFloat {
+        if detail, !panel, detailHeight != nil { return 0 }
+        if detail || panel { return pageBudget }
+        if module == .files && !detail, fileMediaHeight != nil { return 0 }
+        if module == .captures && !detail, capturePreviewHeight != nil { return 0 }
+        return NotchPageFloor.contentHeight(module: module, items: content)
+    }
+
+    /// The island's size for one page: what the page's content measures, the
+    /// island's chrome around it, and the display's 80% over both. A page that
+    /// measures less than the display allows is drawn at its own height; one
+    /// that measures more is drawn at the limit and scrolls.
     func expandedSize(module: NotchModule, detail: Bool = false, panel: Bool = false,
                       detailHeight: CGFloat? = nil, shortcutCount: Int = 4,
                       sliderCount: Int = 2, controlsHaveMusic: Bool = true, musicHasContent: Bool = true,
@@ -2754,67 +2913,21 @@ struct NotchGeometry: Equatable {
                       fileMediaHeight: CGFloat? = nil, systemCards: Int = 6, toolCount: Int? = 8,
                       capturePreviewHeight: CGFloat? = nil,
                       timerHasSession: Bool = false, timerMode: NotchTimerMode = .timer,
-                      agentsHeight: CGFloat? = nil) -> CGSize {
-        let budget = contentBudget
-        let showsCapturePreview = module == .captures && !detail && capturePreviewHeight != nil
-        let showsFileMedia = module == .files && !detail && fileMediaHeight != nil
-        let contentHeight: CGFloat
-        if detail, !panel, let detailHeight {
-            contentHeight = min(pageBudget, max(0, detailHeight) + 4)
-        } else if detail || panel {
-            contentHeight = pageBudget
-        } else if showsFileMedia {
-            // Measured surfaces keep their own height; the custom limit and
-            // the display bound them below.
-            contentHeight = max(0, fileMediaHeight ?? 0)
-        } else if showsCapturePreview {
-            contentHeight = max(0, capturePreviewHeight ?? 0) + 4
-        } else {
-            switch module {
-            case .controls:
-                // The levels sit in the top row; only playback, the shortcuts
-                // and the levels a camera's row cannot split evenly make the page.
-                // Those keep a row below the camera's that a preset adds to
-                // the island, as it adds the top row, rather than taking it
-                // from the cards and the rail; a custom height holds them all.
-                let levels = max(0, sliderCount)
-                let band = NotchBand(geometry: self, contentWidth: contentWidth)
-                let levelRow = NotchLayout.bandLevelCount(levels, band: band) < levels
-                let room = budget + (levelRow && layout != .custom ? NotchLayout.levelRowHeight + NotchLayout.rowSpacing : 0)
-                let home = NotchLayout.controls(hasCards: controlsHaveMusic, levelRow: levelRow,
-                                                shortcutCount: max(0, shortcutCount), width: contentWidth, height: room)
-                let empty = !controlsHaveMusic && sliderCount <= 0 && shortcutCount <= 0
-                contentHeight = min(room, empty ? NotchLayout.emptyHeight : home.height)
-            case .music:
-                let player = NotchLayout.musicPlayerHeight(band: musicBandHeight, playing: musicHasContent)
-                // Presets grow for the optional row; a custom height keeps
-                // its limit and the page can scroll to the controls.
-                let volume = musicShowsVolume ? NotchLayout.rowSpacing + NotchLayout.levelRowHeight : 0
-                let room = budget + (layout == .custom ? 0 : volume)
-                contentHeight = min(room, player + volume) + max(0, musicExtraHeight)
-            case .system:
-                let cards = max(0, systemCards)
-                contentHeight = min(budget, cards == 0 ? NotchLayout.emptyHeight
-                    : NotchLayout.railHeight(rows: systemRows(cards: cards), rowHeight: NotchLayout.systemCardHeight, spacing: NotchLayout.rowSpacing)
-                        + NotchLayout.systemHoverInset(width: contentWidth) * 2)
-            case .tools:
-                guard let toolCount else { contentHeight = pageBudget; break }
-                contentHeight = min(budget, toolCount == 0 ? NotchLayout.emptyHeight
-                    : NotchLayout.railHeight(rows: toolRows(count: toolCount), rowHeight: NotchLayout.toolHeight, spacing: NotchLayout.toolSpacing))
-            case .timer:
-                contentHeight = min(budget, NotchLayout.timer(mode: timerMode, hasSession: timerHasSession, height: budget))
-            case .agents:
-                // Only the cards a person chose; a short set leaves a short island.
-                contentHeight = min(budget, agentsHeight.map { $0 > 0 ? $0 : NotchLayout.emptyHeight } ?? budget)
-            // Lists and previews fill the chosen content budget.
-            case .mixer, .calendar, .clipboard, .captures, .files, .notifications, .downloads, .camera, .scratchpad, .watch:
-                contentHeight = budget
-            }
-        }
-        var preferredHeight = headerTopInset + headerChromeHeight + contentHeight
-        if layout == .custom { preferredHeight = min(preferredHeight, customHeight) }
-        return CGSize(width: expandedWidth,
-                      height: min(preferredHeight, screen.height - 48 - quickAccessBottomInset))
+                      agentsHeight: CGFloat? = nil,
+                      content: NotchPageContent = .empty) -> CGSize {
+        let natural = naturalContentHeight(module: module, detail: detail, panel: panel, detailHeight: detailHeight,
+                                           shortcutCount: shortcutCount, sliderCount: sliderCount,
+                                           controlsHaveMusic: controlsHaveMusic, musicHasContent: musicHasContent,
+                                           musicShowsVolume: musicShowsVolume, musicExtraHeight: musicExtraHeight,
+                                           fileMediaHeight: fileMediaHeight, systemCards: systemCards,
+                                           toolCount: toolCount, capturePreviewHeight: capturePreviewHeight,
+                                           timerHasSession: timerHasSession, timerMode: timerMode,
+                                           agentsHeight: agentsHeight, content: content)
+        let floor = minimumContentHeight(module: module, detail: detail, panel: panel, detailHeight: detailHeight,
+                                         fileMediaHeight: fileMediaHeight, capturePreviewHeight: capturePreviewHeight,
+                                         content: content)
+        return CGSize(width: expandedWidth, height: resolveHeight(contentHeight: natural,
+                                                                  minimumContentHeight: floor).surfaceHeight)
     }
 
     /// Leave room for the row indicator without narrowing the tiles below
@@ -2824,41 +2937,58 @@ struct NotchGeometry: Equatable {
                                  spacing: NotchLayout.sectionSpacing)
     }
 
-    /// Visible rows. The gallery is a page like the app panel, so a preset
-    /// shows three rows before any row has to step in; the rest step in whole.
+    /// Visible rows. The island is as tall as the tiles it draws, up to the
+    /// display's limit, so the rows it shows are the rows it has room for.
     func sectionRows(count: Int) -> Int {
         NotchLayout.railRows(count: count,
                              perRow: sectionColumns,
-                             rowHeight: NotchLayout.sectionTileHeight, spacing: NotchLayout.sectionSpacing, height: pageBudget)
+                             rowHeight: NotchLayout.sectionTileHeight, spacing: NotchLayout.sectionSpacing,
+                             height: sectionPageHeight(count: count))
     }
 
+    /// The height the sections page comes to with `count` tiles on it.
+    func sectionPageHeight(count: Int) -> CGFloat {
+        resolveHeight(contentHeight: sectionsContentHeight(count: count),
+                      minimumContentHeight: NotchLayout.sectionTileHeight).contentHeight
+    }
+
+    /// The tiles the gallery draws, at the columns it draws them in.
+    func sectionsContentHeight(count: Int) -> CGFloat {
+        NotchNaturalContent.rail(count: count, itemWidth: NotchLayout.sectionTileWidth,
+                                 itemHeight: NotchLayout.sectionTileHeight,
+                                 spacing: NotchLayout.sectionSpacing,
+                                 width: contentWidth - NotchLayout.sectionIndicatorWidth)
+    }
+
+    /// The island around the gallery: every tile the page draws, and the
+    /// display's limit over them.
     func sectionPickerSize(count: Int) -> CGSize {
-        let content = min(pageBudget, count == 0 ? NotchLayout.emptyHeight
-            : NotchLayout.railHeight(rows: sectionRows(count: count), rowHeight: NotchLayout.sectionTileHeight, spacing: NotchLayout.sectionSpacing))
-        let desiredHeight = headerTopInset + headerChromeHeight + content
-        return CGSize(width: expandedWidth, height: min(desiredHeight, screen.height - 48 - quickAccessBottomInset))
+        let resolved = resolveHeight(contentHeight: sectionsContentHeight(count: count),
+                                     minimumContentHeight: NotchLayout.sectionTileHeight)
+        return CGSize(width: expandedWidth, height: resolved.surfaceHeight)
     }
-
     /// The open island holding the one-page dashboard, at the height the page's
     /// own sections measure: every card the page draws - the month, one card per
     /// player, the timer, the readings, the way to the sections - is in that
     /// height, so the island grows as activities arrive and every section stays
     /// on the page.
     ///
-    /// The height chosen for the island is not its ceiling here. That height is
-    /// the island's own resting size and the size of the pages that hold one
-    /// section; the dashboard is the page that grows with what runs, which is
-    /// what the page's design asks for. Only the display bounds it, and where
-    /// the display cannot hold the whole page the page scrolls with all its
-    /// sections drawn - no section is dropped to make a page fit.
+    /// This is the shared rule like every other page: the page's own measure is
+    /// its height, and the display's 80% is its limit. Where the display cannot
+    /// hold the whole page, the page scrolls with all its sections drawn - no
+    /// section is dropped to make a page fit.
     func dashboardSize(content: CGFloat, width: CGFloat) -> CGSize {
-        let preferredHeight = headerTopInset + headerChromeHeight + max(0, content)
+        let resolved = resolveHeight(contentHeight: max(0, content), minimumContentHeight: NotchLayout.emptyHeight)
         // The island is as wide as the page it holds, and never wider than the
         // preset's own island: a narrow display narrows the page with it.
         let pageWidth = min(expandedWidth, width + NotchLayout.horizontalInset * 2)
-        return CGSize(width: pageWidth,
-                      height: min(preferredHeight,
-                                  screen.height - 48 - quickAccessBottomInset))
+        return CGSize(width: pageWidth, height: resolved.surfaceHeight)
+    }
+
+    /// Whether a page scrolls on this display: what it measures is taller than
+    /// the page the display allows. Every page asks the same question.
+    func scrolls(contentHeight natural: CGFloat, minimumContentHeight: CGFloat = 0) -> Bool {
+        resolveHeight(contentHeight: natural, minimumContentHeight: minimumContentHeight).scrolls
     }
 
     func contentSize(for size: CGSize) -> CGSize {
@@ -2866,12 +2996,10 @@ struct NotchGeometry: Equatable {
                height: max(0, size.height - headerTopInset - headerChromeHeight))
     }
 
-    /// How much content the dashboard can be shown at all: the tallest island
-    /// the display allows, less its header. Below this the page cannot be drawn
-    /// whole and scrolls, with every section still drawn.
-    var dashboardContentLimit: CGFloat {
-        max(0, screen.height - 48 - quickAccessBottomInset - headerTopInset - headerChromeHeight)
-    }
+    /// How much content the dashboard can be shown at all: the tallest page the
+    /// display allows, less the island's chrome. Below this the page cannot be
+    /// drawn whole and scrolls, with every section still drawn.
+    var dashboardContentLimit: CGFloat { contentCeiling }
     var appPanelSize: CGSize { contentSize(for: expandedSize(module: .tools, panel: true)) }
     func frame(for size: CGSize) -> CGRect {
         CGRect(x: screen.midX + surfaceShift - size.width / 2,

@@ -136,6 +136,12 @@ struct NotchClipboardView: View {
             guard !preview else { return }
             // Escape closes the search before it closes the island.
             service.setPageLayer(.clipboard, close: open ? { closeSearch() } : nil)
+            // The island is as tall as the field and the cards under it.
+            service.updateClipboardContent(entries: entries.count, searchOpen: open)
+        }
+        .onChange(of: entries.count) { _, count in
+            guard !preview else { return }
+            service.updateClipboardContent(entries: count, searchOpen: searchOpen)
         }
         .onChange(of: searching) { _, focused in
             // A field left empty has nothing to keep open.
@@ -144,7 +150,10 @@ struct NotchClipboardView: View {
         .onDisappear {
             dwell?.task.cancel()
             closing?.task.cancel()
-            if !preview { service.setPageLayer(.clipboard, close: nil) }
+            if !preview {
+                service.setPageLayer(.clipboard, close: nil)
+                service.forgetClipboardContent()
+            }
         }
         // A row that leaves the list hands the highlight on, as a new search does.
         .onChange(of: entries.map(\.id)) { _, _ in highlightedID = searchHighlight(keeping: highlightedID) }
@@ -173,6 +182,8 @@ struct NotchClipboardView: View {
         guard !preview else { return }
         highlightedID = searchHighlight(keeping: nil)
         searching = true
+        // The island is as tall as the cards this page draws.
+        service.updateClipboardContent(entries: entries.count, searchOpen: searchOpen)
     }
 
     /// The list follows the highlight the least that shows it whole. With no

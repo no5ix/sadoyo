@@ -326,10 +326,10 @@ struct NotchView: View {
         }
     }
 
-    /// The island's one page. It scrolls only where the display, or a height
-    /// chosen by hand, leaves the sections taller than the island.
+    /// The island's one page. It scrolls only where the page measures taller
+    /// than the display allows, which is the same question every page asks.
     @ViewBuilder private var dashboard: some View {
-        if service.dashboardContentHeight > service.contentSize.height {
+        if service.expandedScrolls {
             ScrollView {
                 NotchDashboardView(service: service)
                     .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -465,51 +465,18 @@ struct NotchView: View {
         }
     }
 
-    /// Keep each page's minimum usable layout reachable when a custom height
-    /// or the display leaves less room. The outer silhouette stays unchanged.
+    /// The page's height: what the page's content measures, the island's chrome
+    /// around it, and the display's 80% over both. Each page's shortest usable
+    /// layout is a floor inside that shared rule (`NotchPageFloor`), not a
+    /// height kept here, so no page is sized by a rule of its own and no fixed
+    /// height overrides the content. The outer silhouette stays unchanged.
     private var pageSize: CGSize {
-        var size = service.contentSize
-        // The dashboard keeps the height its sections measure, which the island
-        // was grown to; no page's minimum applies to it.
-        guard !showsDetail, !service.showsDashboard else { return size }
-        switch service.selected {
-        case .controls:
-            let items = NotchSupport.controls()
-            let shortcuts = items.filter { $0 != .music && !$0.isLevel }
-            let levels = items.filter(\.isLevel).count
-            let band = NotchBand(geometry: service.expandedGeometry, contentWidth: size.width)
-            size.height = max(size.height, NotchLayout.controls(
-                hasCards: items.contains(.music), levelRow: NotchLayout.bandLevelCount(levels, band: band) < levels,
-                shortcutCount: shortcuts.count, width: size.width, height: size.height).height)
-        case .timer:
-            let session = NotchTimerService.shared.session
-            size.height = max(size.height, NotchLayout.timer(
-                mode: session.hasSession ? session.mode : NotchTimerSupport.savedMode(),
-                hasSession: session.hasSession, height: size.height))
-        case .calendar:
-            size.height = max(size.height, NotchLayout.calendarMonthMinimumHeight)
-        case .clipboard:
-            // A complete card with its action row; the search is in the top row.
-            size.height = max(size.height, NotchLayout.clipboardCardHeight)
-        case .camera:
-            // Keep permission and error messages reachable.
-            size.height = max(size.height, 144)
-        case .mixer:
-            // Shorten the tracks before pushing mute and level controls offscreen.
-            size.height = max(size.height, NotchLayout.mixerMinimumHeight)
-        case .music:
-            size.height = max(size.height, NotchLayout.musicPlayerHeight(band: service.expandedGeometry.musicBandHeight,
-                                                                         playing: music.playback != nil,
-                                                                         showVolume: service.musicShowsVolume))
-        case .files:
-            // One shelf tile and its vertical insets; the actions are in the top row.
-            size.height = max(size.height, 88 + 8)
-        default: break
-        }
-        return size
+        service.contentSize
     }
 
-    private var contentOverflows: Bool { pageSize.height > service.contentSize.height }
+    /// The page on screen measures taller than the island: it scrolls to its
+    /// last row. A page that fits the display is drawn whole, with no scroller.
+    private var contentOverflows: Bool { service.expandedScrolls }
 
     private var scrollsVertically: Bool {
         guard !service.showingAppPanel else { return false }
