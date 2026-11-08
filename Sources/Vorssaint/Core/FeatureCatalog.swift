@@ -31,7 +31,7 @@ enum AppFeature: String, CaseIterable {
          commandBar, screenRecorder, wallpaper, killProcess, portManager
     // Dynamic Island, then its extensions
     case notch, notchCalendar, notchNotifications, notchGestures, notchTimer, notchAccessories, notchLyrics,
-         notchQueue, notchLiveEqualizer, notchDownloads, notchAgents, notchWatch, notchMascot
+         notchQueue, notchLiveEqualizer, notchDownloads, notchAgents, notchWatch, notchSplash, notchMascot
     // System monitor, one entry per metric family (temperatures live with
     // their parent metric: CPU temp with CPU, battery temp with power).
     case monitorCPU, monitorGPU, monitorMemory, monitorNetwork, monitorDisk, monitorPower, connectedDevices, fanControl
@@ -119,7 +119,7 @@ extension AppFeature {
             return .tools
         case .notch, .notchCalendar, .notchNotifications, .notchGestures, .notchTimer, .notchAccessories,
              .notchLyrics, .notchQueue, .notchLiveEqualizer, .notchDownloads, .notchAgents, .notchWatch,
-             .notchMascot:
+             .notchSplash, .notchMascot:
             return .dynamicIsland
         case .monitorCPU, .monitorGPU, .monitorMemory, .monitorNetwork, .monitorDisk, .monitorPower,
              .connectedDevices, .fanControl:
@@ -196,6 +196,8 @@ extension AppFeature {
         case .notchCalendar: return "calendar"
         case .notchAgents: return "sparkles"
         case .notchWatch: return "eye"
+        // A dashboard of four readings, in the island.
+        case .notchSplash: return "gauge.with.dots.needle.bottom.50percent"
         case .notchMascot: return "face.smiling"
         case .notch: return "macbook"
         case .radialMenu: return "circle.grid.cross"
@@ -271,6 +273,7 @@ extension AppFeature {
         case .notchCalendar: return [DefaultsKey.notchCalendarEnabled]
         case .notchAgents: return [DefaultsKey.notchAgentsEnabled]
         case .notchWatch: return [DefaultsKey.notchWatchEnabled]
+        case .notchSplash: return [DefaultsKey.notchSplashEnabled]
         case .notchMascot: return [DefaultsKey.notchMascotEnabled]
         case .notch: return [DefaultsKey.notchEnabled]
         case .radialMenu: return [DefaultsKey.radialMenuEnabled]
@@ -347,6 +350,9 @@ extension AppFeature {
         // The chosen area is read with the screen capture other tools use,
         // and the alert becomes a notification where the island is hidden.
         case .notchWatch: return [.screenRecording, .notifications]
+        // The status is read from a server on this Mac over plain HTTP, which
+        // asks nothing of macOS. The task's end is a notification.
+        case .notchSplash: return [.notifications]
         case .notchNotifications: return [.accessibility]
         case .notchCalendar: return [.calendar]
         case .notch: return [.accessibility, .automationPlayback]
@@ -402,7 +408,7 @@ extension AppFeature {
         switch self {
         case .keepAwake, .brightness, .radialMenu, .quickToggles, .cleaner,
              .uninstaller, .homebrew, .appUpdates, .mixer, .cameraPreview,
-             .micMute, .musicBlock, .notchWatch:
+             .micMute, .musicBlock, .notchWatch, .notchSplash:
             return []
         default:
             return permissions.filter { $0 == .accessibility || $0 == .screenRecording }
@@ -489,7 +495,8 @@ extension AppFeature {
              .connectedDevices:
             return true
         case .focusFollowsMouse, .scrollHorizontal, .scrollZoom, .linearScroll, .diskImageInstaller, .audioPriority,
-             .wallpaper, .killProcess, .portManager, .fanControl, .notchMascot, .spacesOrder, .quitApps:
+             .wallpaper, .killProcess, .portManager, .fanControl, .notchMascot, .spacesOrder, .quitApps,
+             .notchSplash:
             return false
         }
     }
@@ -520,6 +527,9 @@ extension AppFeature {
             case (.notchWatch, .screenRecording):
                 return isAvailable(.notch) && boolFor(DefaultsKey.notchEnabled)
                     && !(stringFor(DefaultsKey.notchHiddenModules) ?? "").split(separator: ",").contains("watch")
+            case (.notchSplash, .notifications):
+                return isAvailable(.notch) && boolFor(DefaultsKey.notchEnabled)
+                    && !(stringFor(DefaultsKey.notchHiddenModules) ?? "").split(separator: ",").contains("splash")
             case (.notchNotifications, .accessibility):
                 return isAvailable(.notch) && boolFor(DefaultsKey.notchEnabled)
                     && !(stringFor(DefaultsKey.notchHiddenModules) ?? "").split(separator: ",").contains("notifications")

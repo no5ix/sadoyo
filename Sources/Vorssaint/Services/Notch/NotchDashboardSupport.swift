@@ -51,11 +51,14 @@ enum NotchDashboardSection: String, CaseIterable, Identifiable {
 enum NotchDashboardActivity: Hashable, Identifiable {
     case player(id: Int)
     case timer
+    /// A Splash session being read, whose card is the four readings.
+    case splash
 
     var id: String {
         switch self {
         case .player(let id): return "player.\(id)"
         case .timer: return "timer"
+        case .splash: return "splash"
         }
     }
 }
@@ -278,6 +281,7 @@ enum NotchDashboardLayout {
         switch activity {
         case .player(let id): return id == primaryPlayerID ? activityCardHeight : playerCardHeight
         case .timer: return timerCardHeight
+        case .splash: return NotchSplashLayout.cardHeight
         }
     }
 
@@ -452,9 +456,12 @@ enum NotchDashboardSupport {
     /// was. Two players at once are two cards.
     /// The page's activities: the players the system reports, in order, then the
     /// timer, which is decided apart from every one of them.
-    static func activities(players: [Int], timer: Bool) -> [NotchDashboardActivity] {
+    static func activities(players: [Int], timer: Bool, splash: Bool = false) -> [NotchDashboardActivity] {
         var visible = players.map { NotchDashboardActivity.player(id: $0) }
         if timer { visible.append(.timer) }
+        // The dashboard's card follows the timer's, so the running things are
+        // read in the order the page has always listed them.
+        if splash { visible.append(.splash) }
         return visible
     }
 

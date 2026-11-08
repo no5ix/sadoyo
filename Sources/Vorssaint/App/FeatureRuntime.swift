@@ -377,6 +377,11 @@ final class FeatureRuntime: ObservableObject {
             if AppFeature.notch.isAvailable { NotchService.shared.syncWithPreferences() }
             else { NotchWatchService.shared.stop() }
         },
+        // Reading a server stops the moment the section is uninstalled.
+        .notchSplash: {
+            if AppFeature.notch.isAvailable { NotchService.shared.syncWithPreferences() }
+            else { NotchSplashService.shared.stop() }
+        },
         // Leaving folds the wings it rests in, and coming back greets.
         .notchMascot: {
             if AppFeature.notch.isAvailable { NotchService.shared.syncWithPreferences() }

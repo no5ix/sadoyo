@@ -23,6 +23,7 @@ struct NotchDashboardView: View {
     @ObservedObject private var l10n = L10n.shared
     @ObservedObject private var music = NotchMusicService.shared
     @ObservedObject private var timer = NotchTimerService.shared
+    @ObservedObject private var splash = NotchSplashService.shared
     @ObservedObject private var monitor = SystemMonitor.shared
     @Environment(\.notchBand) private var band
     @AppStorage(DefaultsKey.networkSpeedUnit) private var networkSpeedUnit = NetworkSpeedUnit.bytes
@@ -124,6 +125,8 @@ struct NotchDashboardView: View {
                     }
                 case .timer:
                     timerCard
+                case .splash:
+                    splashCard
                 }
             }
         }
@@ -372,6 +375,27 @@ struct NotchDashboardView: View {
         .accessibilityIdentifier("notch.dashboard.timer")
     }
 
+    /// A Splash session as a card: the same header and the same four readings
+    /// as the page's own dashboard, at the width the section has, in the same
+    /// colours. The card is read, not pressed; its one mark stops the reading,
+    /// and asks nothing of the work running in Splash. The session is not the
+    /// card's owner: navigating away leaves it reading, and the card with it.
+    private var splashCard: some View {
+        NotchSplashDashboardCard(
+            snapshot: splash.snapshot,
+            phase: splash.phase,
+            elapsed: splash.elapsed(),
+            isMonitoring: splash.isMonitoring,
+            isSpilling: splash.isSpilling,
+            failure: splash.failure,
+            address: splash.endpointDescription,
+            onStop: splash.isMonitoring ? { splash.stop() } : nil,
+            compact: true)
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel(FeatureStrings.notchSplash(l10n.language).title)
+            .accessibilityIdentifier("notch.dashboard.splash")
+    }
+
     /// The marks this session's card offers, as the page's layout decides them.
     private var timerCardControls: [NotchDashboardTimerControl] {
         NotchDashboardLayout.timerCardControls(countdown: timer.session.mode == .timer)
@@ -551,6 +575,7 @@ extension NotchModule {
         case .music: return .pink
         case .calendar: return .red
         case .timer: return .orange
+        case .splash: return .mint
         default: return .white.opacity(0.85)
         }
     }

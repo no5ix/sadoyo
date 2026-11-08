@@ -877,6 +877,12 @@ enum DefaultsKey {
     static let notchWatchEnabled = "notchWatchEnabled"
     static let notchWatchSound = "notchWatchSound"
     static let notchWatchCondition = "notchWatchCondition"
+    // Splash Dashboard: the island reads a local Splash server's status.
+    static let notchSplashEnabled = "notchSplashEnabled"
+    static let notchSplashHost = "notchSplashHost"           // host or address, no scheme
+    static let notchSplashPort = "notchSplashPort"           // the port the server answers on
+    static let notchSplashAPIKey = "notchSplashAPIKey"       // sent as a bearer token, when set
+    static let notchSplashIntervalSeconds = "notchSplashIntervalSeconds" // whole seconds between readings
     static let notchCalendarEnabled = "notchCalendarEnabled"
     static let notchCalendarCountdown = "notchCalendarCountdown"
     static let notchCalendarCountdownLead = "notchCalendarCountdownLead" // minutes before a start, chosen events included
@@ -1517,6 +1523,12 @@ enum Defaults {
         DefaultsKey.notchWatchEnabled: true,
         DefaultsKey.notchWatchSound: true,
         DefaultsKey.notchWatchCondition: NotchWatchCondition.changes.rawValue,
+        // The dashboard ships off: it reads a server only a person runs.
+        DefaultsKey.notchSplashEnabled: false,
+        DefaultsKey.notchSplashHost: "",
+        DefaultsKey.notchSplashPort: NotchSplashEndpoint.defaultPort,
+        DefaultsKey.notchSplashAPIKey: "",
+        DefaultsKey.notchSplashIntervalSeconds: NotchSplashSupport.defaultInterval,
         DefaultsKey.notchEnabled: false,
         DefaultsKey.notchDisplay: NotchDisplay.automatic.rawValue,
         DefaultsKey.notchSilhouette: NotchSilhouette.capsule.rawValue,

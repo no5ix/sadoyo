@@ -2741,12 +2741,18 @@ enum NotchTests {
             suite.expect(geometry.sectionPickerSize(count: 1).height < geometry.sectionPickerSize(count: allModules.count).height,
                    "a short search result shrinks the gallery instead of reserving empty rows")
         }
-        suite.expect(compact.sectionRows(count: allModules.count) == 4 && spacious.sectionRows(count: allModules.count) == 4
-               && compact.contentSize(for: compact.sectionPickerSize(count: allModules.count)).height
-                   == NotchLayout.railHeight(rows: 4, rowHeight: NotchLayout.sectionTileHeight, spacing: NotchLayout.sectionSpacing)
-               && tall.sectionRows(count: allModules.count) > spacious.sectionRows(count: allModules.count)
-               && tall.sectionRows(count: allModules.count)
-                   <= NotchSectionPaging.rows(count: allModules.count, columns: tall.sectionColumns),
+        let sections = allModules.count
+        suite.expect(compact.sectionRows(count: sections)
+                   == NotchSectionPaging.rows(count: sections, columns: compact.sectionColumns)
+               && spacious.sectionRows(count: sections)
+                   == NotchSectionPaging.rows(count: sections, columns: spacious.sectionColumns)
+               && compact.contentSize(for: compact.sectionPickerSize(count: sections)).height
+                   == NotchLayout.railHeight(rows: compact.sectionRows(count: sections),
+                                             rowHeight: NotchLayout.sectionTileHeight,
+                                             spacing: NotchLayout.sectionSpacing)
+               && tall.sectionRows(count: sections) > spacious.sectionRows(count: sections)
+               && tall.sectionRows(count: sections)
+                   <= NotchSectionPaging.rows(count: sections, columns: tall.sectionColumns),
                "the gallery draws every tile it has room for, and steps to more rows where the display gives more")
         suite.expect(compact.sectionColumns == 4 && spacious.sectionColumns == 5
                && compact.sectionColumns * compact.sectionRows(count: allModules.count) >= allModules.count

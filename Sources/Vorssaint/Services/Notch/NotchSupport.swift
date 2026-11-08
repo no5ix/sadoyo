@@ -7,7 +7,7 @@ import Foundation
 import CoreGraphics
 
 enum NotchModule: String, CaseIterable, Identifiable {
-    case controls, mixer, music, clipboard, captures, files, system, tools, calendar, notifications, timer, camera, downloads, scratchpad, agents, watch
+    case controls, mixer, music, clipboard, captures, files, system, tools, calendar, notifications, timer, camera, downloads, scratchpad, agents, watch, splash
     var id: String { rawValue }
 
     var symbol: String {
@@ -31,6 +31,8 @@ enum NotchModule: String, CaseIterable, Identifiable {
         case .scratchpad: return "note.text"
         case .agents: return "sparkles"
         case .watch: return "eye"
+        // Four readings of a local server, in a row: a gauge of the work.
+        case .splash: return "gauge.with.dots.needle.bottom.50percent"
         }
     }
 
@@ -53,6 +55,7 @@ enum NotchModule: String, CaseIterable, Identifiable {
         case .scratchpad: return "p"
         case .agents: return "g"
         case .watch: return "o"
+        case .splash: return "l"
         }
     }
 
@@ -76,6 +79,7 @@ enum NotchModule: String, CaseIterable, Identifiable {
         case .scratchpad: return AppFeature.scratchpad.isAvailable(in: defaults)
         case .agents: return AppFeature.notchAgents.isAvailable(in: defaults)
         case .watch: return AppFeature.notchWatch.isAvailable(in: defaults)
+        case .splash: return AppFeature.notchSplash.isAvailable(in: defaults)
         case .system:
             return [.monitorCPU, .monitorGPU, .monitorMemory, .monitorNetwork,
                     .monitorDisk, .monitorPower, .fanControl, .connectedDevices].contains { (feature: AppFeature) in
@@ -1914,6 +1918,7 @@ enum NotchSupport {
                 && ($0 != .notifications || defaults.bool(forKey: DefaultsKey.notchNotificationsEnabled))
                 && ($0 != .agents || defaults.bool(forKey: DefaultsKey.notchAgentsEnabled))
                 && ($0 != .watch || defaults.bool(forKey: DefaultsKey.notchWatchEnabled))
+                && ($0 != .splash || defaults.bool(forKey: DefaultsKey.notchSplashEnabled))
         }
     }
 

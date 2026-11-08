@@ -8,34 +8,28 @@ import Foundation
 enum NotchTimerMode: String, CaseIterable { case timer, pomodoro, stopwatch }
 enum NotchTimerPhase: String { case timer, focus, shortBreak, longBreak, stopwatch }
 
+/// The timer's ruler: the shared `NotchRulerScale` arithmetic, at the range
+/// and the labelling a countdown has always had.
 enum NotchTimerRulerScale {
-    static let spacing = 14.0
+    static let spacing = NotchRulerScale.minutes.spacing
+    static let minutes = NotchRulerScale.minutes
 
     static func moving(_ value: Double, by points: Double) -> Double {
-        guard value.isFinite, points.isFinite else { return 1 }
-        return min(180, max(1, value - points / spacing))
+        minutes.moving(value, by: points)
     }
 
     static func minute(_ value: Double) -> Int {
-        Int(moving(value, by: 0).rounded())
+        minutes.value(value)
     }
 
     static func offset(of minute: Int, selected: Int) -> Double {
-        (Double(minute) - Double(selected)) * spacing
+        minutes.offset(of: minute, selected: selected)
     }
 
     /// Keep the ruler filled near either end instead of centering a short
     /// duration over an empty half. The inset fits the hour labels as well.
     static func selectionX(selected: Int, width: Double) -> Double {
-        guard width.isFinite, width > 0 else { return 0 }
-        let inset = min(24, width / 2)
-        let selected = min(180, max(1, selected))
-        let leading = Double(selected - 1) * spacing
-        let trailing = Double(180 - selected) * spacing
-        if leading + trailing <= width - 2 * inset {
-            return (width - leading - trailing) / 2 + leading
-        }
-        return min(inset + leading, max(width / 2, width - inset - trailing))
+        minutes.selectionX(selected: selected, width: width)
     }
 
     static func label(for minute: Int) -> String {

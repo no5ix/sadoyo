@@ -860,7 +860,8 @@ final class NotchService: ObservableObject {
     }
 
     var dashboardActivities: [NotchDashboardActivity] {
-        NotchDashboardSupport.activities(players: dashboardPlayerIDs, timer: showsDashboardTimer)
+        NotchDashboardSupport.activities(players: dashboardPlayerIDs, timer: showsDashboardTimer,
+                                         splash: showsDashboardSplash)
     }
 
     /// Whether the page shows the calendar's card: the section is in the
@@ -906,6 +907,13 @@ final class NotchService: ObservableObject {
 
     private var showsDashboardTimer: Bool {
         modules.contains(.timer) && NotchTimerService.shared.session.hasSession
+    }
+
+    /// A Splash session being read is a live activity: the card appears when
+    /// Start begins the reading and goes when X stops it. Navigating away
+    /// from the page leaves the session reading, and the card with it.
+    private var showsDashboardSplash: Bool {
+        modules.contains(.splash) && NotchSplashService.shared.isMonitoring
     }
 
     /// The width the page lays its sections out at: the page's own, short of
@@ -1359,6 +1367,9 @@ final class NotchService: ObservableObject {
         // A watch keeps reading while the island is away, as on the lock
         // screen, and says so with a notification if it cannot show itself.
         NotchWatchService.shared.syncWithPreferences()
+        // A Splash session keeps reading while the island is away, and stops
+        // with the section that started it.
+        NotchSplashService.shared.syncWithPreferences()
         // Requested file work can continue while locked, but disabling its
         // feature must still cancel it before presentation resumes.
         NotchFileToolsService.shared.syncWithPreferences()

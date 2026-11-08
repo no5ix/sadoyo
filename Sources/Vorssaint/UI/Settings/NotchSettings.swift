@@ -30,6 +30,7 @@ struct NotchSettings: View {
     @AppStorage(DefaultsKey.notchCalendarWeekNumbers) private var calendarWeekNumbers = false
     @AppStorage(DefaultsKey.notchAgentsEnabled) private var agentsEnabled = false
     @AppStorage(DefaultsKey.notchWatchEnabled) private var watchEnabled = true
+    @AppStorage(DefaultsKey.notchSplashEnabled) private var splashEnabled = false
     @AppStorage(DefaultsKey.notchLyricsEnabled) private var lyricsEnabled = true
     @AppStorage(DefaultsKey.notchLyricsOnline) private var lyricsOnline = false
     @AppStorage(DefaultsKey.notchBrowserCovers) private var browserCovers = false
@@ -127,6 +128,7 @@ struct NotchSettings: View {
          String(showPlayingMusic), String(includeOtherPlayers), String(musicShowVolume), idle, hiddenControls, controlOrder, size,
          String(timerEnabled), String(timerSoundEnabled), String(hideTimerCountdown),
          String(cameraEnabled), String(accessoriesEnabled), String(outlineEnabled), String(hideMenuBarGap),
+         String(splashEnabled),
          String(customWidth), String(customHeight), String(cameraFitWidth), String(cameraFitHeight),
          String(capsuleFitWidth), String(capsuleFitHeight), String(capsuleFitDrop), String(hapticFeedback),
          String(shelfWindow), String(dragReveal), String(captureControls), String(quickPanel), String(appPanel),
@@ -550,6 +552,9 @@ struct NotchSettings: View {
         case .watch:
             NotchWatchSettingsControls()
                 .toggleStyle(TrailingSwitchToggleStyle())
+        case .splash:
+            NotchSplashSettingsControls()
+                .toggleStyle(TrailingSwitchToggleStyle())
         case .mixer, .system, .tools:
             EmptyView()
         }
@@ -889,6 +894,7 @@ struct NotchSettings: View {
         case .scratchpad: return .scratchpad
         case .agents: return .notchAgents
         case .watch: return .notchWatch
+        case .splash: return .notchSplash
         }
     }
 
@@ -1091,6 +1097,7 @@ struct NotchSettings: View {
             (module != .timer || timerEnabled) && (module != .camera || cameraEnabled)
                 && (module != .calendar || calendarEnabled) && (module != .notifications || notificationsEnabled)
                 && (module != .agents || agentsEnabled) && (module != .watch || watchEnabled)
+                && (module != .splash || splashEnabled)
                 && !hidden.split(separator: ",").contains(Substring(module.rawValue))
         } set: { shown in
             if module == .timer { timerEnabled = shown }

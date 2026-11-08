@@ -179,6 +179,10 @@ enum NotchNaturalContent {
             return NotchLayout.cameraPreviewHeight(width: width)
         case .watch:
             return NotchLayout.watchPageHeight
+        case .splash:
+            // The interval's ruler, and the dashboard of four readings under
+            // it; before a session, the same ruler above what to do next.
+            return NotchSplashLayout.pageHeight
         case .scratchpad:
             // A page of text: the editor, its rule and its actions.
             return NotchLayout.scratchpadPageHeight
@@ -212,6 +216,7 @@ enum NotchPageFloor {
         case .calendar: NotchLayout.calendarMonthMinimumHeight
         case .camera: NotchLayout.cameraMinimumHeight
         case .watch: NotchLayout.watchPageHeight
+        case .splash: NotchSplashLayout.pageMinimumHeight
         case .scratchpad: NotchLayout.scratchpadPageHeight
         case .music: NotchLayout.musicPlayerHeight(band: 0, playing: false)
         case .controls, .timer, .agents: 0
