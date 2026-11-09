@@ -46,6 +46,22 @@ If documentation conflicts with executable code or build scripts, inspect the cu
 - Separate verified results from inferred behavior and untested scenarios. Never claim a test, reproduction, screenshot, or manual check that did not happen.
 - If the environment cannot verify a requirement, explain the blocker and provide the strongest evidence available. Do not silently mark it complete.
 
+### Test execution efficiency and command visibility
+
+- Use a risk-based, incremental testing strategy. Do not run the full test suite after every individual file edit or small implementation change.
+- **After small changes:** Prefer targeted tests, relevant test cases, or quick compilation checks.
+- **After completing a logical group of changes:** Run the relevant focused test suites together.
+- **Before declaring a task complete:** Run the required broader test suites, Release build, and app self-test according to `DEVELOPMENT.md`.
+- Batch related implementation changes before running expensive verification commands. Avoid redundant full-suite executions when no relevant code or test changes have occurred since the previous successful run.
+- When a test fails, inspect the failure, identify its root cause, implement the fix, and rerun the smallest relevant test first. Run broader verification afterward.
+- Do not skip required tests, weaken assertions, or remove existing test coverage to save execution time.
+- Distinguish compilation checks, targeted test executions, and complete test-suite executions. Never report a compilation check as a successful full test run.
+- For long-running commands, preserve and display live output. Prefer `tee` to save complete logs while allowing output to remain visible.
+- Avoid pipelines such as `grep ... | head` that can hide progress, suppress diagnostic information, or make a running command appear frozen. If filtering is necessary, preserve the original complete log.
+- Do not interrupt a command merely because it produces no output temporarily. Check whether it is still running before deciding it is stuck.
+- Record the actual commands, execution durations, test scope, and results in the final report.
+
+
 ## macOS Release, Developer, and permissions
 
 - The authoritative app bundle is built by `build.sh`; `Package.swift` supports editor indexing and does not assemble or sign the app bundle.
