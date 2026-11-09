@@ -153,6 +153,10 @@ struct NotchSplashDashboardCard: View {
     let phase: NotchSplashTaskTracker.Phase
     /// The clock's value at the moment the card is drawn.
     var elapsed: TimeInterval = 0
+    /// The task's tokens, as the tracker counted them: the difference the
+    /// engine's cumulative counters have made across this task, and frozen at
+    /// its end.
+    var taskTokens: NotchSplashTaskTracker.TaskTokens = .zero
     var isMonitoring = false
     var isSpilling = false
     /// The measured past: the readings the four charts draw, and the daily
@@ -223,19 +227,25 @@ struct NotchSplashDashboardCard: View {
     // MARK: The header, on one line
 
     /// The dashboard's mark and name on the left, and on the same line the
-    /// tokens the engine has moved, the task's clock, and the lit circle that
+    /// tokens this task has moved, the task's clock, and the lit circle that
     /// ends the reading.
     ///
     /// The mark before the name is the Codex mark the AI page draws - the same
     /// mark the gallery's tile wears and the same view of it, at the size of
     /// this line - so the section is known by one shape wherever it shows. The
-    /// words the reference does not draw are not drawn here either: the old line
-    /// of compact resource values lives in the memory card now, where there is
-    /// room for all three of them, their units and their bar.
+    /// mark and the name are one line with the page's own gap between them, at
+    /// every size the card is drawn at: the compact card of the dashboard's Live
+    /// Activities and the page's whole card are the same line, and a section
+    /// whose name is crowded against its mark in one place and not the other is
+    /// two sections.
+    ///
+    /// The words the reference does not draw are not drawn here either: the old
+    /// line of compact resource values lives in the memory card now, where there
+    /// is room for all three of them, their units and their bar.
     private var header: some View {
         let clock = NotchSplashSupport.taskClock(elapsed)
         return HStack(spacing: 6) {
-            HStack(spacing: 4) {
+            HStack(spacing: NotchSplashLayout.markTitleGap) {
                 NotchSectionMark(module: .splash, size: compact ? NotchSplashLayout.titleIconSize - 1
                                                                 : NotchSplashLayout.titleIconSize)
                 Text(text.title)
@@ -287,22 +297,32 @@ struct NotchSplashDashboardCard: View {
             .fixedSize()
     }
 
-    /// The cumulative tokens, up for the in and down for the out, in the two
-    /// colours the trend uses for the same two things.
+    /// The tokens this task has moved, up for the in and down for the out, in
+    /// the two colours the trend uses for the same two things.
+    ///
+    /// The task's own, and not the engine's: the engine counts tokens across
+    /// its whole life, and a header is a glance at the work being timed. A new
+    /// task begins at nothing, an intermediate request of the same task adds to
+    /// what the task has already moved, and the end of the task freezes the
+    /// figures beside the frozen clock. A restart, a reset counter, and a field
+    /// the server does not report are all met with the task keeping what it
+    /// measured: the header never shows a negative and never shows less than
+    /// the task did.
+    ///
+    /// The trend's thirty days are not this line. A task beginning adds a task
+    /// and takes no day away.
     @ViewBuilder private var tokens: some View {
-        if let input = metrics?.prefillInputTokens, let output = metrics?.decodeOutputTokens {
-            HStack(spacing: 8) {
-                tokenPair(symbol: "arrow.up", value: NotchSplashSupport.tokensText(input),
-                          tint: NotchSplashPalette.blue, name: text.inputTokens)
-                tokenPair(symbol: "arrow.down", value: NotchSplashSupport.tokensText(output),
-                          tint: NotchSplashPalette.green, name: text.outputTokens)
-            }
-            .font(.system(size: compact ? NotchSplashLayout.readingSize - 1.5 : NotchSplashLayout.readingSize,
-                          weight: .medium))
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel("\(text.inputTokens) \(NotchSplashSupport.tokensText(input)), "
-                + "\(text.outputTokens) \(NotchSplashSupport.tokensText(output))")
+        HStack(spacing: 8) {
+            tokenPair(symbol: "arrow.up", value: NotchSplashSupport.tokensText(taskTokens.input),
+                      tint: NotchSplashPalette.blue, name: text.inputTokens)
+            tokenPair(symbol: "arrow.down", value: NotchSplashSupport.tokensText(taskTokens.output),
+                      tint: NotchSplashPalette.green, name: text.outputTokens)
         }
+        .font(.system(size: compact ? NotchSplashLayout.readingSize - 1.5 : NotchSplashLayout.readingSize,
+                      weight: .medium))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(text.inputTokens) \(NotchSplashSupport.tokensText(taskTokens.input)), "
+            + "\(text.outputTokens) \(NotchSplashSupport.tokensText(taskTokens.output))")
     }
 
     private func tokenPair(symbol: String, value: String, tint: Color, name: String) -> some View {
@@ -352,7 +372,7 @@ struct NotchSplashDashboardCard: View {
             // the reading, and nothing else.
             NotchCircularIconButton(symbol: "xmark", title: text.stop,
                                     side: NotchDashboardLayout.transportMarkSide - 4, filled: true,
-                                    tint: NotchSplashPalette.beige, action: onStop)
+                                    tint: NotchSplashPalette.beige, lifts: false, action: onStop)
                 .accessibilityIdentifier("notch.splash.stop")
         }
     }
@@ -882,6 +902,7 @@ struct NotchSplashView: View {
                 snapshot: service.snapshot,
                 phase: service.phase,
                 elapsed: service.elapsed(),
+                taskTokens: service.taskTokens,
                 isMonitoring: service.isMonitoring,
                 isSpilling: service.isSpilling,
                 history: service.history,

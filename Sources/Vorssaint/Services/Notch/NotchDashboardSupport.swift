@@ -190,13 +190,33 @@ enum NotchDashboardLayout {
     /// leading edge is, and a card of one line is not padded at the top.
     static let activityCardPadding: CGFloat = 10
     /// A card that carries one line of its own, with the edge on every side.
-    static var timerCardHeight: CGFloat { activityCardPadding * 2 + activityArtwork - 12 }
-    /// How a card of this section comes and goes. The travel is the short way
-    /// and the spring has no bounce: a card leaving is a card being taken away,
-    /// not a shape thrown at the page, and the cards under it slide to their
-    /// new places in the same breath, so the page does not jump.
+    ///
+    /// The timer's card is as tall as the tallest mark in its row, and the row
+    /// is a clock and three round marks of `timerControlSide`: measured to that,
+    /// and not to the artwork of a player's card, so the page asks for the height
+    /// the card draws. A tile measured taller than it draws leaves the page
+    /// four points of empty ground that settle after the card has gone, which is
+    /// a collapse the person sees as a second one.
+    static var timerCardHeight: CGFloat { activityCardPadding * 2 + timerControlSide }
+    /// How a card of this section comes and goes.
+    ///
+    /// One movement, and one movement only. The card fades and is carried the
+    /// short way, the cards beside it close the gap in the same breath, and the
+    /// page's own height is animated by the island's shape - so the spring here
+    /// *is* the island's height spring, chosen from the same `NotchMotion`
+    /// springs the window's sides are drawn with. A card leaving and a page
+    /// shrinking are one event when they are timed the same; timed apart, the
+    /// person sees a card go and then the page fall in after it.
     static let cardTransitionOffset: CGFloat = -6
-    static var cardMotion: Animation { .spring(duration: 0.32, bounce: 0) }
+
+    /// The motion of the section, asked of the page's own springs: the height
+    /// the page is shrinking to moves at the island's shrinking-height spring,
+    /// and a page growing at its growing-height spring, without a swing of its
+    /// own - a swing is the second movement the page must not have.
+    static func cardMotion(grew: Bool) -> Animation {
+        grew ? .spring(duration: NotchMotion.growingHeight.duration, bounce: 0)
+            : .spring(duration: NotchMotion.shrinkingHeight.duration, bounce: 0)
+    }
 
     /// The transition of one activity card. With motion reduced it is the
     /// fade, and nothing else.
@@ -237,14 +257,24 @@ enum NotchDashboardLayout {
 
     // MARK: System Monitoring
 
-    static let metricColumns: Int = 4
-    /// A tile is a label, a value and a meter, so it is taller than a row of
-    /// text: the reading is the tile's own, and a tap opens it. The tile is
-    /// measured so its value is read at a glance, not crowded against its edge.
-    static let metricTileHeight: CGFloat = 64
+    /// A card's own height is its mark, its figures, and the line of what it
+    /// has measured. The tile is measured to the drawing, and not a point
+    /// taller: the page's height is computed from this number and the page
+    /// draws cards of this number, so a card that measured one height and drew
+    /// another would leave the page settling after it arrived.
+    static let metricColumns: Int = 3
+    static let metricTileHeight: CGFloat = 68
     static let metricSpacing: CGFloat = 8
     /// The tile's edge to its reading, the same on every side.
-    static let metricTilePadding: CGFloat = 10
+    static let metricTilePadding: CGFloat = 8
+    /// The line a tile's measurements draw, under its figures.
+    static let metricChartHeight: CGFloat = 20
+    /// The dashboard's grid is always the six cards, and so is always two rows
+    /// of three. A reading the machine does not have is drawn as missing in the
+    /// card that stands for it; the grid does not thin and re-form with the
+    /// weather, which is what the page's fixed height is measured for.
+    static var dashboardTileCount: Int { NotchDashboardCards.metrics.count }
+    static var dashboardRows: Int { metricRows(tiles: dashboardTileCount, columns: metricColumns) }
 
     /// The gap between the page's sections is the page's own; the cards inside
     /// a section sit closer, so a section reads as one group.
@@ -258,8 +288,8 @@ enum NotchDashboardLayout {
         stackHeight(rows, cardHeight: tileHeight, spacing: spacing)
     }
 
-    /// The metrics grid at its columns: four tiles in a row, two rows for the
-    /// eight readings a Mac reports.
+    /// The metrics grid at its columns: three tiles in a row, two rows for the
+    /// six readings the page shows.
     static func metricsHeight(tiles: Int, columns: Int = metricColumns) -> CGFloat {
         gridHeight(rows: metricRows(tiles: tiles, columns: columns),
                    tileHeight: metricTileHeight, spacing: metricSpacing)
@@ -477,12 +507,19 @@ enum NotchDashboardSupport {
     /// where it was, and a timer ending leaves every player's card where it
     /// was. Two players at once are two cards.
     /// The page's activities: the players the system reports, in order, then the
-    /// timer, which is decided apart from every one of them.
+    /// timer, then a Splash session being read - the candidates the page draws,
+    /// and not the order it draws them in.
+    ///
+    /// The order on the page is the order the activities became active, kept by
+    /// `NotchActivityInsertion`. This list is the source of that record and the
+    /// tie-break for activities that begin in the same breath, which is one
+    /// deterministic order: the players by the order the adapter reports them,
+    /// then the timer, then the reading.
     static func activities(players: [Int], timer: Bool, splash: Bool = false) -> [NotchDashboardActivity] {
         var visible = players.map { NotchDashboardActivity.player(id: $0) }
         if timer { visible.append(.timer) }
-        // The dashboard's card follows the timer's, so the running things are
-        // read in the order the page has always listed them.
+        // The reading is listed last of the candidates, and a candidate is not
+        // a place: whichever of them became active first is drawn first.
         if splash { visible.append(.splash) }
         return visible
     }

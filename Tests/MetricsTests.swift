@@ -126,6 +126,8 @@ struct MetricsTests {
                 NotchContentHeightTests.run(suite)
                 NotchClipboardPageTests.run(suite)
                 NotchDashboardTests.run(suite)
+                NotchSystemCardsTests.run(suite)
+                NotchActivityOrderTests.run(suite)
                 NotchMetricHealthTests.run(suite)
                 NotchSplashTests.run(suite)
                 NotchCapsuleTests.run(suite)

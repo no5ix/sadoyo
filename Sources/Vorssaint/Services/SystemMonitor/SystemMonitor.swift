@@ -84,6 +84,12 @@ struct SystemSnapshot {
     var diskWriteHistory: [Double] = []    // bytes/sec
     var systemPowerHistory: [Double] = []  // watts
     var batteryHistory: [Double] = []      // 0...1 charge level
+    /// The same readings as moments: each one carrying its instant, and the
+    /// readings taken at that instant together. The island's six cards chart
+    /// these, because a card's line is a span of time and a pair of arrows is
+    /// one moment — a network's two directions, a volume's read and write.
+    /// A bounded rolling window, and empty while no chart surface is open.
+    var metricSamples: [SystemMetricSample] = []
 }
 
 /// What parts of the menu panel are actually visible right now. The popover can
@@ -232,6 +238,11 @@ final class SystemMonitor: ObservableObject {
     private var diskWriteHistory: MetricHistory
     private var powerHistory: MetricHistory
     private var batteryHistory: MetricHistory
+    /// The monitor's moments, for the island's charts. A window of a few
+    /// minutes at the sampler's own cadence: enough for a line with a shape,
+    /// and no more, however long the machine has been running.
+    private var metricSamples = SystemMetricSampleHistory(capacity: SystemMonitor.metricSampleCapacity)
+    static let metricSampleCapacity = 180
     private var powerSourceRunLoopSource: CFRunLoopSource?
 
     private init() {
@@ -764,6 +775,12 @@ final class SystemMonitor: ObservableObject {
             let now = ProcessInfo.processInfo.systemUptime
 
             var next = SystemSnapshot()
+            // This tick's moment, for the island's charts: every reading taken
+            // at `now` goes into one sample, so the two directions of the
+            // network and the two faces of the volume are one instant and not
+            // two lines that happen to be the same length. A tick that samples
+            // nothing adds nothing.
+            var moment = SystemMetricSample(at: now)
 
             // Publishing a snapshot redraws the menu bar (attributed-string
             // rebuild + width measurement); on ticks where every needed metric
@@ -795,6 +812,7 @@ final class SystemMonitor: ObservableObject {
                     self.lastCPUUsageReadAt = now
                     self.missedCPUUsageSamples = 0
                     self.cpuHistory.push(cpu)
+                    moment.cpu = cpu
                 } else if self.missedCPUUsageSamples < 3 {
                     self.missedCPUUsageSamples += 1
                 } else {
@@ -818,6 +836,7 @@ final class SystemMonitor: ObservableObject {
                     if isFresh, memory.total > 0 {
                         self.memoryHistory.push(Double(memory.used) / Double(memory.total))
                         self.memoryAppHistory.push(Double(memory.appUsed) / Double(memory.total))
+                        moment.memory = Double(memory.used) / Double(memory.total)
                     }
                 }
             }
@@ -831,6 +850,11 @@ final class SystemMonitor: ObservableObject {
                     next.netTotalUp = network.totalUp
                     if let down = network.downBytesPerSec { self.netDownHistory.push(down) }
                     if let up = network.upBytesPerSec { self.netUpHistory.push(up) }
+                    // The pair, kept as a pair: one sampler, one instant, one
+                    // sample, so a card's two arrows and its two lines answer
+                    // the same moment even when one direction has no reading.
+                    moment.netDown = network.downBytesPerSec
+                    moment.netUp = network.upBytesPerSec
                 }
             }
 
@@ -844,9 +868,11 @@ final class SystemMonitor: ObservableObject {
                     let writeValues = ioDevices.compactMap(\.writeBytesPerSec)
                     if !readValues.isEmpty {
                         self.diskReadHistory.push(readValues.reduce(0, +))
+                        moment.diskRead = readValues.reduce(0, +)
                     }
                     if !writeValues.isEmpty {
                         self.diskWriteHistory.push(writeValues.reduce(0, +))
+                        moment.diskWrite = writeValues.reduce(0, +)
                     }
                 } else {
                     next.disk = self.lastDiskReading
@@ -859,6 +885,7 @@ final class SystemMonitor: ObservableObject {
                     self.lastPowerReading = power
                     next.power = power
                     if let watts = power.systemWatts { self.powerHistory.push(watts) }
+                    moment.watts = power.systemWatts
                     if let charge = power.chargePercent { self.batteryHistory.push(Double(charge) / 100.0) }
                 } else {
                     next.power = self.lastPowerReading
@@ -886,7 +913,10 @@ final class SystemMonitor: ObservableObject {
                                                                             current: rawGPU)
                         self.lastGPUUsageReadAt = now
                         self.missedGPUUsageSamples = 0
-                        if let gpu = self.lastGPUUsage { self.gpuHistory.push(gpu) }
+                        if let gpu = self.lastGPUUsage {
+                            self.gpuHistory.push(gpu)
+                            moment.gpu = gpu
+                        }
                     } else if self.missedGPUUsageSamples < 3 {
                         self.missedGPUUsageSamples += 1
                     } else {
@@ -965,6 +995,13 @@ final class SystemMonitor: ObservableObject {
                 next.connectedDevices = self.lastConnectedDevices
             }
 
+            // The moment is kept only when it added a reading: a stride-skipped
+            // tick would otherwise fill a chart with the timer's beats.
+            self.metricSamples.push(moment)
+            let chartsAnyMetric = plan.needCPU || plan.needMemory || plan.needNetwork
+                || plan.needDisk || plan.needPower || plan.needGPUUsage
+            next.metricSamples = chartsAnyMetric
+                ? self.metricSamples.publishedValues(whileVisible: foregroundSampling) : []
             next.cpuHistory = plan.needCPU
                 ? self.cpuHistory.publishedValues(whileVisible: foregroundSampling) : []
             next.gpuHistory = plan.needGPUUsage

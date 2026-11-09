@@ -145,23 +145,18 @@ enum NotchSystemCards {
         return level >= busyLevel
     }
 
-    static func percent(_ value: Double?) -> String? {
-        value.flatMap { $0.isFinite ? "\(Int((min(1, max(0, $0)) * 100).rounded()))%" : nil }
-    }
-
-    /// The same share as the thresholds read it: 0…100.
-    static func percentValue(_ value: Double?) -> Double? {
-        value.flatMap { $0.isFinite ? min(1, max(0, $0)) * 100 : nil }
-    }
+    /// A share as a figure, and the same share as the thresholds read it. The
+    /// rules are the page-shared ones, so a tile, a compact card, a menu bar
+    /// indicator and a detail page write the same number and mean the same thing.
+    static func percent(_ value: Double?) -> String? { NotchMetricReading.percent(value) }
+    static func percentValue(_ value: Double?) -> Double? { NotchMetricReading.percentValue(value) }
 
     /// The tone of a load: the threshold's answer, with the gate's answer over
     /// it when the gate has one. A load that has not held keeps the page's
     /// white.
     static func tone(_ metric: NotchDashboardMetric, percent: Double?,
                      sustained: [NotchDashboardMetric: NotchMetricTone]) -> NotchMetricTone {
-        let reading = NotchMetricHealth.tone(metric: metric, percent: percent)
-        guard let gated = sustained[metric] else { return reading }
-        return reading.severity > gated.severity ? gated : reading
+        NotchMetricReading.tone(metric, percent: percent, sustained: sustained)
     }
 }
 
@@ -190,11 +185,8 @@ final class NotchMetricSustain: ObservableObject {
 
     /// The tone a tile draws: the reading's own, with the load's gates applied.
     func tone(for metric: NotchDashboardMetric, percent: Double?, charging: Bool = false) -> NotchMetricTone {
-        let reading = NotchMetricHealth.tone(metric: metric, percent: percent, charging: charging)
-        guard let gated = tones[metric] else { return reading }
-        // A gate that has gone quiet while the reading is loud is a gate that
-        // has not seen a fresh sample yet: the reading answers for itself.
-        return reading.severity > gated.severity ? gated : reading
+        NotchMetricReading.gate(NotchMetricHealth.tone(metric: metric, percent: percent, charging: charging),
+                                gated: tones[metric])
     }
 
     private func evaluate(_ snapshot: SystemSnapshot) {

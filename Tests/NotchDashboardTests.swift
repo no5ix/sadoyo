@@ -148,19 +148,28 @@ enum NotchDashboardTests {
                          "all of them ending empties the section, which drops it from the page")
         }
 
-        suite.run("grid shows every metric at once, in four columns") {
+        suite.run("the page's grid is six cards in three columns") {
             let all = NotchDashboardSupport.tiles { _ in true }
             expect(suite, all, [.cpu, .gpu, .memory, .battery, .network, .disk, .power, .fan, .devices],
-                   "the grid's order, read left to right")
+                   "the readings the app speaks for, read left to right")
             let eight = NotchDashboardSupport.tiles { $0 != .fan }
-            suite.expect(eight.count == 8, "a Mac with no fan tile shows the eight the layout asks for")
-            suite.expect(NotchDashboardLayout.metricColumns == 4, "the grid is four columns wide")
+            suite.expect(eight.count == 8, "a Mac with no fan reading has eight to speak of")
+            suite.expect(NotchDashboardLayout.metricColumns == 3, "the page's grid is three columns wide")
+            suite.expect(NotchDashboardLayout.dashboardTileCount == 6
+                             && NotchDashboardLayout.dashboardRows == 2,
+                         "the page draws its six cards in two rows: \(NotchDashboardLayout.dashboardTileCount) at "
+                         + "\(NotchDashboardLayout.dashboardRows)")
+            suite.expect(NotchDashboardLayout.metricsHeight(tiles: NotchDashboardLayout.dashboardTileCount)
+                             == NotchDashboardLayout.gridHeight(rows: 2,
+                                                                tileHeight: NotchDashboardLayout.metricTileHeight,
+                                                                spacing: NotchDashboardLayout.metricSpacing),
+                         "the page's grid is its two rows of cards and the one gap between them")
             let rows = NotchDashboardLayout.metricRowRanges(tiles: eight.count)
-            suite.expect(rows.count == 2 && rows[0] == 0..<4 && rows[1] == 4..<8,
-                         "eight tiles fill four columns in two rows: \(rows)")
+            suite.expect(rows.count == 3 && rows[0] == 0..<3 && rows[2] == 6..<8,
+                         "eight readings fill three columns from the left, so the cards keep one width: \(rows)")
             suite.expect(NotchDashboardLayout.metricRowRanges(tiles: all.count)
-                            .map { $0.count } == [4, 4, 1],
-                         "nine tiles fill the rows from the left, so the tiles keep one width")
+                            .map { $0.count } == [3, 3, 3],
+                         "nine readings are three rows of three, and no card grows to fill a row")
             // Unavailable metrics leave no tile, so no tile opens an empty detail.
             expect(suite, NotchDashboardSupport.tiles { $0 == .cpu }, [.cpu], "a desktop Mac shows a CPU tile only")
             suite.expect(NotchDashboardLayout.metricRowRanges(tiles: 0).isEmpty
@@ -303,10 +312,10 @@ enum NotchDashboardTests {
             // The grid is measured whole at every size: the page never trims the
             // readings to make room for a player.
             suite.expect(NotchDashboardLayout.metricsHeight(tiles: tiles)
-                             == NotchDashboardLayout.gridHeight(rows: 2,
+                             == NotchDashboardLayout.gridHeight(rows: 3,
                                                                 tileHeight: NotchDashboardLayout.metricTileHeight,
                                                                 spacing: NotchDashboardLayout.metricSpacing),
-                         "eight readings are two rows of four, whatever the players are")
+                         "eight readings are three rows of three, whatever the players are")
             suite.expect(height(3, timer: true) >= bare
                              + NotchDashboardLayout.metricsHeight(tiles: tiles),
                          "the page holds the grid on top of the players, and trims nothing for a card")
@@ -593,8 +602,8 @@ enum NotchDashboardTests {
             // side: its height is the edge, the control, and the edge again.
             suite.expect(NotchDashboardLayout.timerCardHeight
                              == NotchDashboardLayout.activityCardPadding * 2
-                             + NotchDashboardLayout.activityArtwork - 12,
-                         "the timer's card is measured to its content, not padded at the top")
+                             + NotchDashboardLayout.timerControlSide,
+                         "the timer's card is measured to the control it draws, not padded at the top")
             suite.expect(NotchDashboardLayout.timerControlSide <= NotchDashboardLayout.timerCardHeight
                              - 2 * NotchDashboardLayout.activityCardPadding,
                          "the controls sit inside the card's own edge")
@@ -903,11 +912,16 @@ enum NotchDashboardTests {
             suite.expect(2 * NotchDashboardLayout.quickControlWidth(width: side)
                              + 210 <= width,
                          "both levels fit the row, one on each side of the camera")
-            // Monitoring: four columns, two rows, each tile a label, a reading
-            // and a meter, read at a glance and not crowded against its edge.
-            suite.expect(NotchDashboardLayout.metricTileHeight >= 60
-                             && NotchDashboardLayout.metricTilePadding == 10,
-                         "a tile has room for its label, its reading and its meter, and one edge")
+            // The page's compact cards: three columns, two rows, each card its
+            // mark, its figures and its line, and no meter to fill. Measured to
+            // what it draws, so the page gives back exactly a card's height when
+            // a card leaves it.
+            suite.expect(NotchDashboardLayout.metricTileHeight >= 56
+                             && NotchDashboardLayout.metricTileHeight <= 76
+                             && NotchDashboardLayout.metricTilePadding == 8
+                             && NotchDashboardLayout.metricChartHeight >= 14,
+                         "a card has room for its mark, its figures and its line, and one edge: "
+                         + "\(NotchDashboardLayout.metricTileHeight)pt")
             suite.expect(NotchDashboardLayout.activityCardHeight >= 70
                              && NotchDashboardLayout.activityCardPadding == 10,
                          "a card is tall enough for its words, its times and its buttons, and one edge")
@@ -925,14 +939,14 @@ enum NotchDashboardTests {
                              + 3 * NotchDashboardLayout.cardSpacing,
                          "the players in effect is tall, the others are rows, the timer is its clock")
             suite.expect(NotchDashboardLayout.timerCardHeight
-                             == NotchDashboardLayout.activityCardPadding * 2 + NotchDashboardLayout.activityArtwork - 12,
-                         "the timer's card is its clock with the same edge on every side")
+                             == NotchDashboardLayout.activityCardPadding * 2 + NotchDashboardLayout.timerControlSide,
+                         "the timer's card is its clock and its marks, with the same edge on every side")
             suite.expect(NotchDashboardLayout.metricsHeight(tiles: 8)
-                             == NotchDashboardLayout.gridHeight(rows: 2,
+                             == NotchDashboardLayout.gridHeight(rows: 3,
                                                                 tileHeight: NotchDashboardLayout.metricTileHeight,
                                                                 spacing: NotchDashboardLayout.metricSpacing),
-                         "the grid's height is its two rows")
-            // The page keeps the reference's width, where four columns of tiles
+                         "eight readings measure three rows, and the page's six measure two")
+            // The page keeps the reference's width, where three columns of cards
             // and two levels fit.
             suite.expect(width >= 520 && width <= 620, "the page keeps the reference's width: \(width)")
             // Shapes, not headings, separate the sections: filled, rounded and

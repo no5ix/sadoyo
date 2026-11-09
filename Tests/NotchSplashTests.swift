@@ -774,6 +774,153 @@ enum NotchSplashTests {
                      "the same server is named the same way an hour later, so its task is not lost")
     }
 
+    // MARK: - The task's own tokens
+
+    /// A moment of the task, on the clock the readings are taken at.
+    private static func at(_ seconds: TimeInterval) -> Date {
+        start.addingTimeInterval(seconds)
+    }
+
+    /// A reading of an engine that has been running, at the counters asked for.
+    private static func engine(_ input: Int64?, _ output: Int64?, active: [String], completed: Int,
+                               instance: String = "splash-1", at date: Date = start) -> NotchSplashSnapshot {
+        let ids = active.map { #"{"id": "\#($0)"}"# }.joined(separator: ", ")
+        let json = """
+        {"instance": {"id": "\(instance)", "started_at": "2026-11-08T10:00:00Z"},
+         "active_requests": [\(ids)],
+         "requests": {"completed": \(completed), "failed": 0, "cancelled": 0},
+         "metrics": {"prefill_input_tokens": \(input.map(String.init) ?? "null"),
+                     "decode_output_tokens": \(output.map(String.init) ?? "null")}}
+        """
+        return snapshot(json, at: date)
+    }
+
+    static func taskTokenChecks(_ suite: TestSuite) {
+        let tokens = NotchSplashTaskTracker.TaskTokens.self
+        suite.expect(tokens.zero.input == 0 && tokens.zero.output == 0 && tokens.zero.isEmpty
+                         && tokens.zero.total == 0,
+                     "a task with no tokens counted is nothing, and says nothing")
+
+        // A task begun on an engine that has done a hundred thousand tokens of
+        // other people's work begins its own figures at nothing: the header is
+        // the task, and not the engine's whole life.
+        var tracker = NotchSplashTaskTracker(quiescence: 30, quietReadingsNeeded: 2)
+        suite.expect(tracker.observe(engine(100_000, 60_000, active: ["r1"], completed: 57), at: start)
+                         == .started(id: "r1", at: start)
+                         && tracker.taskTokens.isEmpty,
+                     "the figures begin at nothing, at the instant the clock does")
+
+        // The task's own work, and only that.
+        _ = tracker.observe(engine(102_000, 60_000, active: ["r1"], completed: 57), at: at(2))
+        suite.expect(tracker.taskTokens.input == 2_000 && tracker.taskTokens.output == 0
+                         && tracker.taskTokens.total == 2_000,
+                     "the input the task moved: \(tracker.taskTokens)")
+        _ = tracker.observe(engine(102_000, 61_500, active: ["r1"], completed: 57), at: at(4))
+        suite.expect(tracker.taskTokens.input == 2_000 && tracker.taskTokens.output == 1_500
+                         && tracker.taskTokens.total == 3_500,
+                     "the output joins it, and the two are the task's total")
+
+        // A second request of the same task is the same task: the figures keep
+        // counting and do not start over.
+        _ = tracker.observe(engine(104_000, 63_000, active: ["r2"], completed: 58), at: at(6))
+        suite.expect(tracker.taskTokens.input == 4_000 && tracker.taskTokens.output == 3_000
+                         && tracker.taskTokens.total == 7_000,
+                     "an intermediate request adds to a task's figures and does not reset them: \(tracker.taskTokens)")
+
+        // A reading with no counters adds nothing and asks for nothing.
+        _ = tracker.observe(engine(nil, nil, active: ["r2"], completed: 58), at: at(8))
+        suite.expect(tracker.taskTokens.input == 4_000 && tracker.taskTokens.output == 3_000,
+                     "a server that reports no counters neither adds nor takes away")
+
+        // A counter that went down in the middle of a run - an engine restarted,
+        // a counter reset - is a new baseline. It never takes a run's tokens
+        // back, so a figure shown is never negative and never goes down.
+        _ = tracker.observe(engine(10, 4, active: ["r2"], completed: 58), at: at(10))
+        suite.expect(tracker.taskTokens.input == 4_000 && tracker.taskTokens.output == 3_000,
+                     "a counter that went down leaves a run's figures where they are: \(tracker.taskTokens)")
+        _ = tracker.observe(engine(900, 700, active: ["r2"], completed: 58), at: at(12))
+        suite.expect(tracker.taskTokens.input == 4_890 && tracker.taskTokens.output == 3_696,
+                     "and the run is measured on from where the counter began again: \(tracker.taskTokens)")
+
+        // A request completed inside the quiet is the task's own work: the run
+        // is not over, and the tokens of the reading that says so are counted.
+        _ = tracker.observe(engine(1_000, 800, active: [], completed: 59), at: at(40))
+        suite.expect(tracker.taskTokens == tokens.init(input: 4_990, output: 3_796),
+                     "a reading that reports a request completed is work, and is counted: \(tracker.taskTokens)")
+
+        // The task ends: the first quiet reading is part of the run and is
+        // counted, the second calls the run over, and the figures freeze with
+        // the clock at the instant the quiet began.
+        _ = tracker.observe(engine(9_000, 9_000, active: [], completed: 59), at: at(80))
+        suite.expect(tracker.taskTokens == tokens.init(input: 12_990, output: 11_996) && tracker.isRunning,
+                     "the first quiet reading is measured like any other, and the run is not over yet")
+        let ended = tracker.observe(engine(500_000, 400_000, active: [], completed: 59), at: at(120))
+        let frozen = tracker.taskTokens
+        suite.expect(ended == .finished(id: "r1", outcome: .completed, at: at(80), elapsed: 80)
+                         && frozen == tokens.init(input: 503_990, output: 402_996),
+                     "the run is called over, and its figures freeze with its clock: \(frozen)")
+        _ = tracker.observe(engine(600_000, 500_000, active: [], completed: 59), at: at(160))
+        suite.expect(tracker.taskTokens == frozen && tracker.elapsed(at: at(600)) == 80,
+                     "an idle stretch after a task, however busy the engine, adds nothing to a finished task")
+
+        // The next task on the same engine begins its figures at nothing, on an
+        // engine that has done six hundred thousand.
+        suite.expect(tracker.observe(engine(700_000, 600_000, active: ["r9"], completed: 60), at: at(200))
+                         == .started(id: "r9", at: at(200))
+                         && tracker.taskTokens.isEmpty,
+                     "a new task's figures begin at nothing, whatever the engine has already done")
+        _ = tracker.observe(engine(700_500, 600_250, active: ["r9"], completed: 60), at: at(202))
+        suite.expect(tracker.taskTokens.input == 500 && tracker.taskTokens.output == 250,
+                     "and they are measured from where the engine stood: \(tracker.taskTokens)")
+
+        // The header's words: a task that has counted nothing reads as nothing,
+        // and a task that has counted is read in the same compact figures.
+        suite.expect(NotchSplashSupport.tokensText(nil) == NotchSplashSupport.placeholder
+                         && NotchSplashSupport.tokensText(tokens.zero.total) == "0"
+                         && NotchSplashSupport.tokensText(tracker.taskTokens.total) == "750"
+                         && NotchSplashSupport.tokensText(1_234_567) == "1.23M",
+                     "a figure of a task's tokens is read in the header's own words")
+
+        // A page cleared back to its Start state loses the clock and the figures
+        // together, and a monitoring session begun again starts both over.
+        var over = NotchSplashTaskTracker(quiescence: 0, quietReadingsNeeded: 1)
+        _ = over.observe(engine(1_000, 1_000, active: ["r1"], completed: 1), at: at(0))
+        _ = over.observe(engine(2_000, 1_500, active: [], completed: 2), at: at(40))
+        suite.expect(over.isRunning, "a reading whose counters grew is the task's own work, and is not its end")
+        _ = over.observe(engine(2_000, 1_500, active: [], completed: 2), at: at(60))
+        suite.expect(over.isFinished && over.taskTokens == tokens.init(input: 1_000, output: 500),
+                     "a task that ended keeps the figures it measured")
+        over.clearFinished()
+        suite.expect(over.taskTokens.isEmpty && over.elapsed(at: start) == 0,
+                     "the way out clears a task's figures with its clock")
+        var mid = NotchSplashTaskTracker(quiescence: 30, quietReadingsNeeded: 2)
+        _ = mid.observe(engine(10_000, 10_000, active: ["r1"], completed: 1), at: start)
+        _ = mid.observe(engine(12_000, 11_000, active: ["r1"], completed: 1), at: at(2))
+        suite.expect(mid.taskTokens.total == 3_000, "a run measured across two readings")
+        mid.begin()
+        suite.expect(mid.taskTokens.isEmpty && mid.trackedID == nil && mid.elapsed(at: start) == 0,
+                     "a monitoring session begun again starts the clock and the figures over, together")
+
+        // The two ledgers stay two. The thirty days are the engine's counters
+        // kept day by day, and a task beginning, running, and ending takes
+        // nothing from them: the same readings give the day its whole day, and
+        // the header its task.
+        var history = NotchSplashHistory()
+        let calendar = Calendar(identifier: .gregorian)
+        let day = start
+        history.record(status: engine(100_000, 60_000, active: ["r1"], completed: 57, at: day).status,
+                       instanceKey: "splash-1", at: day, calendar: calendar)
+        history.record(status: engine(104_000, 63_000, active: ["r2"], completed: 58, at: day).status,
+                       instanceKey: "splash-1", at: day, calendar: calendar)
+        let trend = history.trend(calendar: calendar, now: day, count: 30)
+        suite.expect(trend.last?.total == 7_000 && history.total(of: trend) == 7_000,
+                     "the day keeps the counters' whole difference, and the task moved the same 7,000")
+        history.record(status: engine(500_000, 400_000, active: ["r9"], completed: 60, at: day).status,
+                       instanceKey: "splash-1", at: day, calendar: calendar)
+        suite.expect(history.trend(calendar: calendar, now: day, count: 30).last?.total == 740_000,
+                     "a new task adds to the day's tokens and starts no new ledger of its own")
+    }
+
     // MARK: - Notices, once each
 
     static func noticeChecks(_ suite: TestSuite) {
@@ -1534,6 +1681,7 @@ enum NotchSplashTests {
         suite.run("splash text") { textChecks(suite) }
         suite.run("splash history") { historyChecks(suite) }
         suite.run("splash task") { taskChecks(suite) }
+        suite.run("splash task tokens") { taskTokenChecks(suite) }
         suite.run("splash notices") { noticeChecks(suite) }
         suite.run("splash session") { sessionChecks(suite) }
         suite.run("splash polling") { pollingChecks(suite) }

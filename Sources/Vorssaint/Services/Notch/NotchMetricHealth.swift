@@ -127,6 +127,24 @@ enum NotchMetricHealth {
         }
     }
 
+    /// The three voices of a reading that is a verdict: green while it is
+    /// ordinary, amber at a limit, red past it.
+    ///
+    /// The dashboard's compact cards speak their figures in these three, and
+    /// say nothing in white: a page of six small readings is read at a glance,
+    /// and a glance wants the answer, not the absence of one. A tile that
+    /// reports a count, a throughput or a watt has no verdict to speak, and
+    /// keeps its metric's own colour - see `color(_:metric:)`, which is what
+    /// the menu bar, the System page's tiles and the detail pages draw with,
+    /// where a healthy page rests in its own white.
+    static func verdictColor(_ tone: NotchMetricTone) -> Color {
+        switch tone {
+        case .nominal, .identity: return NotchSplashPalette.green
+        case .warning: return NotchSplashPalette.amber
+        case .critical: return NotchSplashPalette.red
+        }
+    }
+
     /// The metric's own colour, while it carries no verdict.
     static func identityColor(_ metric: NotchDashboardMetric) -> Color {
         switch metric {

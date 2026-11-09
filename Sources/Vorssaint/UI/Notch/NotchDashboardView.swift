@@ -52,15 +52,44 @@ struct NotchDashboardView: View {
         service.dashboardActivities
     }
 
-    /// The same readings the System page draws, all of them. The page asks the
-    /// island for the height they need; the grid is never trimmed to make a page
-    /// fit, and an empty grid is a Mac with no sensors, which the page says.
-    /// The loads are read through the gate that keeps a second's spike off the
-    /// page, so the tiles and the menu bar agree about what is busy.
-    private var tiles: [NotchSystemCard] {
-        NotchSystemCards.cards(snapshot: monitor.snapshot, language: l10n.language,
-                               networkSpeedInBits: networkSpeedUnit == .bits,
-                               sustained: sustain.tones)
+    /// The page's six readings, at the page's own order, each with its figure
+    /// and the line of what it has measured. The loads are read through the
+    /// gate that keeps a second's spike off the page, so the cards and the menu
+    /// bar agree about what is busy, and the chart is drawn from the moments the
+    /// monitor kept and never from the reading of the moment repeated.
+    private var readings: [NotchDashboardCardReading] {
+        NotchDashboardCards.readings(dashboardSample,
+                                     networkSpeedInBits: networkSpeedUnit == .bits,
+                                     now: ProcessInfo.processInfo.systemUptime)
+    }
+
+    /// The monitor's snapshot, told to the cards: the moment's readings, the
+    /// moments that make the charts, and the volume the disk card speaks for.
+    private var dashboardSample: NotchDashboardSample {
+        let snapshot = monitor.snapshot
+        let volume = NotchDashboardView.primaryVolume(of: snapshot.disk)
+        let activity = NotchDashboardCards.activity(of: snapshot.disk)
+        return NotchDashboardSample(cpu: snapshot.cpuUsage, gpu: snapshot.gpuUsage,
+                                    memory: snapshot.memoryUsed.flatMap { used in
+                                        snapshot.memoryTotal.flatMap { total in
+                                            total > 0 ? Double(used) / Double(total) : nil
+                                        }
+                                    },
+                                    netDown: snapshot.netDownBytesPerSec,
+                                    netUp: snapshot.netUpBytesPerSec,
+                                    diskRead: activity?.read, diskWrite: activity?.write,
+                                    watts: snapshot.power?.systemWatts,
+                                    diskFreeBytes: volume?.freeBytes, diskTotalBytes: volume?.totalBytes,
+                                    samples: snapshot.metricSamples, sustained: sustain.tones)
+    }
+
+    /// The volume the disk card names: the one the Mac starts from, and the
+    /// first internal one when that volume is not in the reading - the panel's
+    /// disk page's own choice, so card and page speak of one volume.
+    private static func primaryVolume(of disk: DiskReading?) -> DiskDeviceReading? {
+        disk?.devices.first(where: { $0.mountPath == "/" })
+            ?? disk?.devices.first(where: \.isInternal)
+            ?? disk?.devices.first
     }
 
     private var text: NotchStrings { FeatureStrings.notch(l10n.language) }
@@ -136,7 +165,15 @@ struct NotchDashboardView: View {
                     .transition(NotchDashboardLayout.cardTransition(reduceMotion: reduceMotion))
             }
         }
-        .animation(reduceMotion ? nil : NotchDashboardLayout.cardMotion, value: activities)
+        // One movement, and the island's own. The cards and the page's height
+        // are animated by the spring the window's sides are drawn with - the
+        // shrinking spring when a card leaves, the growing spring when one
+        // arrives - so the card going and the page taking its place are one
+        // event on the screen and not a card leaving followed by a collapse.
+        // With motion reduced, the card is only faded and nothing is carried.
+        .animation(reduceMotion ? nil
+                             : NotchDashboardLayout.cardMotion(grew: service.dashboardActivitiesGrew),
+                   value: activities)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(NotchDashboardSection.liveActivities.title(l10n.language))
         .accessibilityIdentifier("notch.dashboard.activities")
@@ -386,10 +423,14 @@ struct NotchDashboardView: View {
                 // The card's own way out: it ends the session, and asks nothing
                 // of the players, whose cards stay as they are. The same circle,
                 // the same size, the same lit plate under the pointer as the
-                // marks beside it and the controls in the Explorer wear.
+                // marks beside it and the controls in the Explorer wear - and it
+                // does not move: the card is the thing that leaves, and a way out
+                // that springs away from the card it belongs to tells the person
+                // the card is going twice, in two places, at two speeds.
                 NotchCircularIconButton(symbol: "xmark",
                                         title: timer.session.completed ? l10n.s.supportIntroDoneButton : l10n.s.mediaCancel,
-                                        side: NotchDashboardLayout.timerControlSide, filled: true, tint: .orange) {
+                                        side: NotchDashboardLayout.timerControlSide, filled: true, tint: .orange,
+                                        lifts: false) {
                     timer.cancel()
                 }
                 .accessibilityIdentifier("notch.dashboard.timer.close")
@@ -412,6 +453,7 @@ struct NotchDashboardView: View {
             snapshot: splash.snapshot,
             phase: splash.phase,
             elapsed: splash.elapsed(),
+            taskTokens: splash.taskTokens,
             isMonitoring: splash.isMonitoring,
             isSpilling: splash.isSpilling,
             history: splash.history,
@@ -471,26 +513,35 @@ struct NotchDashboardView: View {
 
     // MARK: - System Monitoring
 
-    /// Every reading at once, four in a row, each tile a label, a value and a
-    /// meter of its own. The grid is the page's grid, not a summary: nothing is
-    /// folded into a chosen metric, and a tile opens its detail at once.
+    /// The six readings at once: two rows of three cards, each card its mark,
+    /// its figures in the corner and the line of what it has measured. The grid
+    /// is the page's grid and not a summary: the cards are the six the page has
+    /// room for, in one order, at one size, and a card opens its reading's page.
+    ///
+    /// What is not here is the page's decision too. The charge and the devices
+    /// on the cables are the Power page's readings, where each has room to be
+    /// named; their sampling, their pages, and their menu bar indicators are
+    /// untouched.
     private var systemMonitoring: some View {
         VStack(spacing: NotchDashboardLayout.metricSpacing) {
-            ForEach(NotchDashboardLayout.metricRowRanges(tiles: tiles.count,
+            ForEach(NotchDashboardLayout.metricRowRanges(tiles: readings.count,
                                                          columns: NotchDashboardLayout.metricColumns),
                     id: \.lowerBound) { row in
                 HStack(spacing: NotchDashboardLayout.metricSpacing) {
-                    ForEach(Array(tiles[row])) { tile in
-                        metricTile(tile)
+                    ForEach(Array(readings[row])) { reading in
+                        NotchSystemMetricTile(reading: reading, title: title(for: reading.metric),
+                                              selected: service.selectedMetric == reading.metric.detailKind,
+                                              select: { service.showMetric(reading.metric.detailKind) })
                     }
-                    // An unfilled row keeps its tiles at the width of the
+                    // An unfilled row keeps its cards at the width of the
                     // others, so the grid stays a grid.
-                    ForEach(0..<(NotchDashboardLayout.metricColumns - tiles[row].count), id: \.self) { _ in
+                    ForEach(0..<max(0, NotchDashboardLayout.metricColumns - readings[row].count),
+                            id: \.self) { _ in
                         Color.clear.frame(maxWidth: .infinity)
                     }
                 }
             }
-            if tiles.isEmpty {
+            if readings.isEmpty {
                 Text(l10n.s.monitorUnavailable)
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
@@ -503,53 +554,22 @@ struct NotchDashboardView: View {
         .accessibilityIdentifier("notch.dashboard.system")
     }
 
-    private func metricTile(_ tile: NotchSystemCard) -> some View {
-        let selected = service.selectedMetric == tile.metric.detailKind
-        // One tone, three places: the figure, the meter and the mark are drawn
-        // from the same verdict, so a tile never says "fine" in its number and
-        // "low" in its bar. The plate stays the page's own, and the words stay
-        // secondary: a page of coloured cards would shout at every glance.
-        let color = NotchMetricHealth.color(tile.tone, metric: tile.metric)
-        return Button { service.showMetric(tile.metric.detailKind) } label: {
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 4) {
-                    Image(systemName: tile.symbol)
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(tile.wantsAttention ? color : .white.opacity(0.6))
-                        .frame(width: 12)
-                    Text(tile.title)
-                        .font(.system(size: 8.5, weight: .medium))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1).truncationMode(.tail)
-                    Spacer(minLength: 0)
-                }
-                Text(tile.value ?? "…")
-                    .font(.system(size: 13, weight: .semibold, design: .rounded))
-                    .monospacedDigit()
-                    .contentTransition(.numericText())
-                    .foregroundStyle(tile.wantsAttention ? color : .white)
-                    .lineLimit(1).minimumScaleFactor(0.65)
-                    .animation(reduceMotion ? nil : .smooth(duration: 0.25), value: tile.value)
-                Spacer(minLength: 0)
-                if let level = tile.level {
-                    NotchMeter(value: level, height: 3, tint: color)
-                } else {
-                    NotchMeter(value: 0, height: 3)
-                }
-            }
-            .padding(NotchDashboardLayout.metricTilePadding)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .frame(height: NotchDashboardLayout.metricTileHeight)
-            .modifier(NotchControlSurface(cornerRadius: 10, selected: selected,
-                                          fillOpacity: NotchDashboardLayout.fillOpacity))
-            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+    /// What a card is called, where a name costs the page no room: the screen
+    /// reader's label, and the pointer's help. The card itself is drawn with no
+    /// title, and says what it is by its mark.
+    private func title(for metric: NotchDashboardMetric) -> String {
+        let strings = l10n.s
+        switch metric {
+        case .cpu: return strings.cpuLabel
+        case .gpu: return strings.gpuLabel
+        case .memory: return strings.memorySection
+        case .network: return strings.networkSection
+        case .disk: return strings.diskAvailable.localizedCapitalized
+        case .power: return strings.powerSection
+        case .battery: return strings.batteryLabel
+        case .fan: return FeatureStrings.fanControl(l10n.language).title
+        case .devices: return FeatureStrings.connectedDevices(l10n.language).title
         }
-        .buttonStyle(NotchButtonStyle(cornerRadius: 10, lifts: false))
-        .accessibilityLabel(tile.title)
-        .accessibilityValue([tile.value, tile.detail].compactMap { $0 }.joined(separator: ", "))
-        .accessibilityAddTraits(selected ? .isSelected : [])
-        .accessibilityIdentifier("notch.dashboard.metric.\(tile.metric.rawValue)")
-        .help(tile.title)
     }
 }
 

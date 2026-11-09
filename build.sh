@@ -315,6 +315,10 @@ if (( TEST )); then
         Sources/Vorssaint/Services/AgentUsage/AgentOpenCodeReader.swift
         Sources/Vorssaint/App/MenuBarMetricHitSupport.swift
         Sources/Vorssaint/Services/Notch/NotchDashboardSupport.swift
+        Sources/Vorssaint/Services/Notch/NotchDashboardCards.swift
+        Sources/Vorssaint/Services/Notch/NotchMetricReading.swift
+        Sources/Vorssaint/Services/Notch/NotchActivityTimeline.swift
+        Sources/Vorssaint/Services/SystemMonitor/SystemMetricSamples.swift
         Sources/Vorssaint/Services/Notch/NotchGestureSupport.swift
         Sources/Vorssaint/Services/Notch/NotchSectionPaging.swift
         Sources/Vorssaint/Services/Notch/NotchSliderEditing.swift

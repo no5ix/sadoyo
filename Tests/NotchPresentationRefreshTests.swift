@@ -197,6 +197,10 @@ enum NotchPresentationRefreshContract {
         func flushMascotReaction() {}
         func syncMascotKeepAwake() {}
         func syncMascotAgents() {}
+        // The page's cards keep the order their activities began in, and a
+        // refresh is where the island learns that one began. The contract keeps
+        // no row of activities, so the record is kept by nothing here.
+        func syncActivityTimeline() {}
         var mascotRestsInView = false
         var mascotRestedInView = false
         var mascotInBar = false, mascotHasRoom = true

@@ -188,6 +188,15 @@ struct NotchCircularIconButton: View {
     var tint: Color = .white
     var disabled = false
     var selected = false
+    /// Whether the mark grows under the pointer and dips under the press.
+    ///
+    /// A mark that ends a card keeps this off. The card it lives in is the thing
+    /// that moves, and a card is a whole: a mark that scales on its own springs
+    /// away from the card it belongs to, and a person pressing the way out of a
+    /// card sees the mark leave its place a moment before the card goes. The
+    /// press is still told - the plate lights and the mark dims - and the mark
+    /// stays where the card put it.
+    var lifts = true
     let action: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var hover = false
@@ -206,7 +215,7 @@ struct NotchCircularIconButton: View {
         }
         // The style's own plate is a square of the same radius, which at a
         // square box is the same circle: press and hover light the one shape.
-        .buttonStyle(NotchButtonStyle(cornerRadius: side / 2))
+        .buttonStyle(NotchButtonStyle(cornerRadius: side / 2, lifts: lifts))
         .disabled(disabled)
         .onHover { hover = $0 }
         .animation(reduceMotion ? nil : .smooth(duration: 0.2), value: hover)

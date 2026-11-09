@@ -859,10 +859,46 @@ final class NotchService: ObservableObject {
         return Int(pid)
     }
 
+    /// The activity cards, in the order their activities became active: the
+    /// first started is drawn first, and every activity begun after it is
+    /// appended below. The order is the machine's history, kept by
+    /// `NotchActivityInsertion`, and not a rank by activity type: a song that
+    /// started an hour ago stands above a timer started since, and a timer
+    /// begun again joins the page at its end.
+    ///
+    /// Reading this changes nothing. The record is kept by `syncActivityTimeline`,
+    /// asked where the island already learns that a player, a timer, or a
+    /// reading has begun or ended - a getter the page measures itself by must
+    /// not be the thing that decides what is on the page.
     var dashboardActivities: [NotchDashboardActivity] {
+        activityInsertion.ordering(dashboardActivityCandidates) { $0.id }
+    }
+
+    /// The page's activities as the running things decide them, before the
+    /// order of their activation is applied.
+    private var dashboardActivityCandidates: [NotchDashboardActivity] {
         NotchDashboardSupport.activities(players: dashboardPlayerIDs, timer: showsDashboardTimer,
                                          splash: showsDashboardSplash)
     }
+
+    /// The order the activities became active in.
+    private var activityInsertion = NotchActivityInsertion()
+
+    /// Records the activities running now, and issues a place to any that has
+    /// just begun. Asked of the moments the island already reacts to, and of
+    /// every presentation refresh, which is what catches an activity already
+    /// running when the island opens.
+    private func syncActivityTimeline() {
+        let begun = activityInsertion.register(dashboardActivityCandidates.map(\.id))
+        dashboardActivitiesGrew = begun > 0
+    }
+
+    /// Whether the page's activities last gained a card, which is the page
+    /// growing and not shrinking. The section's motion and the island's shape
+    /// are the same movement, so they are asked of the same event: a card
+    /// arriving grows the page, and a card leaving shrinks it, and neither is
+    /// guessed at from the count the view happens to be drawing.
+    private(set) var dashboardActivitiesGrew = false
 
     /// Whether the page shows the calendar's card: the section is in the
     /// island's list and the page is wide enough for a week of days beside the
@@ -927,14 +963,12 @@ final class NotchService: ObservableObject {
     }
 
     /// What the page measures, which the island grows to hold. The grid's count
-    /// is the System page's own count, so the page and the island agree on the
-    /// tiles without the service reading the monitor's snapshot twice.
+    /// is the page's own six cards, so the page and the island agree on the grid
+    /// without the service reading the monitor's snapshot twice.
     var dashboardContentHeight: CGFloat {
         NotchDashboardLayout.contentHeight(activities: dashboardActivities,
                                            calendar: showsDashboardCalendar,
-                                           metrics: NotchSupport.systemCardCount(
-                                            hasBattery: PowerSampler.hasInternalBattery,
-                                            fans: SystemMonitor.shared.snapshot.fanSpeeds.count),
+                                           metrics: NotchDashboardLayout.dashboardTileCount,
                                            width: dashboardContentWidth,
                                            primaryPlayerID: dashboardPrimaryPlayerID)
     }
@@ -2973,6 +3007,10 @@ final class NotchService: ObservableObject {
     }
 
     func refreshPresentation(animated: Bool = true, transitionContent: NotchContentTransition = .none) {
+        // The page's cards keep the order their activities began in, and a
+        // refresh is where the island learns that one has begun, ended, or
+        // been running all along under a page that has just opened.
+        syncActivityTimeline()
         // A notice with a new reading, or the music strip naming its song,
         // fits its new width in place.
         let fitsInPlace = noticeFitsInPlace && notice != nil && !noticeExpanded
@@ -4387,6 +4425,7 @@ final class NotchService: ObservableObject {
             NotchTimerService.shared.$session.removeDuplicates().receive(on: DispatchQueue.main)
                 .sink { [weak self] _ in
                     self?.syncMenuSpaceMonitoring()
+                    self?.syncActivityTimeline()
                     self?.objectWillChange.send()
                     self?.refreshPresentation()
                 }.store(in: &subscriptions)
@@ -4405,6 +4444,7 @@ final class NotchService: ObservableObject {
                 .receive(on: DispatchQueue.main)
                 .sink { [weak self] _ in
                     self?.syncMenuSpaceMonitoring()
+                    self?.syncActivityTimeline()
                     self?.objectWillChange.send()
                     self?.refreshPresentation()
                 }.store(in: &subscriptions)
@@ -4443,6 +4483,14 @@ final class NotchService: ObservableObject {
                     self?.objectWillChange.send()
                     self?.refreshPresentation()
                 }.store(in: &subscriptions)
+            // A player beginning, and a player falling silent, are the page's
+            // cards appearing and going: the record of activation is kept here
+            // so a card joining the Live Activities is appended at its end and
+            // not sorted by what kind of activity it is.
+            music.$sources.map { sources in sources.filter(\.isActivelyPlaying).map { Int($0.pid) } }
+                .removeDuplicates { $0 == $1 }.receive(on: DispatchQueue.main)
+                .sink { [weak self] _ in self?.syncActivityTimeline() }
+                .store(in: &subscriptions)
             // A strip naming its song fits the next song's name in place, or
             // its cover and bars when the next reading names nothing.
             music.$playback.map { [$0?.track.title, $0?.track.artist] }.removeDuplicates()

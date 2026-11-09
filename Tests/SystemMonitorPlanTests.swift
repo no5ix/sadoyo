@@ -107,14 +107,25 @@ enum SystemMonitorPlanTests {
         monitor.menuPanelNeeds = .none
         suite.expect(!monitor.currentPlan(defaults: defaults).needPeripheralBattery,
                      "a closed panel does not read peripheral batteries")
+        // The Power page carries the charge and the devices on the cables, so
+        // the page that draws them is the page that pays for them: the detail
+        // reads peripheral batteries and the devices, in the panel and in the
+        // island alike, and a detail that draws neither pays for neither.
+        defaults.set(true, forKey: AppFeature.connectedDevices.availabilityKey)
         panel.selectedMetric = .power
         monitor.menuPanelNeeds = panel.monitorNeeds
-        suite.expect(!monitor.currentPlan(defaults: defaults).needPeripheralBattery,
-                     "the Power and Battery time detail does not read peripheral batteries")
+        suite.expect(monitor.currentPlan(defaults: defaults).needPeripheralBattery
+                         && monitor.currentPlan(defaults: defaults).needConnectedDevices,
+                     "the Power detail reads the peripherals' batteries and the devices it draws")
         monitor.menuPanelNeeds = .none
         monitor.notchDetailNeeds = MetricDetailKind.power.monitorNeeds
-        suite.expect(!monitor.currentPlan(defaults: defaults).needPeripheralBattery,
-                     "the island's Power detail does not read peripheral batteries")
+        suite.expect(monitor.currentPlan(defaults: defaults).needPeripheralBattery
+                         && monitor.currentPlan(defaults: defaults).needConnectedDevices,
+                     "the island's Power detail reads the peripherals' batteries and the devices it draws")
+        monitor.notchDetailNeeds = MetricDetailKind.fan.monitorNeeds
+        suite.expect(!monitor.currentPlan(defaults: defaults).needPeripheralBattery
+                         && !monitor.currentPlan(defaults: defaults).needConnectedDevices,
+                     "a detail that draws neither the peripherals nor the devices pays for neither")
         monitor.notchDetailNeeds = .none
         monitor.fullMonitorVisible = true
         suite.expect(!monitor.currentPlan(defaults: defaults).needPeripheralBattery,

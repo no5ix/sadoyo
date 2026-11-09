@@ -1781,13 +1781,81 @@ enum RepositoryFeatureTests {
         suite.expect(!cardLines.contains { $0.contains("Text(text.today)") },
                "the way back to today is a circle, and not a word")
 
+
+        // The section's mark and its name are a pair with a stated space
+        // between them. The header is one view, drawn in the card of the Live
+        // Activities and in the page, and the space is its one value: a mark
+        // that touches its name in one place and stands apart in the other is
+        // the same view drawn twice, and not one view.
+        suite.expect(NotchSplashLayout.markTitleGap > 0 && NotchSplashLayout.markTitleGap <= 10
+                         && splashCardLines.filter { $0.contains("spacing: NotchSplashLayout.markTitleGap") }.count == 1,
+               "the header's mark and its name keep one stated space, and it is named once")
+        // The space is between the section's mark and its name, in the header
+        // the card and the page share.
+        var markAndTitle = false
+        if let gap = splashCardLines.firstIndex(where: {
+            $0.contains("HStack(spacing: NotchSplashLayout.markTitleGap) {")
+        }) {
+            let window = splashCardLines[gap..<min(gap + 6, splashCardLines.count)]
+            markAndTitle = window.contains { $0.contains("NotchSectionMark(module: .splash") }
+                && window.contains { $0.contains("Text(text.title)") }
+        }
+        suite.expect(markAndTitle,
+                     "the stated space is the one between the section's mark and its name")
+
+        // The header's token counts are the task's. The engine's counters are
+        // cumulative over its whole life, and a card in a header is a glance at
+        // the work being timed: the header reads them as a difference, and the
+        // thirty days' ledger is kept by the history and not by the card.
+        suite.expect(splashCardLines.contains { $0.contains("taskTokens: service.taskTokens") }
+                         && splashCardLines.contains { $0.contains("NotchSplashSupport.tokensText(taskTokens.input)") }
+                         && splashCardLines.contains { $0.contains("NotchSplashSupport.tokensText(taskTokens.output)") }
+                         && !splashCardLines.contains { $0.contains("tokens: service.status") },
+               "the header shows the task's tokens, and not the engine's cumulative counters")
+
+        // The page's readings are six compact cards in three columns, drawn
+        // from the model that decides their figures and their lines. A card has
+        // no title and no meter: its mark says which reading it is, its corner
+        // says what it reads, and its line says what it has done. The charge and
+        // the devices on the cables are the watt page's readings, and the page
+        // that draws them asks the monitor for them.
+        let metricChartLines = repository.lines(at: "Sources/Vorssaint/UI/Notch/NotchSystemCharts.swift")
+        suite.expect(cardLines.contains { $0.contains("NotchDashboardCards.readings(dashboardSample,") }
+                         && cardLines.contains { $0.contains("NotchSystemMetricTile(reading:") }
+                         && cardLines.contains { $0.contains("columns: NotchDashboardLayout.metricColumns") }
+                         && NotchDashboardLayout.metricColumns == 3
+                         && NotchDashboardLayout.dashboardTileCount == 6,
+               "the page draws six compact cards in three columns, from the model that reads them")
+        suite.expect(!metricChartLines.contains { $0.contains("Text(title)") }
+                         && !metricChartLines.contains { $0.contains("ProgressView") }
+                         && metricChartLines.contains { $0.contains("accessibilityLabel(title)") }
+                         && metricChartLines.contains { $0.contains("NotchTimedChart(lines: reading.lines") },
+               "a compact card prints no title and fills no meter, and is named to the screen reader")
+        suite.expect(metricChartLines.contains { $0.contains("line.role.color") }
+                         && metricChartLines.contains { $0.contains("foregroundStyle(figure.color)") },
+               "a card's line is its metric's colour and its figure is the threshold's, drawn from different words")
+        suite.expect(NotchDashboardCards.metrics == [.cpu, .gpu, .memory, .network, .disk, .power]
+                         && !metricChartLines.contains { $0.contains("NotchSystemCard(") }
+                         && !cardLines.contains { $0.contains("NotchSystemCard(") },
+               "the page's six are the page's six, and the old eight-tile card is not among them")
+        let powerDetailLines = repository.lines(at: "Sources/Vorssaint/UI/MenuPanel/MetricDetailView.swift")
+        suite.expect(powerDetailLines.contains { $0.contains("rows.append(contentsOf: batteryGroup(snapshot))") }
+                         && powerDetailLines.contains { $0.contains("rows.append(contentsOf: connectedDevicesGroup(snapshot))") }
+                         && powerDetailLines.contains { $0.contains("batteryTemperature: true") }
+                         && powerDetailLines.contains { $0.contains("peripheralBattery: true") }
+                         && powerDetailLines.contains { $0.contains("connectedDevices: true") },
+               "the watt page carries the charge and the devices, and asks the monitor for what it draws")
+
         // The monitoring tiles are coloured by one rule, asked of the shared
         // policy, and not by a colour written into each tile.
         let systemCardLines = repository.lines(at: "Sources/Vorssaint/UI/Notch/NotchSystemCards.swift")
+            + repository.lines(at: "Sources/Vorssaint/Services/Notch/NotchDashboardCards.swift")
             + cardLines
-        suite.expect(systemCardLines.contains { $0.contains("NotchMetricHealth.color(") }
+        suite.expect(systemCardLines.contains { $0.contains("NotchMetricHealth.verdictColor(") }
                          && systemCardLines.contains { $0.contains("NotchMetricHealth.tone(") }
-                         && systemCardLines.contains { $0.contains("final class NotchMetricSustain") },
+                         && systemCardLines.contains { $0.contains("NotchMetricReading.tone(") }
+                         && systemCardLines.contains { $0.contains("final class NotchMetricSustain") }
+                         && systemCardLines.contains { $0.contains("NotchMetricReading.gate(") },
                "a reading's colour is the shared policy's, and the load's gate is one gate")
 
         // A card comes and goes with the page's own transition, on a stable

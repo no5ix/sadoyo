@@ -59,7 +59,14 @@ enum MetricDetailKind: String, Equatable, Identifiable {
             }
             return SystemMonitorPanelNeeds(peripheralBattery: true)
         case .power:
-            return SystemMonitorPanelNeeds(power: true)
+            // The page shows the draw, the charge, and the devices on the
+            // cables, so it asks the monitor for all three: a page that draws a
+            // reading is the reason that reading is sampled.
+            return SystemMonitorPanelNeeds(power: true,
+                                           battery: true,
+                                           peripheralBattery: true,
+                                           batteryTemperature: true,
+                                           connectedDevices: true)
         case .fan:
             return SystemMonitorPanelNeeds(fanSpeed: true)
         case .connectedDevices:
@@ -446,21 +453,15 @@ struct MetricDetailView: View {
             }
             return rows
         case .power:
-            let power = snapshot.power
-            var rows = [
-                row(l10n.s.powerSystem, power?.systemWatts.map(MetricFormat.watts) ?? l10n.s.networkMeasuring),
-                row(l10n.s.powerAdapter, adapterText(power)),
-            ]
-            if PowerSampler.hasInternalBattery {
-                rows.append(row(l10n.s.powerBattery, batteryFlowText(power)))
-                if let power, power.hasBattery,
-                   !power.externalConnected, !power.isCharging {
-                    let strings = FeatureStrings.batteryTime(l10n.language)
-                    rows.append(row(strings.title,
-                                    power.timeRemainingSeconds.flatMap(BatteryTimeSupport.formatted)
-                                        ?? strings.calculating))
-                }
-            }
+            // The watt's page is the machine's power page, and a charge and the
+            // devices on their cables are its readings. The dashboard's grid
+            // gave them no room and sent them here, where each has room to be
+            // named; their own pages, their menu bar indicators, their settings
+            // and their sampling are untouched, and the hub gates them as it
+            // always did.
+            var rows = powerRows(snapshot)
+            rows.append(contentsOf: batteryGroup(snapshot))
+            rows.append(contentsOf: connectedDevicesGroup(snapshot))
             return rows
         case .fan:
             let strings = FeatureStrings.fanControl(l10n.language)
@@ -483,6 +484,84 @@ struct MetricDetailView: View {
                     symbolName: "cable.connector")
             }
         }
+    }
+
+    /// The machine's draw: what it takes, and what the adapter gives.
+    ///
+    /// The charge's own readings - how long it is good for among them - are the
+    /// battery group's below, which is where they are named; this is the watt
+    /// and the supply, which is what the page is called for.
+    private func powerRows(_ snapshot: SystemSnapshot) -> [MetricDetailRow] {
+        let power = snapshot.power
+        var rows = [
+            row(l10n.s.powerSystem, power?.systemWatts.map(MetricFormat.watts) ?? l10n.s.networkMeasuring),
+            row(l10n.s.powerAdapter, adapterText(power)),
+        ]
+        if PowerSampler.hasInternalBattery {
+            rows.append(row(l10n.s.powerBattery, batteryFlowText(power)))
+        }
+        return rows
+    }
+
+    /// The charge, and what it is doing: the battery page's own rows, read the
+    /// battery page reads them, on the page that has the room for them. The
+    /// Mac's charge first, then the batteries that are not the Mac's - the same
+    /// devices, the same keeping, and nothing invented for a device that has
+    /// not been read.
+    private func batteryGroup(_ snapshot: SystemSnapshot) -> [MetricDetailRow] {
+        var rows = [heading("battery", l10n.s.batteryLabel)]
+        let power = snapshot.power
+        if PowerSampler.hasInternalBattery {
+            rows.append(contentsOf: [
+                row(l10n.s.batteryCharge, power?.chargePercent.map { "\($0)%" } ?? l10n.s.networkMeasuring),
+                row(l10n.s.temperatures,
+                    snapshot.batteryTemperature.map(formatTemperature) ?? l10n.s.monitorUnavailable),
+                row(l10n.s.powerHealth, power?.healthPercent.map { "\(Int($0.rounded()))%" } ?? "-"),
+                row(l10n.s.powerCycles, power?.cycleCount.map(String.init) ?? "-"),
+            ])
+            // How long the charge is good for, on the one condition under which
+            // the machine is spending it: off the cable, and not filling up.
+            if let power, power.hasBattery, !power.externalConnected, !power.isCharging {
+                let strings = FeatureStrings.batteryTime(l10n.language)
+                rows.append(row(strings.title,
+                                power.timeRemainingSeconds.flatMap(BatteryTimeSupport.formatted)
+                                    ?? strings.calculating))
+            }
+        }
+        if snapshot.peripheralBatteries.isEmpty {
+            rows.append(row(l10n.s.monitorShowPeripheralBattery,
+                            l10n.s.peripheralBatteryNoDevices,
+                            wrapsValue: true))
+        } else {
+            for device in PeripheralBatterySupport.sorted(snapshot.peripheralBatteries).prefix(5) {
+                rows.append(row(id: "peripheral.\(device.id)", device.name, "\(device.percent)%"))
+            }
+        }
+        return rows
+    }
+
+    /// What is on the cables: the devices page's own list, named by the devices
+    /// page's own words, on the page the dashboard sends a person to.
+    private func connectedDevicesGroup(_ snapshot: SystemSnapshot) -> [MetricDetailRow] {
+        let strings = FeatureStrings.connectedDevices(l10n.language)
+        var rows = [heading("devices", strings.title)]
+        guard !snapshot.connectedDevices.isEmpty else {
+            rows.append(row(strings.noDevices, ""))
+            return rows
+        }
+        for device in snapshot.connectedDevices {
+            rows.append(row(id: device.id,
+                            device.name.isEmpty ? strings.unnamedDevice : device.name,
+                            device.vendorName ?? "",
+                            symbolName: "cable.connector"))
+        }
+        return rows
+    }
+
+    /// The name of a group of rows, with the line that says the rows above it
+    /// were about something else.
+    private func heading(_ id: String, _ title: String) -> MetricDetailRow {
+        MetricDetailRow(id: "heading.\(id)", title: title, value: "", isHeading: true)
     }
 
     private var primaryValue: String {
@@ -593,7 +672,20 @@ struct MetricDetailView: View {
 
     @ViewBuilder
     private func detailRow(_ row: MetricDetailRow) -> some View {
-        if row.wrapsValue {
+        if row.isHeading {
+            // The group's name, and the line that says the rows above it were
+            // about something else: the page reads in groups and not as one long
+            // list of numbers.
+            VStack(alignment: .leading, spacing: 5) {
+                Divider()
+                Text(row.title)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            .padding(.top, 2)
+            .accessibilityAddTraits(.isHeader)
+        } else if row.wrapsValue {
             VStack(alignment: .leading, spacing: 2) {
                 Text(row.title)
                     .font(.system(size: 10.5))
@@ -818,4 +910,7 @@ private struct MetricDetailRow: Identifiable {
     var showsPressure = false
     var wrapsValue = false
     var symbolName: String?
+    /// The name of a group of rows, drawn as a heading with its divider, and
+    /// not as a reading.
+    var isHeading = false
 }

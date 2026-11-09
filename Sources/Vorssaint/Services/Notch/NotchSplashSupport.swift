@@ -22,6 +22,12 @@ enum NotchSplashLayout {
     static let padding: CGFloat = 10
     static let headerHeight: CGFloat = 20
     static let headerSpacing: CGFloat = 10
+    /// The gap between the section's mark and its name, on every line where the
+    /// two stand side by side: the page's card and the dashboard's compact card
+    /// are the same line, drawn from the same number, at every width. A mark
+    /// crowded against a name in one place and spaced from it in another is two
+    /// sections with one name.
+    static let markTitleGap: CGFloat = 7
     /// The gap between the four readings: one gap, four columns, one row.
     static let metricSpacing: CGFloat = 8
     /// The gap between the card's sections: the readings, the memory, the
@@ -974,6 +980,29 @@ struct NotchSplashTaskTracker {
         case finished(id: String, outcome: Outcome, at: Date, elapsed: TimeInterval)
     }
 
+    /// The marks a card's header shows for one task: the tokens the engine
+    /// moved across this task, and nothing else.
+    ///
+    /// The engine's own counters are cumulative over its whole life, and a card
+    /// in a header is a glance at the work being timed. So the header is the
+    /// difference between the counters as they stand and as they stood when the
+    /// task began, kept over the task's several requests, and frozen when the
+    /// task ends. The counters never go down: a run's total is only ever added
+    /// to, and an engine that begins again is rebased where it began again.
+    ///
+    /// This is not the thirty days. The daily trend is the same engine's
+    /// counters kept day by day in the app's own file, and a task beginning
+    /// takes nothing away from it.
+    struct TaskTokens: Equatable {
+        let input: Int64
+        let output: Int64
+
+        static let zero = TaskTokens(input: 0, output: 0)
+        var isEmpty: Bool { input == 0 && output == 0 }
+        /// The task's whole: what the engine moved in and out across it.
+        var total: Int64 { input + output }
+    }
+
     /// The counters as they stood when the run began, and the server it was
     /// read from.
     private struct Baseline: Equatable {
@@ -984,6 +1013,17 @@ struct NotchSplashTaskTracker {
     }
 
     private(set) var phase: Phase = .idle
+    /// The task's tokens, as the header shows them: counted while the task
+    /// runs, frozen at its end, and zero before a task has begun.
+    private(set) var taskTokens = TaskTokens.zero
+    /// The tokens the run has measured so far, and the counters the last
+    /// reading carried. The two together are what makes a counter that went
+    /// down - an engine restarted, a counter reset - a new baseline rather
+    /// than a subtraction, and what keeps a run's figures from going negative.
+    private var runInput = Int64(0)
+    private var runOutput = Int64(0)
+    private var lastInputTokens: Int64?
+    private var lastOutputTokens: Int64?
     private var baseline: Baseline?
     /// The first reading that showed nothing running: the task's length is
     /// measured to it, because the work ended somewhere between the reading
@@ -1020,6 +1060,7 @@ struct NotchSplashTaskTracker {
         quietReadings = 0
         lastSpillCount = nil
         isSpilling = false
+        resetTaskTokens()
     }
 
     /// A finished task cleared, so a page returns to its Start state.
@@ -1029,6 +1070,17 @@ struct NotchSplashTaskTracker {
         baseline = nil
         firstQuietAt = nil
         quietReadings = 0
+        resetTaskTokens()
+    }
+
+    /// The task's figures, back to nothing: the clock is back to nothing too,
+    /// and a header that shows a task shows the task's own.
+    private mutating func resetTaskTokens() {
+        taskTokens = .zero
+        runInput = 0
+        runOutput = 0
+        lastInputTokens = nil
+        lastOutputTokens = nil
     }
 
     var isRunning: Bool {
@@ -1103,6 +1155,12 @@ struct NotchSplashTaskTracker {
                          at: date, snapshot: snapshot)
 
         case .running(let id, let startedAt):
+            // The task's counters are read at every reading of the run, quiet
+            // ones included: a counter that moved is work the engine did, and
+            // a run's figures are the whole span of the run and not only the
+            // readings that found it busy.
+            advanceTokens(input: status.metrics.prefillInputTokens,
+                          output: status.metrics.decodeOutputTokens)
             if work {
                 firstQuietAt = nil
                 quietReadings = 0
@@ -1129,7 +1187,42 @@ struct NotchSplashTaskTracker {
                             cancelled: counters.cancelled ?? 0, instanceKey: snapshot.instanceKey)
         firstQuietAt = nil
         quietReadings = 0
+        // The task begins at nothing, and from here the engine's cumulative
+        // counters are read against this moment: the header's figures and the
+        // clock start together, at the same instant, and an intermediate request
+        // of the same task adds to them without starting them over.
+        resetTaskTokens()
+        lastInputTokens = snapshot.status.metrics.prefillInputTokens
+        lastOutputTokens = snapshot.status.metrics.decodeOutputTokens
         return .started(id: id, at: date)
+    }
+
+    /// One reading's tokens, added to the run.
+    ///
+    /// The rule is a difference, and the difference is kept honest four ways:
+    /// a counter the server does not report adds nothing and asks for nothing;
+    /// a counter that grew adds what it grew by; a counter that went down, or
+    /// came from an engine the run did not begin in, is a fresh baseline at the
+    /// reading and adds nothing - it is never subtracted, because a task that
+    /// used sixty tokens does not un-use them; and a figure the run has already
+    /// measured is never lowered, so the header never shows a negative and never
+    /// shows less than the task did.
+    private mutating func advanceTokens(input: Int64?, output: Int64?) {
+        func advance(_ current: Int64?, _ last: inout Int64?, _ total: inout Int64) {
+            guard let current, current >= 0 else { return }
+            if let previous = last, current > previous {
+                total += current - previous
+            }
+            // The next reading's difference is measured from this one, so a
+            // run's tokens are counted once each. A counter that came in below
+            // the mark is a counter begun again - an engine restarted, a
+            // counter reset: the run keeps what it measured and is measured on
+            // from here, which adds nothing and takes nothing away.
+            last = current
+        }
+        advance(input, &lastInputTokens, &runInput)
+        advance(output, &lastOutputTokens, &runOutput)
+        taskTokens = TaskTokens(input: runInput, output: runOutput)
     }
 
     private func judge(_ status: NotchSplashStatus, snapshot: NotchSplashSnapshot) -> Outcome {
@@ -1155,6 +1248,10 @@ struct NotchSplashTaskTracker {
         baseline = nil
         firstQuietAt = nil
         quietReadings = 0
+        // The clock freezes at the task's length, and the task's tokens freeze
+        // with it: the header keeps the figures of the task that ended until
+        // the next one begins, which begins them again at nothing.
+        taskTokens = TaskTokens(input: runInput, output: runOutput)
         return .finished(id: id, outcome: outcome, at: date, elapsed: elapsed)
     }
 
@@ -1274,6 +1371,12 @@ final class NotchSplashService: ObservableObject {
     @Published private(set) var isMonitoring = false
     /// The task being timed: idle, running, or finished and frozen.
     @Published private(set) var phase: NotchSplashTaskTracker.Phase = .idle
+    /// The task's tokens: the engine's cumulative counters read against where
+    /// they stood when the task began, frozen at its end. The card header's two
+    /// arrows, and nothing else - the thirty days of tokens are the trend's,
+    /// kept in the app's own file, and a task beginning leaves them where they
+    /// are.
+    @Published private(set) var taskTokens = NotchSplashTaskTracker.TaskTokens.zero
     /// Why the last reading did not arrive, while the polling is running.
     @Published private(set) var failure: NotchSplashFailure?
     /// The interval the polling runs at, in whole seconds.
@@ -1400,6 +1503,7 @@ final class NotchSplashService: ObservableObject {
         tracker.begin()
         tracker.clearFinished()
         phase = tracker.phase
+        taskTokens = tracker.taskTokens
         lastOutcome = nil
         monitoringSince = clock()
         lastActiveAt = nil
@@ -1423,6 +1527,7 @@ final class NotchSplashService: ObservableObject {
         loop = nil
         tracker.clearFinished()
         phase = tracker.phase
+        taskTokens = tracker.taskTokens
         lastOutcome = nil
         lastActiveAt = nil
         failure = nil
@@ -1434,6 +1539,7 @@ final class NotchSplashService: ObservableObject {
     func clearFinishedTask() {
         tracker.clearFinished()
         phase = tracker.phase
+        taskTokens = tracker.taskTokens
     }
 
     /// The chosen interval, applied to the running session at once.
@@ -1579,6 +1685,7 @@ final class NotchSplashService: ObservableObject {
         if snapshot.status.hasWork { lastActiveAt = date }
         let event = tracker.observe(snapshot, at: date)
         phase = tracker.phase
+        taskTokens = tracker.taskTokens
         isSpilling = tracker.isSpilling
         reservationFailures = snapshot.status.kv.reservationFailures
         guard let event else { return }
