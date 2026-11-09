@@ -363,7 +363,9 @@ struct NotchDashboardView: View {
 
     /// A Splash session as a card: the same header and the same four readings
     /// as the page's own dashboard, at the width the section has, in the same
-    /// colours. The card is read, not pressed; its one mark stops the reading,
+    /// colours, and with the same four charts, memory and trend. The card
+    /// lights under the pointer and a click opens the section's page, as the
+    /// dashboard's other interactive cards do; its one mark stops the reading,
     /// and asks nothing of the work running in Splash. The session is not the
     /// card's owner: navigating away leaves it reading, and the card with it.
     private var splashCard: some View {
@@ -373,6 +375,7 @@ struct NotchDashboardView: View {
             elapsed: splash.elapsed(),
             isMonitoring: splash.isMonitoring,
             isSpilling: splash.isSpilling,
+            history: splash.history,
             failure: splash.failure,
             address: splash.endpointDescription,
             onStop: splash.isMonitoring ? { splash.stop() } : nil,
@@ -720,6 +723,13 @@ private struct NotchDashboardCalendarCard: View {
     /// the grid the Calendar page's grid moves.
     private var header: some View {
         HStack(spacing: 3) {
+            // The month's name leads with the section's own mark, as the
+            // section's tile wears it, so the card in the Live Activities says
+            // what it is before it is read.
+            Image(systemName: NotchModule.calendar.symbol)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.7))
+                .accessibilityHidden(true)
             Text(focus, format: .dateTime.month(.wide).year())
                 .font(.system(size: 10.5, weight: .semibold))
                 .lineLimit(1)

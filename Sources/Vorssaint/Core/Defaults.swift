@@ -1527,7 +1527,9 @@ enum Defaults {
         DefaultsKey.notchSplashEnabled: false,
         DefaultsKey.notchSplashHost: NotchSplashEndpoint.localHost,
         DefaultsKey.notchSplashPort: NotchSplashEndpoint.defaultPort,
-        DefaultsKey.notchSplashAPIKey: NotchSplashEndpoint.localAPIKey,
+        // No key of the app's own: a key belongs to the machine, written
+        // into the settings here or handed over in the session's environment.
+        DefaultsKey.notchSplashAPIKey: "",
         DefaultsKey.notchSplashIntervalSeconds: NotchSplashSupport.defaultInterval,
         DefaultsKey.notchEnabled: false,
         DefaultsKey.notchDisplay: NotchDisplay.automatic.rawValue,

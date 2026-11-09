@@ -562,21 +562,38 @@ enum NotchDashboardTests {
             let silent = NotchPlaybackSource(pid: 51, bundleIdentifier: "com.apple.Music", isMusicApp: true,
                                              isPlaying: false, hasTrack: false)
             let reported = [netease, safari, spotify, silent]
-            // The one in effect leads, whatever order the adapter reported in,
-            // and a browser that reports a track is a player like any other.
-            suite.expect(NotchDashboardLayout.playerIDs(sources: reported, inEffectPID: 31) == [31, 21, 41],
-                         "the player in effect, then the others that report a track, and no silent process")
-            suite.expect(NotchDashboardLayout.playerIDs(sources: reported, inEffectPID: nil) == [31, 21, 41],
-                         "with none in effect, every player that reports a track is on the page")
-            suite.expect(NotchDashboardLayout.playerIDs(sources: reported, inEffectPID: 21) == [21, 31, 41],
+            // A card is media being heard. The player in effect leads, and a
+            // browser that is playing is a player like any other; a player
+            // paused with its track still named, and a process with nothing at
+            // all, are not on the page.
+            suite.expect(NotchDashboardLayout.playerIDs(sources: reported, inEffectPID: 31) == [31, 21],
+                         "the player in effect, then the others that are playing, and no paused session")
+            suite.expect(NotchDashboardLayout.playerIDs(sources: reported, inEffectPID: nil) == [31, 21],
+                         "with none in effect, every player playing now is on the page")
+            suite.expect(NotchDashboardLayout.playerIDs(sources: reported, inEffectPID: 21) == [21, 31],
                          "the card above is the first, and the rest keep their order")
+            suite.expect(NotchDashboardLayout.playerIDs(sources: reported, inEffectPID: 41) == [31, 21],
+                         "a player in effect that has paused leads no card of its own")
+            suite.expect(NotchDashboardLayout.playerIDs(sources: [spotify], inEffectPID: 41).isEmpty,
+                         "a lone paused player leaves the page with no player card")
             // A page of four players is the whole list, and the fifth is not asked.
             let many = reported + [NotchPlaybackSource(pid: 61, bundleIdentifier: "com.apple.podcast",
                                                        isMusicApp: true, isPlaying: true, hasTrack: true)]
-            suite.expect(NotchDashboardLayout.playerIDs(sources: many, inEffectPID: 31) == [31, 21, 41, 61],
+            suite.expect(NotchDashboardLayout.playerIDs(sources: many, inEffectPID: 31) == [31, 21, 61],
                          "the page carries the players it has room for, in order")
             suite.expect(NotchDashboardLayout.playerIDs(sources: [], inEffectPID: 31).isEmpty,
                          "what the adapter does not report, the page does not draw")
+            // The same players reported in the same order answer the same way,
+            // and only the player in effect moving changes the order.
+            suite.expect(NotchDashboardLayout.playerIDs(sources: reported, inEffectPID: 31)
+                             == NotchDashboardLayout.playerIDs(sources: reported, inEffectPID: 31),
+                         "the same players in the same report give the same cards, every time")
+            // Playing with a track, and playing with none: a player that says
+            // it plays and names nothing has no card to draw.
+            let playingNothing = NotchPlaybackSource(pid: 71, bundleIdentifier: "com.apple.Music",
+                                                     isMusicApp: true, isPlaying: true, hasTrack: false)
+            suite.expect(NotchDashboardLayout.playerIDs(sources: [playingNothing], inEffectPID: 71).isEmpty,
+                         "a player playing nothing is given no card")
         }
 
         suite.run("closing the timer's card leaves every player's card") {

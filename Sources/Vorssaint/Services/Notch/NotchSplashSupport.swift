@@ -20,32 +20,64 @@ enum NotchSplashLayout {
     static let metricCornerRadius: CGFloat = 10
     /// The card's edge to its content, on every side alike.
     static let padding: CGFloat = 10
-    static let headerHeight: CGFloat = 18
-    static let headerSpacing: CGFloat = 8
+    static let headerHeight: CGFloat = 20
+    static let headerSpacing: CGFloat = 10
     /// The gap between the four readings: one gap, four columns, one row.
     static let metricSpacing: CGFloat = 8
-    /// A reading is a label, a figure and a line under it, so it is taller
-    /// than a row of text.
-    static let metricCardHeight: CGFloat = 76
-    static let labelSize: CGFloat = 8.5
+    /// The gap between the card's sections: the readings, the memory, the
+    /// trend, each a card of the reference.
+    static let sectionSpacing: CGFloat = 10
+    /// A reading is its name, its figure, its unit and the line of what it
+    /// has measured: a card of its own, and taller than a row of text.
+    static let metricCardHeight: CGFloat = 86
+    /// The line a metric's measurements draw, in the height of a thumb.
+    static let sparklineHeight: CGFloat = 22
+    /// The memory's card: its name, three numbers in three columns, and the
+    /// governor's bar under them.
+    static let memoryCardHeight: CGFloat = 92
+    /// The trend's card: its name, the caption of the period, thirty bars,
+    /// the dates, and the two names of the two colours.
+    static let trendCardHeight: CGFloat = 124
+    /// The bars themselves, between the caption of the period and the dates.
+    static let trendBarsHeight: CGFloat = 60
+    static let labelSize: CGFloat = 10
     static let valueSize: CGFloat = 22
-    static let footerSize: CGFloat = 9.5
-    static let headerSize: CGFloat = 12
+    static let footerSize: CGFloat = 10
+    static let headerSize: CGFloat = 13
     /// The mark that stands before the card's name, a little under the name's
     /// own size so the two read as one line.
-    static let titleIconSize: CGFloat = 11
+    static let titleIconSize: CGFloat = 13
     static let readingSize: CGFloat = 11
+    /// The memory card's three names, its figures, its units and its caption.
+    static let memoryLabelSize: CGFloat = 10
+    static let memoryValueSize: CGFloat = 18
+    static let memoryUnitSize: CGFloat = 10.5
+    static let sectionTitleSize: CGFloat = 11.5
+    static let captionSize: CGFloat = 10
+    /// The utilization bar, and the number beside it.
+    static let utilizationBarHeight: CGFloat = 8
     /// The card as the page and the section measure it: the header's line, the
-    /// gap, the four readings. The header is not underlined, so the card is
-    /// measured without a rule.
+    /// four readings, the memory, the trend, and the gaps between them.
     static var cardHeight: CGFloat {
         padding * 2 + headerHeight + headerSpacing + metricCardHeight
+            + sectionSpacing + memoryCardHeight
+            + sectionSpacing + trendCardHeight
     }
 
     /// The page: the ruler's row, the card under it, and the gap between.
     static var pageHeight: CGFloat {
         NotchLayout.timerRulerHeight + NotchLayout.rowSpacing + cardHeight
     }
+
+    /// The page before a session: the ruler's row, the mark and the words of
+    /// what to do next, and the gap between. Measured without the card, whose
+    /// charts, memory and trend have nothing to draw before a reading.
+    static var pageSetupHeight: CGFloat {
+        NotchLayout.timerRulerHeight + NotchLayout.rowSpacing + setupHeight
+    }
+
+    /// The mark, and the two lines that say what Start does and does not do.
+    static let setupHeight: CGFloat = 78
 
     /// The shortest page that stays usable: the ruler at its shortest, and
     /// the words that say what to do before Start.
@@ -448,12 +480,13 @@ enum NotchSplashEndpoint {
     /// The Splash server on this Mac, which is where the dashboard is asked
     /// to look before anyone has said otherwise.
     static let localHost = "127.0.0.1"
-    /// The key the Splash app on this Mac hands to the programs that speak to
-    /// it. The settings start with it so the dashboard works on a machine
-    /// that runs Splash of its own, and a key written into the settings takes
-    /// its place. It is kept with the settings, it is sent only to the address
-    /// the settings name, and it is never written on the screen.
-    static let localAPIKey = "sk-omlx-734TcXTQ2wgaKAV1Gvl8FD8t"
+    /// The name a machine's own Splash key is handed to the app by, in the
+    /// environment its session starts with. The app carries no key of its
+    /// own: a key belongs to the machine it runs on, in the settings the
+    /// person writes or in the environment the session starts with. The name
+    /// of the variable is public; its value never is - not on the screen,
+    /// not in a log, not in the source.
+    static let localAPIKeyEnvironment = "VOSSAINT_SPLASH_API_KEY"
 
     /// A port as it is written in the field a person types it in.
     static func portText(_ port: Int) -> String { String(port) }
@@ -531,29 +564,36 @@ enum NotchSplashTone: Equatable {
 
 /// The dashboard's numbers, thresholds and formatting.
 enum NotchSplashSupport {
-    static let defaultInterval = 2
+    /// The interval a dashboard with nothing set reads at.
+    static let defaultInterval = 1
     static let intervalRange = 1...10
+    /// How far back the four metric charts look: the last half hour of
+    /// readings, whatever the app has kept for longer.
+    static let chartWindowMinutes = 30
     /// A reading older than this many intervals is stale: the server stopped
     /// answering, and its last words are not evidence about the present.
     static let staleIntervalFactor = 3
 
-    /// How long the engine must have been quiet before a run of requests is
-    /// called over.
+    /// How long the engine must have been quiet before the run of work being
+    /// timed is called over.
     ///
-    /// The endpoint says nothing about tasks; it counts requests. A coding
+    /// The endpoint says nothing about tasks: it counts requests. A coding
     /// agent's task is a run of them, with a pause after each while it runs a
-    /// tool and a longer one while its client composes the next prompt.
-    /// Watching a real engine through a task of several turns, those pauses
-    /// reached twenty seconds, and the request counters moved inside the run
-    /// - so a request ending is not a task ending, and the only honest signal
-    /// is a quiet that has outlasted the pauses. One prompt answered on its
-    /// own is announced a minute after it was answered; a task that is really
-    /// running is not announced in the middle, which is the trade this window
-    /// makes.
-    static let taskQuiescenceSeconds: TimeInterval = 60
-    /// Quiet readings that must pass in a row, so the window is honoured at a
-    /// one-second interval and at a ten-second one alike.
-    static let taskQuiescenceReadings = 2
+    /// tool, waits for an approval, or composes the next prompt, and the
+    /// request counters move inside the run, so a request ending is not a run
+    /// ending and one pause is not the end of the work. The only signal the
+    /// endpoint gives is a quiet that has outlasted the pauses, so the window
+    /// is the engine's own idle-to-sleep span, ten minutes, and the app says
+    /// what it knows - the activity ended - rather than a completion it was
+    /// never told. Short idle gaps keep the clock running; a full ten minutes
+    /// of nothing stops it.
+    static let taskIdleSeconds: TimeInterval = 10 * 60
+    /// Quiet readings needed, one: the window is ten minutes, and waiting
+    /// through two of them would be twenty minutes of a clock that has
+    /// already stopped.
+    static let taskIdleReadings = 1
+    /// How often a long session re-applies the thirty-day keeping to the file.
+    static let historyCleanupInterval: TimeInterval = 6 * 60 * 60
 
     // MARK: Settings
 
@@ -574,26 +614,31 @@ enum NotchSplashSupport {
         interval(defaults.object(forKey: DefaultsKey.notchSplashIntervalSeconds) as? Int)
     }
 
-    /// The key a reading is sent with: the one written into the settings, and
-    /// the key this Mac's Splash app hands out when nothing has been written.
-    /// The settings keep it and never show it.
-    static func savedAPIKey(in defaults: UserDefaults = .standard) -> String {
-        let saved = (defaults.string(forKey: DefaultsKey.notchSplashAPIKey) ?? "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return saved.isEmpty ? NotchSplashEndpoint.localAPIKey : saved
+    /// The key a reading is sent with: the one written into the settings, or
+    /// the machine's own key handed to the app in the environment. The settings
+    /// keep it and never show it; it goes only to the address the settings name.
+    static func savedAPIKey(in defaults: UserDefaults = .standard,
+                            environment: [String: String] = ProcessInfo.processInfo.environment) -> String {
+        let saved = trimmedKey(defaults.string(forKey: DefaultsKey.notchSplashAPIKey))
+        if !saved.isEmpty { return saved }
+        return trimmedKey(environment[NotchSplashEndpoint.localAPIKeyEnvironment])
     }
 
     /// Whether a key is in use, which is all the settings say about it.
-    static func hasAPIKey(in defaults: UserDefaults = .standard) -> Bool {
-        !savedAPIKey(in: defaults).isEmpty
+    static func hasAPIKey(in defaults: UserDefaults = .standard,
+                          environment: [String: String] = ProcessInfo.processInfo.environment) -> Bool {
+        !savedAPIKey(in: defaults, environment: environment).isEmpty
     }
 
-    /// Only a key written by hand can be taken back; the one the app starts
-    /// with comes back when the field is cleared.
+    /// Only a key written into the settings can be taken back from them. The
+    /// machine's own key, handed over in the environment, stays where it was
+    /// given and comes back when the field is cleared.
     static func hasWrittenAPIKey(in defaults: UserDefaults = .standard) -> Bool {
-        let saved = (defaults.string(forKey: DefaultsKey.notchSplashAPIKey) ?? "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return !saved.isEmpty && saved != NotchSplashEndpoint.localAPIKey
+        !trimmedKey(defaults.string(forKey: DefaultsKey.notchSplashAPIKey)).isEmpty
+    }
+
+    private static func trimmedKey(_ value: String?) -> String {
+        (value ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     static func endpoint(in defaults: UserDefaults = .standard) -> URL? {
@@ -692,8 +737,11 @@ enum NotchSplashSupport {
     /// is an alarm is spilling and reservations that failed.
     static func kvTone(pagesFree: Int?, pagesTotal: Int?, spilling: Bool,
                        reservationFailures: Int?) -> NotchSplashTone {
+        // A server that has run out of pages, and a server whose pages have
+        // gone past being gone, are both out of room: the first spills, the
+        // second says the arithmetic itself has broken.
         if (reservationFailures ?? 0) > 0 || spilling { return .red }
-        if let pagesFree, pagesFree < 0 { return .amber }
+        if let pagesFree, pagesFree < 0 { return .red }
         if let pagesFree, pagesFree <= pagesScarceMinimum { return .amber }
         if let pagesFree, let pagesTotal, pagesTotal > 0,
            Double(pagesFree) / Double(pagesTotal) < pagesScarceFraction { return .amber }
@@ -734,9 +782,17 @@ enum NotchSplashSupport {
 
     /// Time to first token, in seconds with its unit.
     static func ttftText(_ seconds: Double?, locale: Locale = locale) -> String {
-        guard let seconds, seconds.isFinite else { return placeholder }
+        guard let parts = ttftParts(seconds, locale: locale) else { return placeholder }
+        return parts.value + " " + parts.unit
+    }
+
+    /// The same figure split into its number and its unit, so a card can set
+    /// the number at its own size and the unit at a smaller one. The two
+    /// joined are what `ttftText` writes.
+    static func ttftParts(_ seconds: Double?, locale: Locale = locale) -> (value: String, unit: String)? {
+        guard let seconds, seconds.isFinite else { return nil }
         let format = seconds >= 10 ? "%.0f" : "%.1f"
-        return String(format: format, locale: locale, seconds) + " s"
+        return (String(format: format, locale: locale, seconds), "s")
     }
 
     static func ttftSeconds(milliseconds: Double?) -> Double? {
@@ -934,9 +990,12 @@ struct NotchSplashTaskTracker {
 
     private let quiescence: TimeInterval
     private let quietReadingsNeeded: Int
+    /// The counters of the reading before this one, which is how a run is
+    /// noticed at all when the server answers faster than the interval.
+    private var lastRequests: NotchSplashStatus.Requests?
 
-    init(quiescence: TimeInterval = NotchSplashSupport.taskQuiescenceSeconds,
-         quietReadingsNeeded: Int = NotchSplashSupport.taskQuiescenceReadings) {
+    init(quiescence: TimeInterval = NotchSplashSupport.taskIdleSeconds,
+         quietReadingsNeeded: Int = NotchSplashSupport.taskIdleReadings) {
         self.quiescence = quiescence
         self.quietReadingsNeeded = max(1, quietReadingsNeeded)
     }
@@ -945,6 +1004,7 @@ struct NotchSplashTaskTracker {
     /// reading of the counters.
     mutating func begin() {
         phase = .idle
+        lastRequests = nil
         baseline = nil
         firstQuietAt = nil
         quietReadings = 0
@@ -990,6 +1050,22 @@ struct NotchSplashTaskTracker {
         }
     }
 
+    /// Whether the engine's counters moved since the reading before: a request
+    /// completed, failed, or cancelled. A generation shorter than the interval
+    /// between readings never appears as an active request in any reading, and
+    /// its counters are all that is left of it, so the counters are taken as
+    /// work too. A first reading has no reading before it and says nothing.
+    private func countersGrew(_ incoming: NotchSplashStatus.Requests) -> Bool {
+        guard let last = lastRequests else { return false }
+        func grew(_ before: Int?, _ after: Int?) -> Bool {
+            guard let before, let after else { return false }
+            return after > before
+        }
+        return grew(last.completed, incoming.completed)
+            || grew(last.failed, incoming.failed)
+            || grew(last.cancelled, incoming.cancelled)
+    }
+
     /// One reading, taken at `date`.
     ///
     /// Work seen while nothing is being timed opens a run. Work seen while a
@@ -1008,14 +1084,16 @@ struct NotchSplashTaskTracker {
     mutating func observe(_ snapshot: NotchSplashSnapshot, at date: Date) -> Event? {
         let status = snapshot.status
         isSpilling = spillsGrew(status.kv.spillCount)
+        let work = status.hasWork || countersGrew(status.requests)
+        lastRequests = status.requests
         switch phase {
         case .idle, .finished:
-            guard status.hasWork else { return nil }
+            guard work else { return nil }
             return start(id: status.activeRequestIDs.first ?? NotchSplashTaskTracker.unnumbered,
                          at: date, snapshot: snapshot)
 
         case .running(let id, let startedAt):
-            if status.hasWork {
+            if work {
                 firstQuietAt = nil
                 quietReadings = 0
                 return nil
@@ -1190,6 +1268,11 @@ final class NotchSplashService: ObservableObject {
     @Published private(set) var failure: NotchSplashFailure?
     /// The interval the polling runs at, in whole seconds.
     @Published private(set) var intervalSeconds: Int
+    /// The measured past: the readings the four charts draw, and the daily
+    /// tokens the trend draws. Kept locally for thirty days, and published as
+    /// it grows, so the cards draw what has been measured and not a shape
+    /// invented for the moment.
+    @Published private(set) var history = NotchSplashHistory.empty
 
     /// A reading of the server's spilling and reservation pressure, which
     /// only the tracker can tell from two readings in a row.
@@ -1228,6 +1311,12 @@ final class NotchSplashService: ObservableObject {
     private let clock: () -> Date
     private let strings: () -> NotchSplashStrings
     private let deliver: (Notice) -> Void
+    /// The history on disk: the readings are recorded as they arrive, the file
+    /// is written at most twice a minute, and thirty days is kept.
+    private let historyStore: NotchSplashHistoryStore
+    /// The last time the file was pruned to its thirty days, so a session that
+    /// runs for weeks prunes itself and not only at its start.
+    private var historyCleaned: Date?
 
     /// A session with its world handed in, which is how a test runs one.
     init(read: @escaping StatusReader,
@@ -1238,7 +1327,8 @@ final class NotchSplashService: ObservableObject {
          keepInterval: @escaping (Int) -> Void = { _ in },
          clock: @escaping () -> Date = Date.init,
          strings: @escaping () -> NotchSplashStrings = { FeatureStrings.notchSplash(.enUS) },
-         deliver: @escaping (Notice) -> Void = { _ in }) {
+         deliver: @escaping (Notice) -> Void = { _ in },
+         history: NotchSplashHistoryStore = NotchSplashHistoryStore()) {
         self.read = read
         self.address = address
         self.enabled = enabled
@@ -1248,6 +1338,7 @@ final class NotchSplashService: ObservableObject {
         self.clock = clock
         self.strings = strings
         self.deliver = deliver
+        historyStore = history
         intervalSeconds = savedInterval()
     }
 
@@ -1304,6 +1395,9 @@ final class NotchSplashService: ObservableObject {
         lastActiveAt = nil
         failure = nil
         isMonitoring = true
+        // What was measured before is read once, here, and pruned to its
+        // thirty days; from the first reading on, the file only grows.
+        openHistory(at: clock())
         startLoop()
     }
 
@@ -1322,6 +1416,8 @@ final class NotchSplashService: ObservableObject {
         lastOutcome = nil
         lastActiveAt = nil
         failure = nil
+        // Whatever has been measured is written down on the way out.
+        historyStore.flush(at: clock())
     }
 
     /// A finished task cleared, so the page is empty again.
@@ -1359,6 +1455,31 @@ final class NotchSplashService: ObservableObject {
         // read the new one, and let the tracker's instance rule decide what
         // the old request was. Nothing else about the settings ends a session
         // that a person started.
+    }
+
+    // MARK: The measured past
+
+    /// Reads the file, keeps what is inside its thirty days, and lets the
+    /// counters begin from the reading that is about to arrive, so the tokens
+    /// of the time the app was away are not written as a day's work.
+    private func openHistory(at date: Date) {
+        historyStore.load(now: date)
+        historyStore.clean(now: date)
+        history = historyStore.history
+        historyCleaned = date
+    }
+
+    /// Records one reading, and prunes the file again when a session has run
+    /// long enough that a month of readings has to be thinned on its way in.
+    private func recordHistory(snapshot: NotchSplashSnapshot, at date: Date) {
+        historyStore.record(status: snapshot.status, instanceKey: snapshot.instanceKey, at: date)
+        history = historyStore.history
+        if let cleaned = historyCleaned,
+           date.timeIntervalSince(cleaned) >= NotchSplashSupport.historyCleanupInterval {
+            historyStore.clean(now: date)
+            history = historyStore.history
+            historyCleaned = date
+        }
     }
 
     // MARK: The loop
@@ -1441,6 +1562,10 @@ final class NotchSplashService: ObservableObject {
     private func apply(_ snapshot: NotchSplashSnapshot, at date: Date) {
         self.snapshot = snapshot
         failure = nil
+        // The reading is history from this moment on: the four charts draw
+        // what has been recorded, and the day's tokens are the difference this
+        // reading's counters make against the last.
+        recordHistory(snapshot: snapshot, at: date)
         if snapshot.status.hasWork { lastActiveAt = date }
         let event = tracker.observe(snapshot, at: date)
         phase = tracker.phase
@@ -1472,8 +1597,12 @@ final class NotchSplashService: ObservableObject {
         // froze at - not the time the notice happens to be sent.
         let spoken = NotchSplashSupport.taskClock(max(0, elapsed))
         if announcements.take(id: key, outcome: outcome) {
-            deliver(Notice(title: words.notifyCompletedTitle,
-                           body: words.notifyCompletedBody(spoken)))
+            // The counters completed, and the endpoint said so. What the app
+            // says is what it knows: the activity ended, outlasted by a quiet
+            // of the whole window, and how long it lasted. It does not claim
+            // a task was completed, which the endpoint never reported.
+            deliver(Notice(title: words.notifyActivityEndedTitle,
+                           body: words.notifyActivityEndedBody(spoken)))
         } else if announcements.takeUnsuccessful(id: key, outcome: outcome) {
             deliver(Notice(title: outcome == .failed ? words.notifyFailedTitle : words.notifyCancelledTitle,
                            body: outcome == .failed ? words.notifyFailedBody : words.notifyCancelledBody))

@@ -201,34 +201,56 @@ private struct NotchAgentGlyphBridge: NSViewRepresentable {
 
 /// Stacked bars, one per bucket, each split by agent. Hovering a bar reports
 /// it so the card can name the day and its value.
-struct NotchAgentBars: View {
-    let buckets: [AgentBucket]
-    let providers: [AgentProvider]
-    let byCost: Bool
-    @Binding var hovered: Date?
+/// One bar per entry, stacked in the order the series are given: the shape
+/// both trend charts draw, the agents' by provider and the dashboard's by
+/// token. A day with nothing in it is a two-point capsule, so the row of bars
+/// keeps its rhythm and no bar is invented out of a zero.
+struct NotchTrendBars: View {
+    /// A series: its colour, and the height of each bar.
+    struct Series {
+        let tint: Color
+        let values: [Double]
+    }
+
+    let series: [Series]
+    /// The day each entry stands for, oldest first, for the hover.
+    var dates: [Date] = []
+    /// Whether hovering a bar dims the others, as the agents' chart does.
+    var hoverable = false
+    var hovered: Date? = nil
+    var onHover: (Date?) -> Void = { _ in }
+
+    private var count: Int { max(1, series.first?.values.count ?? 0) }
 
     var body: some View {
-        let values = buckets.map { bucket in providers.map { bucket.byProvider[$0]?.weight(byCost: byCost) ?? 0 } }
-        let peak = max(values.map { $0.reduce(0, +) }.max() ?? 0, .leastNonzeroMagnitude)
+        let totals = (0..<count).map { index in
+            series.map { $0.values.indices.contains(index) ? $0.values[index] : 0 }.reduce(0, +)
+        }
+        let peak = max(totals.max() ?? 0, .leastNonzeroMagnitude)
         GeometryReader { proxy in
-            let count = CGFloat(max(1, buckets.count))
-            let gap: CGFloat = count > 24 ? 2 : 4
-            let width = max(1, (proxy.size.width - gap * (count - 1)) / count)
+            let bars = CGFloat(max(1, count))
+            let gap: CGFloat = bars > 24 ? 2 : 4
+            let width = max(1, (proxy.size.width - gap * (bars - 1)) / bars)
             HStack(alignment: .bottom, spacing: gap) {
-                ForEach(Array(buckets.enumerated()), id: \.element.id) { index, bucket in
-                    let parts = values[index]
-                    let total = parts.reduce(0, +)
+                ForEach(0..<count, id: \.self) { index in
+                    let total = totals[index]
+                    let day = dates.indices.contains(index) ? dates[index] : nil
                     VStack(spacing: 0) {
                         Spacer(minLength: 0)
                         if total <= 0 {
                             Capsule().fill(.white.opacity(0.1)).frame(height: 2)
                         } else {
                             VStack(spacing: 0) {
-                                ForEach(providers.indices.reversed(), id: \.self) { slot in
-                                    if parts[slot] > 0 {
+                                // The first series is drawn at the top, which
+                                // is how both charts read their stacks.
+                                ForEach(series.indices.reversed(), id: \.self) { slot in
+                                    let value = series[slot].values.indices.contains(index)
+                                        ? series[slot].values[index] : 0
+                                    if value > 0 {
                                         Rectangle()
-                                            .fill(providers[slot].tint.opacity(hovered == nil || hovered == bucket.start ? 0.95 : 0.5))
-                                            .frame(height: max(1, proxy.size.height * parts[slot] / peak))
+                                            .fill(series[slot].tint.opacity(
+                                                !hoverable || hovered == nil || hovered == day ? 0.95 : 0.5))
+                                            .frame(height: max(1, proxy.size.height * value / peak))
                                     }
                                 }
                             }
@@ -238,12 +260,33 @@ struct NotchAgentBars: View {
                     .frame(width: width, height: proxy.size.height)
                     .contentShape(Rectangle())
                     .onHover { inside in
-                        if inside { hovered = bucket.start } else if hovered == bucket.start { hovered = nil }
+                        guard hoverable, let day else { return }
+                        if inside { onHover(day) } else if hovered == day { onHover(nil) }
                     }
                 }
             }
         }
         .accessibilityHidden(true)
+    }
+}
+
+struct NotchAgentBars: View {
+    let buckets: [AgentBucket]
+    let providers: [AgentProvider]
+    let byCost: Bool
+    @Binding var hovered: Date?
+
+    var body: some View {
+        NotchTrendBars(
+            series: providers.map { provider in
+                NotchTrendBars.Series(tint: provider.tint,
+                                      values: buckets.map { $0.byProvider[provider]?.weight(byCost: byCost) ?? 0 })
+            },
+            dates: buckets.map(\.start),
+            hoverable: true,
+            hovered: hovered,
+            onHover: { hovered = $0 }
+        )
     }
 }
 

@@ -291,13 +291,22 @@ enum NotchDashboardLayout {
     /// process. Nothing about a card's control is in this order, and a card is
     /// never listed twice: using a control on the card below the first sends
     /// that player a command, and the cards stay where they were.
+    ///
+    /// Only a player with media being heard is on the page. A player paused,
+    /// stopped, or holding a recording with nothing running is left out, so a
+    /// card is a thing happening now and not a session from the last hour, and
+    /// a player in effect that has gone quiet does not lead a page of nothing.
+    /// With more than one playing, the order is fixed: the one in effect, then
+    /// the rest as the adapter named them, which is the same answer every time
+    /// the same players are reported.
     static func playerIDs(sources: [NotchPlaybackSource], inEffectPID: Int?,
                           limit: Int = NotchDashboardLayout.maxPlayers) -> [Int] {
         var ids: [Int] = []
-        if let inEffectPID, inEffectPID > 0, sources.contains(where: { Int($0.pid) == inEffectPID }) {
+        if let inEffectPID, inEffectPID > 0,
+           sources.contains(where: { Int($0.pid) == inEffectPID && $0.isActivelyPlaying }) {
             ids.append(inEffectPID)
         }
-        for source in sources where source.isPlaying || source.hasTrack {
+        for source in sources where source.isActivelyPlaying {
             let pid = Int(source.pid)
             guard pid > 0, !ids.contains(pid) else { continue }
             ids.append(pid)

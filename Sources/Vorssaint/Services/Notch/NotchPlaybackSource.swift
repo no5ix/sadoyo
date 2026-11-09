@@ -17,6 +17,12 @@ struct NotchPlaybackSource: Equatable {
     /// The player's own state, which a second read of the player can correct.
     var isPlaying: Bool
     let hasTrack: Bool
+
+    /// Whether this player has media being heard: it says it is playing, and
+    /// it has a recording to play. A session left paused, stopped, or holding
+    /// a recording with nothing running is not media being heard, and the
+    /// island draws no card for it; a player that says it is playing with
+    /// nothing to play has nothing to draw either.
     var displayName: String? = nil
     /// What the player reports of its own recording, read from that player's
     /// path: its card draws these, never the words of the player in effect.
@@ -35,6 +41,8 @@ struct NotchPlaybackSource: Equatable {
     /// players travel in the same line as the readings, so each is kept to a
     /// size a watched stream can repeat.
     static let maximumArtworkBytes = 1_024 * 1_024
+
+    var isActivelyPlaying: Bool { isPlaying && hasTrack }
 
     var selection: Selection { Selection(pid: pid, bundleIdentifier: bundleIdentifier) }
 

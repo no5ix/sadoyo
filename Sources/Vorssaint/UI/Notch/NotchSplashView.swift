@@ -129,12 +129,25 @@ struct NotchSplashSettingsControls: View {
 
 // MARK: - The card
 
-/// The dashboard: one line of status over four readings in one row.
+/// The dashboard's card, of the reference's four parts in the reference's
+/// order: the header, four metric charts in one row, the memory and its
+/// governor, and the trend of thirty days.
 ///
 /// The page and the dashboard's Live Activities section draw this one view, so
 /// the same numbers, the same words, the same thresholds and the same colours
 /// answer in both places. Nothing in the view reads a server: it is given a
-/// reading, and it says what it can from what the reading carries.
+/// reading and the recorded past, and it says what it can from those.
+///
+/// Every part is drawn from what has been measured. A metric the server has
+/// not answered shows no line and says it has nothing; a day the app was not
+/// measuring has no bar; a period before the app began measuring is left empty
+/// rather than given a shape. The colours are kept honest in a second sense
+/// too: a figure takes the colour of how it reads, a chart line keeps the
+/// colour of the metric it belongs to, and the two are never merged.
+///
+/// The card is an interactive card of the dashboard's own kind: the pointer
+/// lights its surface, as it lights the players' and the timer's cards, and a
+/// click on it opens the section's page.
 struct NotchSplashDashboardCard: View {
     let snapshot: NotchSplashSnapshot?
     let phase: NotchSplashTaskTracker.Phase
@@ -142,6 +155,9 @@ struct NotchSplashDashboardCard: View {
     var elapsed: TimeInterval = 0
     var isMonitoring = false
     var isSpilling = false
+    /// The measured past: the readings the four charts draw, and the daily
+    /// tokens the trend draws.
+    var history: NotchSplashHistory = .empty
     /// Why the reading stopped answering, while it is being watched.
     var failure: NotchSplashFailure?
     /// The server being read, named when it does not answer.
@@ -149,21 +165,39 @@ struct NotchSplashDashboardCard: View {
     /// The way out of the session, offered in the header as the reference draws it.
     var onStop: (() -> Void)?
     var compact = false
+    /// Whether a click on the card leads somewhere. On the section's own page
+    /// the card has nowhere to go, and a card should not promise a journey it
+    /// cannot take.
+    var canOpenSection = true
+    /// The moment the charts end, so the cards and the clock answer the same
+    /// instant.
+    var now: Date = Date()
 
     @ObservedObject private var l10n = L10n.shared
+    @ObservedObject private var notch = NotchService.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var hovered = false
     private var text: NotchSplashStrings { FeatureStrings.notchSplash(l10n.language) }
     private var status: NotchSplashStatus? { snapshot?.status }
+    private var metrics: NotchSplashStatus.Metrics? { status?.metrics }
+    private var series: [NotchSplashSample] { history.series(endingAt: now) }
+    private var days: [NotchSplashDay] { history.trend(now: now) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: NotchSplashLayout.headerSpacing) {
+        VStack(alignment: .leading, spacing: NotchSplashLayout.sectionSpacing) {
             header
-            metrics
+            charts
+            memoryCard
+            trendCard
         }
         .padding(NotchSplashLayout.padding)
         .frame(maxWidth: .infinity, alignment: .leading)
         .modifier(NotchControlSurface(cornerRadius: NotchSplashLayout.cornerRadius,
-                                      interactive: false, fillOpacity: NotchDashboardLayout.fillOpacity))
+                                      selected: hovered, interactive: canOpenSection,
+                                      fillOpacity: NotchDashboardLayout.fillOpacity))
+        .contentShape(RoundedRectangle(cornerRadius: NotchSplashLayout.cornerRadius, style: .continuous))
+        .onHover { hovered = $0 }
+        .modifier(NotchSplashCardTap(enabled: canOpenSection) { notch.select(.splash) })
         .accessibilityElement(children: .contain)
         .accessibilityLabel(text.title)
         .accessibilityIdentifier("notch.splash.card")
@@ -171,23 +205,20 @@ struct NotchSplashDashboardCard: View {
 
     // MARK: The header, on one line
 
-    /// The name of the dashboard on the left, and everything the server is
-    /// doing on the same line: the tokens in and out, the cache and the
-    /// memory, the task's clock, and the way out.
+    /// The dashboard's mark and name on the left, and on the same line the
+    /// tokens the engine has moved, the task's clock, and the lit circle that
+    /// ends the reading.
     ///
-    /// The line is offered in widths, most wanted first. While a reading is
-    /// not coming, the reason for that outranks the cumulative tokens: a
-    /// person reading the card needs to know what the page is doing before
-    /// they need the totals. A narrow surface gives up the memory group, then
-    /// the tokens, before it gives up the line itself, so the card never
-    /// clips and never stacks.
+    /// The mark before the name is the one the agents' Resets button wears, as
+    /// the reference draws it. The words the reference does not draw are not
+    /// drawn here either: the old line of compact resource values lives in the
+    /// memory card now, where there is room for all three of them, their units
+    /// and their bar.
     private var header: some View {
         let clock = NotchSplashSupport.taskClock(elapsed)
         return HStack(spacing: 6) {
             HStack(spacing: 4) {
-                // The dashboard's own mark, the one its tile in the Explorer
-                // wears, so the card and the section are the same thing.
-                Image(systemName: NotchModule.splash.symbol)
+                Image(systemName: NotchAgentCard.resets.symbol)
                     .font(.system(size: compact ? NotchSplashLayout.titleIconSize - 1
                                                 : NotchSplashLayout.titleIconSize,
                                   weight: .semibold))
@@ -203,12 +234,13 @@ struct NotchSplashDashboardCard: View {
             .layoutPriority(1)
             Spacer(minLength: 6)
             if failure != nil {
+                // While a reading is not coming, the reason outranks totals
+                // that are certainly out of date.
                 reasonLine(clock)
             } else {
                 ViewThatFits(in: .horizontal) {
-                    HStack(spacing: 8) { readings; tokens; memory; clockMark(clock) }
-                    HStack(spacing: 8) { tokens; memory; clockMark(clock) }
                     HStack(spacing: 8) { tokens; clockMark(clock) }
+                    HStack(spacing: 8) { tokens }
                     clockMark(clock)
                 }
             }
@@ -223,112 +255,55 @@ struct NotchSplashDashboardCard: View {
     /// reason first, and only as a last resort no reason at all.
     private func reasonLine(_ clock: String) -> some View {
         ViewThatFits(in: .horizontal) {
-            HStack(spacing: 8) { readings; tokens; memory; clockMark(clock) }
-            HStack(spacing: 8) { readings; memory; clockMark(clock) }
-            HStack(spacing: 8) { readings; clockMark(clock) }
+            HStack(spacing: 8) { reason; tokens; clockMark(clock) }
+            HStack(spacing: 8) { reason; clockMark(clock) }
             HStack(spacing: 8) { tokens; clockMark(clock) }
+            reason
             clockMark(clock)
         }
     }
 
-    /// The reading's own state, said once: what the polling is doing now.
-    @ViewBuilder private var readings: some View {
-        if let failure {
-            Text(failureText(failure))
-                .font(.system(size: NotchSplashLayout.readingSize))
-                .foregroundStyle(NotchSplashPalette.amber)
-                .lineLimit(1)
-                .help(failureText(failure))
-        } else if isMonitoring {
-            HStack(spacing: 4) {
-                Image(systemName: "arrow.triangle.2.circlepath")
-                    .font(.system(size: 9, weight: .semibold))
-                Text(text.monitoring)
-                    .font(.system(size: NotchSplashLayout.readingSize, weight: .medium))
-            }
-            .foregroundStyle(NotchSplashPalette.green)
+    /// Why the reading is not coming, in the room the line has for it.
+    private var reason: some View {
+        Text(failureText(failure ?? .unreachable))
+            .font(.system(size: 9.5))
+            .foregroundStyle(.white.opacity(0.68))
             .lineLimit(1)
-            .accessibilityLabel(text.monitoring)
-        }
+            .truncationMode(.tail)
+            .fixedSize()
     }
 
-    /// Tokens in and out, as the reference writes them: an up arrow and a
-    /// down arrow, in blue and in green.
+    /// The cumulative tokens, up for the in and down for the out, in the two
+    /// colours the trend uses for the same two things.
     @ViewBuilder private var tokens: some View {
-        if let status {
-            HStack(spacing: 5) {
-                tokenMark("arrow.up", NotchSplashSupport.tokensText(status.metrics.prefillInputTokens),
-                          NotchSplashPalette.blue, text.inputTokens)
-                tokenMark("arrow.down", NotchSplashSupport.tokensText(status.metrics.decodeOutputTokens),
-                          NotchSplashPalette.green, text.outputTokens)
+        if let input = metrics?.prefillInputTokens, let output = metrics?.decodeOutputTokens {
+            HStack(spacing: 8) {
+                tokenPair(symbol: "arrow.up", value: NotchSplashSupport.tokensText(input),
+                          tint: NotchSplashPalette.blue, name: text.inputTokens)
+                tokenPair(symbol: "arrow.down", value: NotchSplashSupport.tokensText(output),
+                          tint: NotchSplashPalette.green, name: text.outputTokens)
             }
-        }
-    }
-
-    private func tokenMark(_ symbol: String, _ value: String, _ color: Color, _ label: String) -> some View {
-        HStack(spacing: 1) {
-            Image(systemName: symbol).font(.system(size: 8, weight: .heavy))
-            Text(value).font(.system(size: NotchSplashLayout.readingSize, weight: .semibold))
-                .monospacedDigit()
-        }
-        .foregroundStyle(color)
-        .lineLimit(1)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(label)
-        .accessibilityValue(value)
-    }
-
-    /// The cache's own bytes, the memory in use, and the governor's limit:
-    /// three numbers, and the unit on the last, as the reference writes them.
-    ///
-    /// The first two are written in purple and the limit in orange, and each
-    /// carries its own warning colour: the cache when its pages run short,
-    /// the charge when the governor is nearly spent.
-    @ViewBuilder private var memory: some View {
-        if let status, let memory = NotchSplashHeaderMemory(status: status) {
-            HStack(spacing: 3) {
-                Text(memory.active)
-                    .foregroundStyle(NotchSplashPalette.tone(
-                        NotchSplashSupport.kvTone(pagesFree: status.kv.pagesFree,
-                                                  pagesTotal: status.kv.pagesTotal,
-                                                  spilling: isSpilling,
-                                                  reservationFailures: status.kv.reservationFailures)))
-                Text("/").foregroundStyle(.white.opacity(0.4))
-                Text(memory.used)
-                    .foregroundStyle(NotchSplashPalette.tone(
-                        NotchSplashSupport.governorUtilizationTone(
-                            NotchSplashSupport.governorUtilization(chargedBytes: status.governor.chargedBytes,
-                                                                   limitBytes: status.governor.limitBytes))))
-                Text("/").foregroundStyle(.white.opacity(0.4))
-                Text(memory.limit)
-                    .foregroundStyle(NotchSplashPalette.tone(headroomTone(status),
-                                                             reference: NotchSplashPalette.orange))
-                if let unit = memory.unit {
-                    Text(unit).foregroundStyle(NotchSplashPalette.tone(headroomTone(status),
-                                                                       reference: NotchSplashPalette.orange))
-                }
-            }
-            .font(.system(size: NotchSplashLayout.readingSize, weight: .medium))
-            .monospacedDigit()
-            .lineLimit(1)
+            .font(.system(size: compact ? NotchSplashLayout.readingSize - 1.5 : NotchSplashLayout.readingSize,
+                          weight: .medium))
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel([text.kvCache, text.memoryUsed, text.governorLimit]
-                .joined(separator: " / "))
-            .accessibilityValue(memory.spoken)
-            .help("\(text.kvCache) \(memory.active) / \(text.memoryUsed) \(memory.used) / \(text.governorLimit) \(memory.limit)")
+            .accessibilityLabel("\(text.inputTokens) \(NotchSplashSupport.tokensText(input)), "
+                + "\(text.outputTokens) \(NotchSplashSupport.tokensText(output))")
         }
     }
 
-    /// How close the governor's charge sits to its limit, told by the colour
-    /// of the limit itself: orange while there is room, amber and red as the
-    /// room goes.
-    private func headroomTone(_ status: NotchSplashStatus) -> NotchSplashTone {
-        NotchSplashSupport.memoryPressureTone(headroomPercent: NotchSplashSupport.governorHeadroom(
-            chargedBytes: status.governor.chargedBytes, limitBytes: status.governor.limitBytes))
+    private func tokenPair(symbol: String, value: String, tint: Color, name: String) -> some View {
+        HStack(spacing: 3) {
+            Image(systemName: symbol)
+                .font(.system(size: 8, weight: .semibold))
+                .accessibilityHidden(true)
+            Text(value).monospacedDigit()
+        }
+        .foregroundStyle(tint)
+        .accessibilityLabel(name)
     }
 
-    /// The task's clock. It belongs to the task: nothing at all before a
-    /// request is seen, running while it is, frozen at its length after.
+    /// The task's clock. It belongs to the task: nothing at all before the
+    /// engine has work, running while it does, frozen at its length after.
     private func clockMark(_ value: String) -> some View {
         Group {
             if case .running(_, let startedAt) = phase, isMonitoring {
@@ -368,62 +343,195 @@ struct NotchSplashDashboardCard: View {
         }
     }
 
-    // MARK: The four readings, in one row
+    // MARK: The four charts, in one row
 
-    private var metrics: some View {
-        HStack(spacing: NotchSplashLayout.metricSpacing) {
-            NotchSplashMetricCard(
-                label: text.decode,
-                value: NotchSplashSupport.speedText(status?.metrics.decodeTokensPerSecond),
-                unit: text.tokensPerSecond,
-                tone: NotchSplashSupport.decodeTone(status?.metrics.decodeTokensPerSecond))
-            NotchSplashMetricCard(
-                label: text.prefill,
-                value: NotchSplashSupport.speedText(status?.metrics.prefillTokensPerSecond),
-                unit: text.tokensPerSecond,
-                tone: NotchSplashSupport.prefillTone(status?.metrics.prefillTokensPerSecond))
-            NotchSplashMetricCard(
-                label: text.ttft,
-                value: NotchSplashSupport.ttftText(
-                    NotchSplashSupport.ttftSeconds(milliseconds: status?.metrics.ttftMilliseconds)),
-                unit: text.timeToFirstToken,
-                tone: NotchSplashSupport.ttftTone(
-                    NotchSplashSupport.ttftSeconds(milliseconds: status?.metrics.ttftMilliseconds)))
-            NotchSplashMetricCard(
-                label: text.cacheHitRate,
-                value: NotchSplashSupport.percentText(
-                    NotchSplashSupport.cacheHitPercent(hits: status?.cache.hits,
-                                                       requests: status?.cache.requests,
-                                                       reportedRate: status?.cache.reportedRate)),
-                tone: NotchSplashSupport.cacheTone(
-                    NotchSplashSupport.cacheHitPercent(hits: status?.cache.hits,
-                                                       requests: status?.cache.requests,
-                                                       reportedRate: status?.cache.reportedRate))) {
+    /// Four cards, one row: the speed of the decode, the speed of the prefill,
+    /// the first token's time, and the cache's hits. Each line keeps its
+    /// metric's colour and each figure takes the colour of how it reads, so a
+    /// card that reads badly is not also drawn in a colour that says so twice.
+    private var charts: some View {
+        let decode = metrics?.decodeTokensPerSecond
+        let prefill = metrics?.prefillTokensPerSecond
+        let ttft = NotchSplashSupport.ttftSeconds(milliseconds: metrics?.ttftMilliseconds)
+        let cache = NotchSplashSupport.cacheHitPercent(hits: status?.cache.hits,
+                                                      requests: status?.cache.requests,
+                                                      reportedRate: status?.cache.reportedRate)
+        return HStack(spacing: NotchSplashLayout.metricSpacing) {
+            NotchSplashMetricCard(title: text.decode,
+                                  values: series.compactMap(\.decode),
+                                  line: NotchSplashPalette.orange,
+                                  value: NotchSplashSupport.speedText(decode),
+                                  unit: decode == nil ? nil : text.tokensPerSecond,
+                                  tone: NotchSplashSupport.decodeTone(decode),
+                                  empty: text.noMeasurements)
+            NotchSplashMetricCard(title: text.prefill,
+                                  values: series.compactMap(\.prefill),
+                                  line: NotchSplashPalette.blue,
+                                  value: NotchSplashSupport.speedText(prefill),
+                                  unit: prefill == nil ? nil : text.tokensPerSecond,
+                                  tone: NotchSplashSupport.prefillTone(prefill),
+                                  empty: text.noMeasurements)
+            NotchSplashMetricCard(title: text.ttft,
+                                  values: series.compactMap(\.ttftSeconds),
+                                  line: NotchSplashPalette.blue,
+                                  value: NotchSplashSupport.ttftParts(ttft)?.value,
+                                  unit: NotchSplashSupport.ttftParts(ttft)?.unit,
+                                  tone: NotchSplashSupport.ttftTone(ttft),
+                                  empty: text.noMeasurements)
+            NotchSplashMetricCard(title: text.cacheHitRate,
+                                  values: series.compactMap(\.cachePercent),
+                                  line: NotchSplashPalette.green,
+                                  value: NotchSplashSupport.percentText(cache),
+                                  unit: nil,
+                                  tone: NotchSplashSupport.cacheTone(cache),
+                                  empty: text.noMeasurements) {
                 counts
             }
         }
         .frame(height: NotchSplashLayout.metricCardHeight)
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel(text.title)
     }
 
-    /// The cache's counters under its rate: the hits and the requests, both
-    /// named, both counted, neither invented.
+    /// Under the cache's rate, the two counts it is made of, so a rate is
+    /// never shown without the numbers behind it.
     @ViewBuilder private var counts: some View {
-        if let status, let hits = status.cache.hits, let requests = status.cache.requests {
-            (Text("\(hits)").foregroundStyle(NotchSplashPalette.green)
-             + Text(" / ").foregroundStyle(.white.opacity(0.45))
-             + Text("\(requests)").foregroundStyle(NotchSplashPalette.blue))
+        if let hits = status?.cache.hits, let requests = status?.cache.requests {
+            Text(text.hitsAndRequests(hits, requests))
+                .font(.system(size: NotchSplashLayout.footerSize))
+                .foregroundStyle(.white.opacity(0.5))
                 .lineLimit(1)
-                .accessibilityLabel(text.hitsAndRequests(hits, requests))
-        } else {
-            Text(text.hitsAndRequests(0, 0))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .accessibilityHidden(true)
+                .minimumScaleFactor(0.6)
+                .accessibilityLabel(text.cacheHitRate)
         }
     }
 
+    // MARK: The memory, and the governor's bar
+
+    /// Three numbers and a bar: the cache's own, the memory the governor
+    /// charges, the governor's limit, and the charge over the limit.
+    ///
+    /// The bar and the memory's colour are the same rule, so the number, the
+    /// bar and the colour of a card cannot tell three stories. No limit, and a
+    /// limit of nothing, leave the bar empty: a missing number is drawn as
+    /// missing, and not as a bar of some length.
+    private var memoryCard: some View {
+        let utilization = NotchSplashSupport.governorUtilization(
+            chargedBytes: status?.governor.chargedBytes, limitBytes: status?.governor.limitBytes)
+        return VStack(alignment: .leading, spacing: 7) {
+            Text(text.memoryAndKVCache)
+                .font(.system(size: NotchSplashLayout.sectionTitleSize, weight: .semibold))
+                .foregroundStyle(NotchSplashPalette.beige.opacity(0.75))
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+            HStack(spacing: NotchSplashLayout.metricSpacing) {
+                memoryColumn(title: text.kvCache,
+                             parts: NotchSplashSupport.bytesText(status?.kv.activeBytes),
+                             tone: NotchSplashPalette.tone(kvTone, reference: NotchSplashPalette.purple),
+                             note: kvShortage)
+                memoryColumn(title: text.memoryUsed,
+                             parts: NotchSplashSupport.bytesText(status?.governor.chargedBytes),
+                             tone: NotchSplashPalette.tone(
+                                 NotchSplashSupport.governorUtilizationTone(utilization)),
+                             note: nil)
+                memoryColumn(title: text.governorLimit,
+                             parts: NotchSplashSupport.bytesText(status?.governor.limitBytes),
+                             tone: NotchSplashPalette.tone(headroomTone,
+                                                           reference: NotchSplashPalette.orange),
+                             note: nil)
+            }
+            utilizationRow(utilization)
+        }
+        .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(height: NotchSplashLayout.memoryCardHeight)
+        .background(.white.opacity(0.05),
+                    in: RoundedRectangle(cornerRadius: NotchSplashLayout.metricCornerRadius, style: .continuous))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(text.memoryAndKVCache)
+    }
+
+    private func memoryColumn(title: String, parts: (value: String, unit: String)?,
+                              tone: Color, note: String?) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title)
+                .font(.system(size: NotchSplashLayout.memoryLabelSize))
+                .foregroundStyle(.white.opacity(0.55))
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+            HStack(alignment: .firstTextBaseline, spacing: 3) {
+                Text(parts?.value ?? NotchSplashSupport.placeholder)
+                    .font(.system(size: NotchSplashLayout.memoryValueSize, weight: .semibold, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(tone)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+                Text(parts?.unit ?? "")
+                    .font(.system(size: NotchSplashLayout.memoryUnitSize, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.6))
+                    .fixedSize()
+            }
+            if let note {
+                Text(note)
+                    .font(.system(size: NotchSplashLayout.captionSize - 0.5))
+                    .foregroundStyle(NotchSplashPalette.amber)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(title)
+    }
+
+    /// The bar, its name, and the number beside it.
+    private func utilizationRow(_ utilization: Double?) -> some View {
+        HStack(spacing: 7) {
+            Text(text.utilization)
+                .font(.system(size: NotchSplashLayout.captionSize))
+                .foregroundStyle(.white.opacity(0.55))
+                .fixedSize()
+            GeometryReader { bar in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(.white.opacity(0.12))
+                    if let utilization {
+                        Capsule()
+                            .fill(NotchSplashPalette.tone(NotchSplashSupport.governorUtilizationTone(utilization)))
+                            .frame(width: max(2, bar.size.width * min(100, max(0, utilization)) / 100))
+                    }
+                }
+            }
+            .frame(height: NotchSplashLayout.utilizationBarHeight)
+            Text(utilization.map { NotchSplashSupport.percentText($0) } ?? NotchSplashSupport.placeholder)
+                .font(.system(size: NotchSplashLayout.captionSize, weight: .semibold))
+                .monospacedDigit()
+                .foregroundStyle(NotchSplashPalette.tone(NotchSplashSupport.governorUtilizationTone(utilization)))
+                .fixedSize()
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(text.utilization)
+        .accessibilityValue(utilization.map { NotchSplashSupport.percentText($0) } ?? NotchSplashSupport.placeholder)
+    }
+
+    /// The cache's colour: purple while the pages are there, amber when they
+    /// run short, red while the server spills or cannot reserve.
+    private var kvTone: NotchSplashTone {
+        NotchSplashSupport.kvTone(pagesFree: status?.kv.pagesFree, pagesTotal: status?.kv.pagesTotal,
+                                  spilling: isSpilling,
+                                  reservationFailures: status?.kv.reservationFailures)
+    }
+
+    /// The shortage, named in words when there is one: a colour alone is not
+    /// an explanation, and the cache's purple saying nothing is the point of
+    /// the colour.
+    private var kvShortage: String? {
+        switch kvTone {
+        case .amber: return text.kvScarce
+        case .red: return text.kvSpilling
+        default: return nil
+        }
+    }
+
+    /// What the reading's failure is called, in the words of the language and
+    /// with the address that did not answer.
     private func failureText(_ failure: NotchSplashFailure) -> String {
         switch failure {
         case .notConfigured: return text.noAddress
@@ -433,93 +541,210 @@ struct NotchSplashDashboardCard: View {
         case .stale: return text.staleAnswer
         }
     }
-}
 
-/// The three memory numbers of the header, in one unit where they share one.
-private struct NotchSplashHeaderMemory: Equatable {
-    let active: String
-    let used: String
-    let limit: String
-    let unit: String?
-    let spoken: String
+    /// How close the governor's charge sits to its limit, told by the colour
+    /// of the limit itself: orange while there is room, amber and red as the
+    /// room goes.
+    private var headroomTone: NotchSplashTone {
+        NotchSplashSupport.memoryPressureTone(headroomPercent: NotchSplashSupport.governorHeadroom(
+            chargedBytes: status?.governor.chargedBytes, limitBytes: status?.governor.limitBytes))
+    }
 
-    init?(status: NotchSplashStatus) {
-        let bytes: [Int64?] = [status.kv.activeBytes, status.memoryActual.currentBytes, status.governor.limitBytes]
-        guard bytes.contains(where: { $0 != nil }) else { return nil }
-        let readings = bytes.map { NotchSplashSupport.bytesText($0) }
-        // One unit for all three when they agree, so the line reads as the
-        // reference draws it; each of its own when they do not.
-        let units = Set(readings.compactMap { $0?.unit })
-        let shared = units.count == 1 ? units.first : nil
-        let values = readings.map { $0?.value ?? NotchSplashSupport.placeholder }
-        active = values[0]
-        used = values[1]
-        limit = values[2]
-        unit = shared
-        self.spoken = [values[0], values[1], values[2]].joined(separator: " / ")
+    // MARK: Thirty days of tokens
+
+    /// The last thirty days, of the agents' trend chart: two colours stacked
+    /// in a bar a day, the period's total above the bars, the dates under
+    /// them, and the two colours named below.
+    ///
+    /// A day is the difference of the engine's counters across that day, and
+    /// not the total the engine has reached, so a quiet day is a day of
+    /// nothing and a restart does not move the engine's whole life into today.
+    /// Where nothing has ever been measured the card says so, and draws no
+    /// bars and no dates.
+    private var trendCard: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .top) {
+                Text(text.trend)
+                    .font(.system(size: NotchSplashLayout.sectionTitleSize, weight: .semibold))
+                    .foregroundStyle(NotchSplashPalette.beige.opacity(0.75))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+                Spacer(minLength: 6)
+                Text(text.daysAndTokens(days.count, NotchSplashSupport.tokensText(history.total(of: days))))
+                    .font(.system(size: NotchSplashLayout.captionSize, weight: .medium))
+                    .monospacedDigit()
+                    .foregroundStyle(.white.opacity(0.6))
+                    .lineLimit(1)
+                    .fixedSize()
+            }
+            if history.hasTokens {
+                NotchTrendBars(series: [
+                    .init(tint: NotchSplashPalette.blue, values: days.map { Double($0.input) }),
+                    .init(tint: NotchSplashPalette.green, values: days.map { Double($0.output) }),
+                ], dates: days.map(\.start))
+                .frame(maxWidth: .infinity)
+                .frame(height: NotchSplashLayout.trendBarsHeight)
+                dayLabels
+            } else {
+                Text(text.noHistoryYet)
+                    .font(.system(size: NotchSplashLayout.captionSize))
+                    .foregroundStyle(.white.opacity(0.55))
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+            }
+            trendLegend
+        }
+        .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(height: NotchSplashLayout.trendCardHeight)
+        .background(.white.opacity(0.05),
+                    in: RoundedRectangle(cornerRadius: NotchSplashLayout.metricCornerRadius, style: .continuous))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(text.trend)
+    }
+
+    /// The first day, a middle one, and the last: dates enough to say what the
+    /// bars span, few enough to stay out of the bars' way.
+    @ViewBuilder private var dayLabels: some View {
+        if let first = days.first, let last = days.last, days.count > 2 {
+            HStack {
+                dayLabel(first)
+                Spacer(minLength: 4)
+                dayLabel(days[days.count / 2])
+                Spacer(minLength: 4)
+                dayLabel(last)
+            }
+            .font(.system(size: NotchSplashLayout.captionSize - 0.5))
+            .foregroundStyle(.white.opacity(0.45))
+            .accessibilityHidden(true)
+        }
+    }
+
+    private func dayLabel(_ day: NotchSplashDay) -> some View {
+        Text(day.start.formatted(.dateTime.month(.abbreviated).day()))
+            .fixedSize()
+            .lineLimit(1)
+    }
+
+    private var trendLegend: some View {
+        HStack(spacing: 10) {
+            legendMark(text.inputSeries, NotchSplashPalette.blue)
+            legendMark(text.outputSeries, NotchSplashPalette.green)
+            Spacer(minLength: 0)
+        }
+        .font(.system(size: NotchSplashLayout.captionSize))
+    }
+
+    private func legendMark(_ name: String, _ tint: Color) -> some View {
+        HStack(spacing: 4) {
+            RoundedRectangle(cornerRadius: 2, style: .continuous)
+                .fill(tint.opacity(0.95))
+                .frame(width: 8, height: 8)
+                .accessibilityHidden(true)
+            Text(name)
+                .foregroundStyle(.white.opacity(0.6))
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+        }
+        .accessibilityLabel(name)
     }
 }
 
-/// One reading: its name, its figure in the colour its threshold chose, and a
-/// line under it.
+/// A card's way to the section's page: a click, and the same thing for a
+/// voice, on a card that has somewhere to go.
+private struct NotchSplashCardTap: ViewModifier {
+    let enabled: Bool
+    let action: () -> Void
+
+    func body(content: Content) -> some View {
+        // The card is drawn in both cases: a card that cannot be clicked is
+        // still a reading, and dropping it would leave its page empty.
+        if enabled {
+            content
+                .onTapGesture(perform: action)
+                .accessibilityAction { action() }
+        } else {
+            content
+        }
+    }
+}
+
+// MARK: - One metric's chart
+
+/// A metric's card: its name, its figure in the colour of how it reads, the
+/// unit it is counted in, the line of its last half hour in the metric's own
+/// colour, and a line for the counts a rate is made of.
+///
+/// The two colours are kept apart on purpose. The line belongs to the metric
+/// and says which of the four this is; the figure belongs to the threshold and
+/// says how it reads. A card that wore its threshold's colour twice would
+/// shout one piece of news in two voices, and a card whose line changed colour
+/// with its figure could not be recognised by its shape and colour at a glance.
 struct NotchSplashMetricCard<Footer: View>: View {
-    let label: String
-    let value: String
-    var unit: String?
-    var tone: NotchSplashTone
+    let title: String
+    /// The window's measurements, oldest first; empty when nothing has been
+    /// measured, which is drawn as nothing and not as a flat line.
+    let values: [Double]
+    /// The line's colour, the metric's own.
+    let line: Color
+    let value: String?
+    let unit: String?
+    let tone: NotchSplashTone
+    /// What to say while there is nothing to draw.
+    var empty: String? = nil
     @ViewBuilder var footer: () -> Footer
 
-    init(label: String, value: String, unit: String? = nil, tone: NotchSplashTone,
-         @ViewBuilder footer: @escaping () -> Footer) {
-        self.label = label
-        self.value = value
-        self.unit = unit
-        self.tone = tone
-        self.footer = footer
-    }
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(label)
-                .font(.system(size: NotchSplashLayout.labelSize, weight: .semibold))
-                .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.system(size: NotchSplashLayout.labelSize))
+                .foregroundStyle(.white.opacity(0.6))
                 .lineLimit(1)
-                .truncationMode(.tail)
-            Text(value)
-                .font(.system(size: NotchSplashLayout.valueSize, weight: .semibold, design: .rounded))
-                .monospacedDigit()
-                .foregroundStyle(NotchSplashPalette.tone(tone))
-                .lineLimit(1)
-                .minimumScaleFactor(0.6)
-                .contentTransition(.numericText())
-            Group {
+                .minimumScaleFactor(0.7)
+            HStack(alignment: .firstTextBaseline, spacing: 3) {
+                Text(value ?? NotchSplashSupport.placeholder)
+                    .font(.system(size: NotchSplashLayout.valueSize, weight: .semibold, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(NotchSplashPalette.tone(tone))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.55)
+                    .contentTransition(.numericText())
                 if let unit {
                     Text(unit)
                         .font(.system(size: NotchSplashLayout.footerSize))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                } else {
-                    footer()
-                        .font(.system(size: NotchSplashLayout.footerSize))
+                        .foregroundStyle(.white.opacity(0.5))
+                        .fixedSize()
                 }
             }
-            Spacer(minLength: 0)
+            NotchSparkline(values: values, tint: line, height: NotchSplashLayout.sparklineHeight)
+            Group {
+                if values.isEmpty, let empty {
+                    Text(empty)
+                        .font(.system(size: NotchSplashLayout.footerSize))
+                        .foregroundStyle(.white.opacity(0.45))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                } else {
+                    footer()
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(NotchSplashLayout.padding - 2)
+        .padding(8)
         .frame(maxWidth: .infinity, alignment: .leading)
         .frame(height: NotchSplashLayout.metricCardHeight)
-        .modifier(NotchControlSurface(cornerRadius: NotchSplashLayout.metricCornerRadius,
-                                      interactive: false, fillOpacity: 0.075))
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(label)
-        .accessibilityValue(value)
+        .background(.white.opacity(0.05),
+                    in: RoundedRectangle(cornerRadius: NotchSplashLayout.metricCornerRadius, style: .continuous))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(title)
     }
 }
 
 extension NotchSplashMetricCard where Footer == EmptyView {
-    init(label: String, value: String, unit: String? = nil, tone: NotchSplashTone) {
-        self.init(label: label, value: value, unit: unit, tone: tone) { EmptyView() }
+    init(title: String, values: [Double], line: Color, value: String?, unit: String?,
+         tone: NotchSplashTone, empty: String? = nil) {
+        self.init(title: title, values: values, line: line, value: value, unit: unit, tone: tone,
+                  empty: empty, footer: { EmptyView() })
     }
 }
 
@@ -540,6 +765,14 @@ struct NotchSplashView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private var text: NotchSplashStrings { FeatureStrings.notchSplash(l10n.language) }
 
+    /// Whether the page has a reading to draw: a session asking the server,
+    /// a reading it has, or a task's phase to report. The page's own rule, in
+    /// the same words the row's action uses, so the row and the page agree the
+    /// moment Start is pressed.
+    private var showsReading: Bool {
+        service.isMonitoring || service.snapshot != nil || service.phase != .idle
+    }
+
     private var interval: Binding<Int> {
         Binding(get: { service.intervalSeconds },
                 set: { value in withAnimation(reduceMotion ? nil : .smooth(duration: 0.2)) {
@@ -549,7 +782,7 @@ struct NotchSplashView: View {
 
     var body: some View {
         Group {
-            if enabled, service.showsDashboard {
+            if enabled, showsReading {
                 dashboard
             } else {
                 setup
@@ -580,9 +813,12 @@ struct NotchSplashView: View {
                 elapsed: service.elapsed(),
                 isMonitoring: service.isMonitoring,
                 isSpilling: service.isSpilling,
+                history: service.history,
                 failure: service.failure,
                 address: service.endpointDescription,
-                onStop: service.isMonitoring ? { service.stop() } : nil)
+                onStop: service.isMonitoring ? { service.stop() } : nil,
+                // The card is already on the page it would lead to.
+                canOpenSection: false)
             statusLine
         }
         .accessibilityElement(children: .contain)

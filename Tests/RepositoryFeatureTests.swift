@@ -1672,12 +1672,102 @@ enum RepositoryFeatureTests {
             $0.contains("private var header: some View {")
         }) {
             let window = splashCardLines[head...min(head + 24, splashCardLines.count - 1)]
-            let mark = window.firstIndex { $0.contains("Image(systemName: NotchModule.splash.symbol)") }
+            let mark = window.firstIndex { $0.contains("Image(systemName: NotchAgentCard.resets.symbol)") }
             let name = window.firstIndex { $0.contains("Text(text.title)") }
             headerLeadsWithMark = mark != nil && name != nil && mark! < name!
         }
         suite.expect(headerLeadsWithMark,
-               "the dashboard card leads with its section's mark, before its name")
+               "the dashboard card leads with the mark the reference draws, before its name")
+
+        // The header of the reference has a mark, a name, two token counts, a
+        // clock and a way out. The words of the old header - the word for the
+        // reading running, and the three compact resource values - are not in
+        // it: the resources have their own card, with room for their units.
+        suite.expect(!splashCardLines.contains { $0.contains("text.monitoring") }
+                         && !splashCardLines.contains { $0.contains("NotchSplashHeaderMemory") }
+                         && splashCardLines.contains { $0.contains("arrow.up") }
+                         && splashCardLines.contains { $0.contains("arrow.down") },
+               "the header is the reference's: a mark, a name, the two token counts, the clock, the way out")
+
+        // The card's four parts, in the reference's order, in one measure.
+        func cardPartsInOrder(_ lines: [String]) -> Bool {
+            let trimmed = lines.map { $0.trimmingCharacters(in: .whitespaces) }
+            let wanted = ["header", "charts", "memoryCard", "trendCard"]
+            var place = -1
+            for part in wanted {
+                guard let found = trimmed.firstIndex(of: part), found > place else { return false }
+                place = found
+            }
+            return true
+        }
+        suite.expect(cardPartsInOrder(splashCardLines),
+               "the dashboard's parts are the reference's four, in the reference's order")
+
+        // A chart's line belongs to its metric, and a figure's colour to the
+        // threshold: the two are drawn from different words, so a card cannot
+        // say the same news twice and a metric keeps its own colour.
+        let chartLines = splashCardLines
+        suite.expect(chartLines.contains { $0.contains("line: NotchSplashPalette.orange") }
+                         && chartLines.filter({ $0.contains("line: NotchSplashPalette.blue") }).count == 2
+                         && chartLines.contains { $0.contains("line: NotchSplashPalette.green") }
+                         && chartLines.contains { $0.contains("NotchSparkline(values: values, tint: line") }
+                         && chartLines.contains { $0.contains("foregroundStyle(NotchSplashPalette.tone(tone))") },
+               "a chart's line is its metric's colour and its figure is the threshold's, drawn apart")
+
+        // The month's card in the Live Activities leads with the section's mark.
+        var monthLeadsWithMark = false
+        let dashboardLines = repository.lines(at: "Sources/Vorssaint/UI/Notch/NotchDashboardView.swift")
+        if let head = dashboardLines.firstIndex(where: {
+            $0.contains("Text(focus, format: .dateTime.month(.wide).year())")
+        }) {
+            let window = dashboardLines[max(0, head - 8)..<head]
+            monthLeadsWithMark = window.contains { $0.contains("Image(systemName: NotchModule.calendar.symbol)") }
+        }
+        suite.expect(monthLeadsWithMark,
+               "the month's card leads with the calendar's mark, before its name")
+
+        // A player's card is media being heard, and the rule is one rule.
+        let playerLines = repository.lines(at: "Sources/Vorssaint/Services/Notch/NotchDashboardSupport.swift")
+        suite.expect(playerLines.contains { $0.contains("source.isActivelyPlaying") }
+                         && !playerLines.contains { $0.contains("source.isPlaying || source.hasTrack") },
+               "the island lists a player only while it plays, and a paused session is not a card")
+
+        // The recorded past is a file of the app's own container, kept for
+        // thirty days, and the tests write their own file and not the app's.
+        let historyLines = repository.lines(at: "Sources/Vorssaint/Services/Notch/NotchSplashHistory.swift")
+        let historyTests = (try? String(contentsOfFile: "Tests/NotchSplashTests.swift", encoding: .utf8))?
+            .components(separatedBy: "\n") ?? []
+        let historyKeeps = historyLines.contains { $0.contains("static let retentionDays = 30") }
+        let historyPrivate = historyLines.contains { $0.contains("PrivateFileStore.createDirectory") }
+            && historyLines.contains { $0.contains("PrivateFileStore.write") }
+        let historyTested = historyTests.contains { $0.contains("NotchSplashHistoryStore(url:") }
+        suite.expect(historyKeeps && historyPrivate && historyTested,
+               "the measured past is a private file kept thirty days, and the tests use a file of their own "
+               + "(\(historyKeeps), \(historyPrivate), \(historyTested), \(historyLines.count) lines)")
+
+        // A key is a thing the person's own settings hold. Only the one place
+        // in the app may name its value, and no test writes one: a key in a
+        // test file is a key in the repository, in perpetuity.
+        let keyShaped = repository.swiftPaths.filter { path in
+            let text = repository.source(at: path) ?? ""
+            return text.range(of: "\"sk-[A-Za-z0-9-]{12,}\"", options: .regularExpression) != nil
+        }
+        let splashTestText = (try? String(contentsOfFile: "Tests/NotchSplashTests.swift", encoding: .utf8)) ?? ""
+        let splashTestHasAKey = splashTestText.range(of: "\"sk-[A-Za-z0-9-]{12,}\"",
+                                                     options: .regularExpression) != nil
+        suite.expect(keyShaped.isEmpty && !splashTestHasAKey,
+               "no key is written into the app's source, and none into its tests (\(keyShaped))")
+
+        // The workflow every agent works under is written down, in the file
+        // every agent reads: test, commit, push a branch, never a secret, never
+        // the main branch.
+        let agentRules = (try? String(contentsOfFile: "AGENTS.md", encoding: .utf8))?.components(separatedBy: "\n") ?? []
+        suite.expect(agentRules.contains { $0.contains("## Git workflow for coding agents (mandatory)") }
+                         && agentRules.contains { $0.contains("Never commit secrets") }
+                         && agentRules.contains { $0.contains("- Push the task branch") }
+                         && agentRules.contains { $0.contains("Never push directly to `main`") }
+                         && agentRules.contains { $0.contains("Never use `git reset --hard`") },
+               "the repository tells its coding agents to test, commit, push a branch, and keep secrets out")
 
         // A key is taken in and kept, and is never written back out to the
         // screen: the field is not bound to the stored key, and the words
@@ -1688,7 +1778,8 @@ enum RepositoryFeatureTests {
                          && splashSettingsLines.contains { $0.contains("SecureField") }
                          && splashSettingsLines.contains { $0.contains("commitKey()") }
                          && splashSettingsLines.contains { $0.contains("text.apiKeySet") }
-                         && !splashSettingsLines.contains { $0.contains("NotchSplashEndpoint.localAPIKey") },
+                         && !splashSettingsLines.contains { $0.contains("NotchSplashEndpoint.localAPIKey") }
+                         && !splashSettingsLines.contains { $0.contains("VOSSAINT_SPLASH_API_KEY") },
                "a key is typed in, kept, and never shown back (\(boundToTheKey.prefix(3).joined(separator: ", ")))")
 
         // French double punctuation and guillemets use non-breaking spaces.

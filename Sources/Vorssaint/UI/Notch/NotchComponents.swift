@@ -1015,3 +1015,106 @@ extension NSSavePanel {
         return response
     }
 }
+
+// MARK: - The line of what a metric has measured
+
+/// The recent shape of one measure, in the height of a thumb: the line the
+/// dashboard's metric cards draw under each figure.
+///
+/// The line is drawn from what was measured, and from nothing else. A period
+/// before the app was measuring has no line, and no shape is invented to fill
+/// it; a card with nothing to draw shows a quiet rule and its card says why.
+struct NotchSparkline: View {
+    /// The measurements, oldest first.
+    let values: [Double]
+    /// The line's colour, which belongs to the metric and not to what the
+    /// figure reads: a metric whose line is its own colour can still show a
+    /// figure out of bounds.
+    let tint: Color
+    var height: CGFloat = 22
+    var lineWidth: CGFloat = 1.5
+    /// The room kept at the top and bottom, so a peak and a trough are both
+    /// seen as the line's own thickness.
+    var padding: CGFloat = 2
+
+    var body: some View {
+        GeometryReader { proxy in
+            let line = linePath(in: proxy.size)
+            ZStack {
+                if hasLine {
+                    areaPath(in: proxy.size)
+                        .fill(tint.opacity(0.22))
+                    line
+                        .stroke(tint, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round, lineJoin: .round))
+                } else {
+                    // Nothing measured: the place where the line will go.
+                    Path { path in
+                        let y = (proxy.size.height - padding * 2) / 2 + padding
+                        path.move(to: CGPoint(x: 0, y: y))
+                        path.addLine(to: CGPoint(x: proxy.size.width, y: y))
+                    }
+                    .stroke(tint.opacity(0.25),
+                            style: StrokeStyle(lineWidth: 1, dash: [2, 3], dashPhase: 1))
+                }
+            }
+        }
+        .frame(height: height)
+        .accessibilityHidden(true)
+    }
+
+    private var hasLine: Bool { values.count > 1 && values.allSatisfy(\.isFinite) }
+
+    /// Each measurement's height, from the top of the drawing: the highest of
+    /// them at 0, the lowest at 1. A series that never moves sits in the
+    /// middle, which is the honest drawing of a flat run.
+    private var heights: [CGFloat] {
+        guard let low = values.min(), let high = values.max(), high - low > 1e-9, values.count > 1 else {
+            return Array(repeating: 0.5, count: values.count)
+        }
+        return values.map { CGFloat((high - $0) / (high - low)) }
+    }
+
+    private func points(in size: CGSize) -> [CGPoint] {
+        let heights = heights
+        guard heights.count > 1 else {
+            let y = (size.height - padding * 2) / 2 + padding
+            return [CGPoint(x: 0, y: y), CGPoint(x: size.width, y: y)]
+        }
+        let step = size.width / CGFloat(heights.count - 1)
+        let span = size.height - padding * 2
+        return heights.enumerated().map { index, height in
+            CGPoint(x: CGFloat(index) * step, y: padding + height * span)
+        }
+    }
+
+    /// The line, curved through the midpoints of the measurements so a series
+    /// of samples reads as a shape and not as a fence.
+    private func linePath(in size: CGSize) -> Path {
+        let points = points(in: size)
+        var path = Path()
+        guard let first = points.first else { return path }
+        path.move(to: first)
+        guard points.count > 2 else {
+            if points.count > 1 { path.addLine(to: points[points.count - 1]) }
+            return path
+        }
+        for index in 1..<points.count {
+            let previous = points[index - 1]
+            let current = points[index]
+            let middle = CGPoint(x: (previous.x + current.x) / 2, y: (previous.y + current.y) / 2)
+            path.addQuadCurve(to: middle, control: previous)
+            path.addQuadCurve(to: current, control: current)
+        }
+        return path
+    }
+
+    /// The soft ground under the line, the same tint and much fainter.
+    private func areaPath(in size: CGSize) -> Path {
+        var path = linePath(in: size)
+        guard let last = points(in: size).last, let first = points(in: size).first else { return path }
+        path.addLine(to: CGPoint(x: last.x, y: size.height))
+        path.addLine(to: CGPoint(x: first.x, y: size.height))
+        path.closeSubpath()
+        return path
+    }
+}

@@ -63,6 +63,19 @@ If documentation conflicts with executable code or build scripts, inspect the cu
 - Do not publish a release, create a tag, merge a PR, or post public communication unless explicitly requested.
 - In the final report, list changed files, actual commands and results, visual evidence, limitations, commit SHA, and push status.
 
+## Git workflow for coding agents (mandatory)
+
+These rules apply to every coding agent working in this repository, on every task, unless the maintainer says otherwise in that task.
+
+- Commit the work. When implementation, testing, and verification for the task are complete, commit the completed changes on the task branch. Do not leave finished work uncommitted.
+- Push the task branch. Push the completed branch to the remote repository and confirm the commit exists there (`git log --oneline -1 origin/<branch>` or `git status -sb`).
+- Report the delivery. The final report must include the commit hash and the remote push confirmation.
+- Never push directly to `main` unless the maintainer has explicitly authorized it for that task. Work on a feature branch.
+- Never commit secrets. API keys, credentials, bearer tokens, passwords, cookies, and private keys stay out of commits, tests, fixtures, screenshots, logs, and reports. Keep a locally supplied key in the user's own settings, never in tracked source, and check the staged diff for it before committing.
+- Never commit work that has not passed the required verification. Run the focused suite, the relevant broader suites, the release build, and the app self-test first, and record the actual results.
+- If verification fails, investigate and fix the problem, then re-run the verification. Do not declare completion over a failing check, and do not weaken, skip, or delete an existing test to make a check pass.
+- Preserve unrelated work. Never use `git reset --hard`, `git checkout -- <paths>`, `git clean`, or any other destructive command to obtain a clean working tree. Uncommitted changes that are not yours are left in place, stashed, or committed on a branch so they are not lost.
+
 ## Required working style
 
 Do not stop after producing a plan when implementation has been requested. Make reasonable engineering decisions autonomously, continue through implementation and verification, and ask only when an unresolved product decision materially changes the result or a genuine external blocker prevents safe progress.

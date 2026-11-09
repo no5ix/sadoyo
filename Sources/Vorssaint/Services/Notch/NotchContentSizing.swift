@@ -111,6 +111,10 @@ struct NotchPageContent: Equatable {
     var mixerMicrophone = false
     /// The calendar page draws the month, not only the week and its agenda.
     var calendarMonth = false
+    /// The Splash page has a dashboard to draw: a reading running, a task
+    /// frozen at the end of one, or a last reading kept after the way out.
+    /// Without one, the page is its ruler and the words of what to do next.
+    var splashDashboard = false
 
     static let empty = NotchPageContent()
 }
@@ -180,9 +184,11 @@ enum NotchNaturalContent {
         case .watch:
             return NotchLayout.watchPageHeight
         case .splash:
-            // The interval's ruler, and the dashboard of four readings under
-            // it; before a session, the same ruler above what to do next.
-            return NotchSplashLayout.pageHeight
+            // The interval's ruler, and the dashboard under it: four charts,
+            // the memory, the trend. Before a session there is nothing of
+            // those to show, so the page is its ruler and the words below it.
+            return items.splashDashboard ? NotchSplashLayout.pageHeight
+                : NotchSplashLayout.pageSetupHeight
         case .scratchpad:
             // A page of text: the editor, its rule and its actions.
             return NotchLayout.scratchpadPageHeight
