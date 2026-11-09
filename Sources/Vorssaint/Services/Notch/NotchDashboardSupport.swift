@@ -596,6 +596,21 @@ enum NotchDashboardSupport {
         dashboard && expanded && !metric && !appPanel && !sections && !commandBar && modules
     }
 
+    /// The island's kept-open mark, the mark in the row's upper-right corner
+    /// that says the island is being kept open and lets it go in one click.
+    ///
+    /// The dashboard is the page the island rests on and its row belongs to
+    /// the page's own controls, so the island's mark stays out of it: keeping
+    /// the island open is asked for from the island's menu, and letting go is
+    /// asked there too, beside the action that asked it. Every other page — a
+    /// section, a reading's detail, the app panel, the gallery, the Command
+    /// Bar — keeps the mark where the island is kept open, and keeping the
+    /// island open is untouched by any of this: the page it shows, and the row
+    /// the page put in it, stay as they were.
+    static func showsKeptOpenMark(pinned: Bool, dashboard: Bool) -> Bool {
+        pinned && !dashboard
+    }
+
     /// Opening the island with nothing asked for — the pointer resting on it,
     /// a click, the toggle — shows the dashboard. A section, a detail, the
     /// panel, the gallery and the Command Bar each name where they go, and the

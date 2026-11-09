@@ -163,6 +163,95 @@ enum NotchDashboardTests {
                          "one subscription follows the month shown: made when the reader starts, dropped when it stops")
         }
 
+        suite.run("a kept-open island marks its pages, and the dashboard keeps none") {
+            func source(_ path: String) -> String { (try? String(contentsOfFile: path, encoding: .utf8)) ?? "" }
+            // Every page the open island can show, named as the page policy
+            // names it: the dashboard it rests on, and what stands in front of it.
+            let pages: [(name: String, asked: Bool, metric: Bool, panel: Bool, sections: Bool, bar: Bool)] = [
+                ("the dashboard", true, false, false, false, false),
+                ("the sections", true, false, false, true, false),
+                ("a reading's detail", true, true, false, false, false),
+                ("the app panel", true, false, true, false, false),
+                ("the Command Bar", true, false, false, false, true),
+                ("a section opened by name", false, false, false, false, false),
+            ]
+            func isDashboard(_ page: (name: String, asked: Bool, metric: Bool, panel: Bool, sections: Bool, bar: Bool)) -> Bool {
+                NotchDashboardSupport.showsDashboard(dashboard: page.asked, expanded: true, metric: page.metric,
+                                                     appPanel: page.panel, sections: page.sections,
+                                                     commandBar: page.bar, modules: true)
+            }
+            var marked: [String] = []
+            for page in pages {
+                // Nothing has been kept open, and the menu opening asks for
+                // nothing: no page carries the mark before Keep Open.
+                suite.expect(!NotchDashboardSupport.showsKeptOpenMark(pinned: false, dashboard: isDashboard(page)),
+                             "\(page.name) shows no kept-open mark while the island is free to close")
+                if NotchDashboardSupport.showsKeptOpenMark(pinned: true, dashboard: isDashboard(page)) {
+                    marked.append(page.name)
+                }
+            }
+            suite.expect(marked == ["the sections", "a reading's detail", "the app panel", "the Command Bar",
+                                    "a section opened by name"],
+                         "kept open marks every page the island carries, and the dashboard is not one of them: \(marked)")
+            // The dashboard, asked over and over to stay open: it stays the page
+            // the island shows, and it grows no mark at its corner.
+            var pinned = false, seen = 0, left = 0
+            for _ in 0..<6 {
+                pinned.toggle()
+                let page = isDashboard(pages[0])
+                if !page { left += 1 }
+                if NotchDashboardSupport.showsKeptOpenMark(pinned: pinned, dashboard: page) { seen += 1 }
+            }
+            suite.expect(left == 0 && seen == 0,
+                         "six Keep Open interactions leave the dashboard the page and show no mark: \(seen) marks, \(left) pages lost")
+            // The keeping itself is untouched: the island is kept open by the
+            // menu's action, on every page, and the mark's one click lets go.
+            let island = source("Sources/Vorssaint/UI/Notch/NotchView.swift")
+            suite.expect(island.contains("Button {\n            service.pinned.toggle()")
+                             && island.contains("service.pinned ? text.unpin : text.pin")
+                             && island.contains("service.pinned ? \"pin.slash\" : \"pin\""),
+                         "the island's menu asks for keeping open and for letting go, on every page the dashboard is not")
+            suite.expect(island.contains(".accessibilityAction(named: service.pinned ? text.unpin : text.pin) { service.pinned.toggle() }"),
+                         "the screen reader is offered the same keeping and letting go on the page it stands on")
+            let mark = island.components(separatedBy: "private var pinMark: some View {").dropFirst().first
+                .map { $0.components(separatedBy: "private var updateOffered").first ?? $0 } ?? ""
+            suite.expect(mark.contains("NotchDashboardSupport.showsKeptOpenMark(pinned: service.pinned")
+                             && mark.contains("dashboard: service.showsDashboard")
+                             && mark.contains("NotchIconButton(symbol: \"pin.fill\", title: text.unpin, selected: true) { service.pinned = false }"),
+                         "the mark is asked of the page policy, and one click on a page that carries it lets the island go")
+            suite.expect(!mark.isEmpty && !mark.contains("if service.pinned {") && !mark.contains(".frame(width:")
+                             && !mark.contains("Spacer"),
+                         "the mark asks for no room of its own: a page that carries no mark keeps no button's space")
+            // The row is the row it was: four widths of the same marks, and the
+            // mark among them, so no slot is kept for a mark a page does not carry.
+            let row = island.components(separatedBy: "private func bandRow(").dropFirst().first
+                .map { $0.components(separatedBy: "private func trailingSections(").first ?? $0 } ?? ""
+            suite.expect(row.components(separatedBy: "HStack(spacing: 6) {").count - 1 == 4
+                             && row.components(separatedBy: "pinMark").count - 1 == 3
+                             && row.contains("ViewThatFits(in: .horizontal)"),
+                         "the row ends with the island's marks in four widths and keeps no placeholder's room")
+            // The dashboard page draws no mark of its own, in its corner or
+            // anywhere: the corner is the page's controls and nothing else.
+            let dashboard = source("Sources/Vorssaint/UI/Notch/NotchDashboardView.swift")
+            suite.expect(!dashboard.contains("\"pin.fill\"") && !dashboard.contains("\"pin.slash\"")
+                             && !dashboard.contains("service.pinned"),
+                         "the dashboard page draws no kept-open mark of its own")
+            // No page, size, band or height of the island is computed from the
+            // kept-open state, so the page keeps the width, height and
+            // alignment it had before the mark was ever asked about.
+            let geometry = source("Sources/Vorssaint/Services/Notch/NotchSupport.swift")
+                .components(separatedBy: "struct NotchGeometry: Equatable {").dropFirst().first ?? ""
+            suite.expect(!geometry.isEmpty && !geometry.contains("pinned"),
+                         "the island's pages and sizes are computed without the kept-open state: the dashboard is sized as it was")
+            // Where the pin is the page's own work, it stays: an entry of the
+            // clipboard and a source of the mixer are pinned by name, and the
+            // island's corner has nothing to do with them.
+            suite.expect(source("Sources/Vorssaint/UI/Notch/NotchClipboardView.swift").contains("\"pin.fill\"")
+                             && source("Sources/Vorssaint/UI/Notch/NotchMixerView.swift").contains("\"pin.fill\"")
+                             && source("Sources/Vorssaint/UI/Notch/NotchFilesView.swift").contains("pinnedIDs"),
+                         "the pages that pin their own content keep the pins they show")
+        }
+
         suite.run("the calendar card has its place, and a page wide enough to hold it") {
             // The card is the page's, so it is measured as one shape: the grid
             // at the rows the grid draws itself, with the month's name above it.

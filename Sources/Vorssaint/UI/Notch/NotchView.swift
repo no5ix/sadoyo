@@ -345,7 +345,9 @@ struct NotchView: View {
 
     /// The row: the island's way back or to the sections leads it, and an
     /// update or the pin ends it, around what the page puts there. A page
-    /// that wraps the camera lays out the leading side itself.
+    /// that wraps the camera lays out the leading side itself. The pin is
+    /// asked of the row and the row answers with nothing where the page does
+    /// not carry it, so a page never keeps a mark's room it was not given.
     private func bandRow(_ items: NotchBandItems, band: NotchBand, wraps: Bool) -> some View {
         let feedback = headerFeedback
         // Across a full row the home page's levels fill the leading side, so
@@ -405,9 +407,13 @@ struct NotchView: View {
         NotchUpdateControl(action: service.showUpdate, compact: band.besideCamera)
     }
 
-    /// A kept-open island says so, and one click lets it go.
+    /// A kept-open island says so on the pages that carry the island's own
+    /// marks, and one click lets it go. The dashboard is not one of them: its
+    /// row is the page's sliders, its menu asks the keeping and the letting go,
+    /// and the mark would sit in the corner of the page the island rests on.
     @ViewBuilder private var pinMark: some View {
-        if service.pinned {
+        if NotchDashboardSupport.showsKeptOpenMark(pinned: service.pinned,
+                                                   dashboard: service.showsDashboard) {
             NotchIconButton(symbol: "pin.fill", title: text.unpin, selected: true) { service.pinned = false }
         }
     }
