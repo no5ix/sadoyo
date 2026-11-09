@@ -103,9 +103,43 @@ enum NotchCalendarSupport {
         return DateInterval(start: today, end: weekEnd)
     }
 
-    static func needsCurrentRead(visible: DateInterval, current: DateInterval,
-                                 countdownEnabled: Bool) -> Bool {
-        countdownEnabled && (visible.start > current.start || visible.end < current.end)
+    /// The month a read is asked for: the first day of the month a shown day
+    /// is in. A month is a read and a day is not - the grid's six weeks are
+    /// read for any of its days - so moving within a month asks for nothing.
+    static func monthStart(of date: Date, calendar: Calendar = .current) -> Date {
+        calendar.startOfDay(for: calendar.dateInterval(of: .month, for: date)?.start ?? date)
+    }
+
+    /// The two spans one screen of the island asks EventKit for: the grid of
+    /// the month being shown, and the week the island counts down through.
+    ///
+    /// They are read apart and joined because a month a year away and today
+    /// are two spans, and one interval over both would read every event in
+    /// between. Joined into one list they are what every surface draws, so a
+    /// day carries the same marks on the dashboard's card, the page's grid
+    /// and the page's strip, and the countdown, the Controls tile and the
+    /// week's agenda keep their week.
+    ///
+    /// `current` is the same interval as `visible` when the month's grid
+    /// already covers the week, which is every month the Mac is in.
+    static func readIntervals(month: Date?, now: Date, calendar: Calendar = .current)
+        -> (visible: DateInterval, current: DateInterval) {
+        let visible = readInterval(month: month, now: now, calendar: calendar)
+        let week = readInterval(month: nil, now: now, calendar: calendar)
+        return (visible, visible.start <= week.start && visible.end >= week.end ? visible : week)
+    }
+
+    /// The marks under one day of the grid: the colours of the calendars that
+    /// have an event that day, at most three, in the order the events start.
+    ///
+    /// Every surface that draws the month asks here, so the same events give
+    /// the same dots in the dashboard's card, the page's grid and the page's
+    /// week strip - and a day with nothing on it carries no mark at all.
+    static func dayMarks(_ read: [NotchCalendarEvent], on day: Date,
+                         calendar: Calendar = .current) -> [NotchCalendarColor] {
+        events(read, on: day, calendar: calendar).reduce(into: [NotchCalendarColor]()) { marks, event in
+            if marks.count < 3, !marks.contains(event.color) { marks.append(event.color) }
+        }
     }
 
     /// End dates are exclusive, including all-day events and midnight boundaries.

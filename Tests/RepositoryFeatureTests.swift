@@ -1731,7 +1731,11 @@ enum RepositoryFeatureTests {
         if let head = dashboardLines.firstIndex(where: {
             $0.contains("Text(month, format: .dateTime.month(.wide).year())")
         }) {
-            let window = dashboardLines[head..<min(head + 16, dashboardLines.count)]
+            // The header's own lines: the month's name, the section's mark -
+            // now the card's control that opens the Calendar page, so a button,
+            // its style, its words and its help - the spacer, the three marks of
+            // the way through the month. The window is the header's one row.
+            let window = dashboardLines[head..<min(head + 34, dashboardLines.count)]
             monthLeadsWithMark = window.contains { $0.contains("Image(systemName: NotchModule.calendar.symbol)") }
                 // The name is centred by the pane and not by the marks: the
                 // marks are a leading group and a trailing group, and a spacer

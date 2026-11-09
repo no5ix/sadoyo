@@ -64,8 +64,12 @@ final class NotchCalendarService: NSObject, ObservableObject {
     private var refreshTimer: Timer?
     private var observers: [NSObjectProtocol] = []
     private var permissionSubscription: AnyCancellable?
+    /// The month the island's calendar shows, followed from the display the
+    /// dashboard's card and the Calendar page share. One subscription, made
+    /// when the reader starts and dropped when it stops, so navigating between
+    /// those two views never adds a second one.
+    private var monthSubscription: AnyCancellable?
     private var generation = UUID()
-    private var visibleMonth: Date?
     private var countdownEnabled = false
     private var timeLeftEnabled = false
     /// How long before a start the island counts down, from Settings.
@@ -96,12 +100,6 @@ final class NotchCalendarService: NSObject, ObservableObject {
 
     private func follows(_ countdown: NotchCalendarCountdown) -> Bool {
         countdown.ongoing ? timeLeftEnabled : countdownEnabled || isChosen(countdown.event)
-    }
-
-    func showMonth(_ month: Date?) {
-        visibleMonth = month
-        events = []
-        refresh()
     }
 
     func syncWithPreferences() {
@@ -141,6 +139,14 @@ final class NotchCalendarService: NSObject, ObservableObject {
                 [weak self] _ in self?.refresh()
             })
         }
+        // A month is a read, a day is not, and a month asked for twice is one
+        // read: the grid's six weeks are read for any of its days, and a visit
+        // to the page that leaves the month where it was asks for nothing.
+        monthSubscription = NotchCalendarDisplay.shared.$focus
+            .map { NotchCalendarSupport.monthStart(of: $0) }
+            .removeDuplicates()
+            .dropFirst()
+            .sink { [weak self] _ in self?.refresh() }
         permissionSubscription = Permissions.shared.$calendarAccess.removeDuplicates().dropFirst()
             .sink { [weak self] _ in self?.refresh() }
         refresh()
@@ -157,17 +163,19 @@ final class NotchCalendarService: NSObject, ObservableObject {
         }
         let requested = generation
         let now = Date()
-        let interval = NotchCalendarSupport.readInterval(month: visibleMonth, now: now)
-        let currentInterval = NotchCalendarSupport.readInterval(month: nil, now: now)
-        let needsCurrentRead = NotchCalendarSupport.needsCurrentRead(
-            visible: interval, current: currentInterval,
-            countdownEnabled: countdownEnabled || timeLeftEnabled || !chosenCountdowns.isEmpty)
+        // What the island is showing decides what is read: the month's grid,
+        // and the week the countdown, the Controls tile and the week's agenda
+        // need. The two lists join into the one list every surface draws.
+        let reads = NotchCalendarSupport.readIntervals(month: NotchCalendarDisplay.shared.focus, now: now)
+        let oneRead = reads.current == reads.visible
         let excluded = excludedCalendars
+        // Only a first read is a wait: a month already on screen stays on
+        // screen while the next month's events arrive, so navigating between
+        // the card and the page, and back, shows no empty grid.
         loading = events.isEmpty
         task = Task { @MainActor [weak self] in
-            let result = await reader.read(interval: interval, excluded: excluded)
-            let currentResult = needsCurrentRead
-                ? await reader.read(interval: currentInterval, excluded: excluded) : result
+            let result = await reader.read(interval: reads.visible, excluded: excluded)
+            let currentResult = oneRead ? result : await reader.read(interval: reads.current, excluded: excluded)
             guard !Task.isCancelled, let self, self.generation == requested,
                   NotchCalendarSupport.isEnabled() else { return }
             let now = Date()
@@ -175,8 +183,8 @@ final class NotchCalendarService: NSObject, ObservableObject {
                 self.events = []; self.countdown = nil; self.loading = false; self.task = nil
                 return
             }
-            self.events = NotchCalendarSupport.ordered(result)
-            let currentEvents = needsCurrentRead ? NotchCalendarSupport.ordered(currentResult) : self.events
+            self.events = NotchCalendarSupport.ordered(result + currentResult)
+            let currentEvents = oneRead ? self.events : NotchCalendarSupport.ordered(currentResult)
             self.updateChosenCountdowns(currentEvents, now: now)
             self.countdown = NotchCalendarSupport.countdown(currentEvents, now: now, starts: self.countdownEnabled,
                                                             ends: self.timeLeftEnabled, chosen: self.chosenCountdowns,
@@ -218,8 +226,8 @@ final class NotchCalendarService: NSObject, ObservableObject {
         observers.forEach(NotificationCenter.default.removeObserver)
         observers.removeAll()
         permissionSubscription = nil
+        monthSubscription = nil
         reader = nil
-        visibleMonth = nil
         countdownEnabled = false
         timeLeftEnabled = false
         excludedCalendars = []

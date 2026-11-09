@@ -50,9 +50,7 @@ struct NotchCalendarMonthView: View {
         let selected = selectedDay.map { calendar.isDate(date, inSameDayAs: $0) } ?? false
         let inMonth = calendar.isDate(date, equalTo: month, toGranularity: .month)
         let dayEvents = NotchCalendarSupport.events(events, on: date)
-        let colors = dayEvents.reduce(into: [NotchCalendarColor]()) { result, event in
-            if result.count < 3 && !result.contains(event.color) { result.append(event.color) }
-        }
+        let colors = NotchCalendarSupport.dayMarks(events, on: date)
         return Button { select(date) } label: {
             VStack(spacing: 2) {
                 // The number alone: a formatted day carries the language's suffix,
@@ -122,9 +120,7 @@ struct NotchCalendarWeekStrip: View {
         let isToday = calendar.isDate(date, inSameDayAs: now)
         let selected = selectedDay.map { calendar.isDate(date, inSameDayAs: $0) } ?? false
         let dayEvents = NotchCalendarSupport.events(events, on: date)
-        let colors = dayEvents.reduce(into: [NotchCalendarColor]()) { result, event in
-            if result.count < 3 && !result.contains(event.color) { result.append(event.color) }
-        }
+        let colors = NotchCalendarSupport.dayMarks(events, on: date)
         // A second tap on the selected day returns to the coming week.
         return Button { selected ? week() : select(date) } label: {
             VStack(spacing: 2) {
@@ -215,9 +211,7 @@ struct NotchCalendarMonthGrid: View {
         let selected = selectedDay.map { calendar.isDate(date, inSameDayAs: $0) } ?? false
         let inMonth = calendar.isDate(date, equalTo: month, toGranularity: .month)
         let dayEvents = NotchCalendarSupport.events(events, on: date)
-        let colors = dayEvents.reduce(into: [NotchCalendarColor]()) { result, event in
-            if result.count < 3 && !result.contains(event.color) { result.append(event.color) }
-        }
+        let colors = NotchCalendarSupport.dayMarks(events, on: date)
         return Button { select(date) } label: {
             VStack(spacing: 0) {
                 Text(calendar.component(.day, from: date), format: .number)

@@ -78,10 +78,12 @@ enum NotchDashboardCards {
                                              figures: [verdict(NotchMetricReading.percent(sample.gpu), tone)],
                                              lines: [line(.gpu, in: samples, \.gpu, window: window, now: now)])
         case .memory:
-            let tone = NotchMetricHealth.tone(metric: .memory,
-                                              percent: NotchMetricReading.percentValue(sample.memory))
+            // The figure's colour is the machine's pressure, in the shared
+            // policy: the card, the panel's pill and the menu bar's dot are one
+            // reading in three places, and they never disagree.
             return NotchDashboardCardReading(metric: .memory, symbol: "memorychip",
-                                             figures: [verdict(NotchMetricReading.percent(sample.memory), tone)],
+                                             figures: [memoryVerdict(NotchMetricReading.percent(sample.memory),
+                                                                    sample.memoryPressure)],
                                              lines: [line(.memory, in: samples, \.memory,
                                                           window: window, now: now)])
         case .network:
@@ -153,6 +155,17 @@ enum NotchDashboardCards {
     /// A figure in a metric's own colour, and quiet when there is nothing.
     private static func figure(_ text: String?, _ role: NotchChartRole) -> NotchMetricFigure {
         NotchMetricFigure(text: text, voice: text == nil ? .quiet : .identity(role))
+    }
+
+    /// Memory is the machine's own verdict, so the tone is read from the
+    /// pressure the kernel reports - the same classification the panel's pill
+    /// and the menu bar's dot draw. A share of what is used colours no memory
+    /// figure on its own; the figure only says the share.
+    static func memoryVerdict(_ text: String?, _ pressure: MemoryPressure) -> NotchMetricFigure {
+        guard let text, let tone = NotchMetricHealth.memoryTone(pressure) else {
+            return NotchMetricFigure(text: text, voice: .quiet)
+        }
+        return NotchMetricFigure(text: text, voice: .verdict(tone))
     }
 
     private static func verdict(_ text: String?, _ tone: NotchMetricTone,
@@ -350,6 +363,9 @@ struct NotchDashboardSample: Equatable {
     var diskRead: Double? = nil
     var diskWrite: Double? = nil
     var watts: Double? = nil
+    /// The machine's own grading of its memory: the reading a memory card is
+    /// drawn in, whatever share of it is used.
+    var memoryPressure: MemoryPressure = .unknown
     /// The volume the page speaks for: its room left, and its whole.
     var diskFreeBytes: UInt64? = nil
     var diskTotalBytes: UInt64? = nil

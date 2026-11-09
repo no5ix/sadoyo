@@ -145,6 +145,32 @@ enum NotchMetricHealth {
         }
     }
 
+    /// The tone of the machine's own memory reading.
+    ///
+    /// Memory is the one reading the machine grades for itself: the pressure
+    /// the kernel reports. The card's figure, the panel's pill and the menu
+    /// bar's dot are that one classification drawn in three places, so a share
+    /// of what is used never colours a memory figure on its own, and a card
+    /// cannot say "fine" where its pill says "critical". A pressure the
+    /// machine does not grade is a reading with no verdict.
+    static func memoryTone(_ pressure: MemoryPressure) -> NotchMetricTone? {
+        switch pressure {
+        case .normal: return .nominal
+        case .warning: return .warning
+        case .critical: return .critical
+        case .unknown: return nil
+        }
+    }
+
+    /// The colour of the machine's memory reading, in the island's own ink: the
+    /// three voices of a verdict - green while ordinary, amber at a limit, red
+    /// past it - and the page's quiet colour when there is no verdict. The
+    /// panel draws the same three voices in its own ink, from the same tone.
+    static func memoryColor(_ pressure: MemoryPressure) -> Color {
+        guard let tone = memoryTone(pressure) else { return .white.opacity(0.45) }
+        return verdictColor(tone)
+    }
+
     /// The metric's own colour, while it carries no verdict.
     static func identityColor(_ metric: NotchDashboardMetric) -> Color {
         switch metric {

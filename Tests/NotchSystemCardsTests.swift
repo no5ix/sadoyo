@@ -62,11 +62,14 @@ enum NotchSystemCardsTests {
                      what + (missing.isEmpty ? "" : " - said short: \(missing.joined(separator: ", "))"))
     }
 
-    /// A full moment of the machine, at the numbers the reference's card shows.
+    /// A full moment of the machine, at the numbers the reference's card shows:
+    /// a Mac at its work and at ease, with the machine grading its own memory
+    /// ordinary.
     private static var full: NotchDashboardSample {
         NotchDashboardSample(cpu: 0.13, gpu: 0.22, memory: 0.41,
                              netDown: 6_200, netUp: 2_400,
                              diskRead: 2_400_000, diskWrite: 6_200_000, watts: 30,
+                             memoryPressure: .normal,
                              diskFreeBytes: 193_000_000_000, diskTotalBytes: 500_000_000_000)
     }
 
@@ -160,10 +163,47 @@ enum NotchSystemCardsTests {
                 suite.expect(verdict(card(NotchDashboardSample(gpu: share), .gpu)) == wanted,
                              "a GPU at \(Int(share * 100))% is \(wanted)")
             }
-            for (share, wanted) in [(0.41, NotchMetricTone.nominal), (0.80, .warning), (0.90, .critical)] {
-                suite.expect(verdict(card(NotchDashboardSample(memory: share), .memory)) == wanted,
-                             "memory at \(Int(share * 100))% is \(wanted)")
+            // Memory is the one reading the machine grades for itself, so the
+            // card's figure wears the pressure the kernel reports - the same
+            // classification the panel's pill and the menu bar's dot are drawn
+            // from. A share of what is used colours no memory figure on its own.
+            for (pressure, wanted) in [(MemoryPressure.normal, NotchMetricTone.nominal),
+                                       (.warning, .warning), (.critical, .critical)] {
+                suite.expect(verdict(card(NotchDashboardSample(memory: 0.41, memoryPressure: pressure), .memory)) == wanted,
+                             "memory under \(pressure) pressure is \(wanted), whatever share is used")
             }
+            let ungraded = card(NotchDashboardSample(memory: 0.41, memoryPressure: .unknown), .memory)
+            suite.expect(figure(ungraded)?.voice == .quiet && figure(ungraded)?.text == "41%",
+                         "memory the machine does not grade is drawn as missing, and not painted healthy")
+            // The figure says the share and the colour says the machine: one is
+            // never derived from the other.
+            suite.expect(figure(card(NotchDashboardSample(memory: 0.90, memoryPressure: .normal), .memory))?.text == "90%"
+                             && figure(card(NotchDashboardSample(memory: 0.11, memoryPressure: .critical), .memory))?.text == "11%",
+                         "the memory figure spells the share while its colour follows the machine")
+            // One colour, in every place the reading is spoken: the card's figure
+            // and the shared policy answer alike, at every pressure.
+            for pressure in [MemoryPressure.normal, .warning, .critical, .unknown] {
+                let reading = card(NotchDashboardSample(memory: 0.62, memoryPressure: pressure), .memory)
+                suite.expect(reading.figures.first?.color == NotchMetricHealth.memoryColor(pressure),
+                             "the memory card's figure is drawn in the shared memory colour for \(pressure)")
+            }
+            suite.expect(NotchMetricHealth.memoryColor(.normal) == NotchSplashPalette.green
+                             && NotchMetricHealth.memoryColor(.warning) == NotchSplashPalette.amber
+                             && NotchMetricHealth.memoryColor(.critical) == NotchSplashPalette.red,
+                         "ordinary memory is green, a warning amber, a critical red")
+            suite.expect(NotchMetricHealth.memoryTone(.normal) == .nominal
+                             && NotchMetricHealth.memoryTone(.warning) == .warning
+                             && NotchMetricHealth.memoryTone(.critical) == .critical
+                             && NotchMetricHealth.memoryTone(.unknown) == nil,
+                         "card, pill and menu bar dot are graded by the one classification, and a machine that grades nothing has no verdict")
+            // The figure and the mark turn together when the machine's grading
+            // turns, on the same share of memory.
+            let calm = card(NotchDashboardSample(memory: 0.90, memoryPressure: .normal), .memory)
+            let strained = card(NotchDashboardSample(memory: 0.90, memoryPressure: .critical), .memory)
+            suite.expect(!calm.wantsAttention && strained.wantsAttention
+                             && calm.figures.first?.color == NotchSplashPalette.green
+                             && strained.figures.first?.color == NotchSplashPalette.red,
+                         "the card's figure and its mark both follow the machine's pressure")
             // No reading, no verdict: the figure is quiet, not green.
             let none = card(NotchDashboardSample(), .cpu)
             suite.expect(figure(none)?.voice == .quiet && figure(none)?.text == nil,
@@ -227,7 +267,9 @@ enum NotchSystemCardsTests {
                              && NotchMetricReading.percent(Double.nan) == nil
                              && NotchMetricReading.percent(3) == "100%",
                          "one rule for a share and its gate, and a gate quieter than the reading lets the reading answer")
-            // Memory's thresholds are a pressure's, not a load's: no gate.
+            // Memory's thresholds stay where they were written - the System
+            // page's tile and the alerts read them - while the compact card's
+            // figure is graded by the machine's own pressure.
             suite.expect(NotchMetricHealth.tone(metric: .memory, percent: 86) == .critical
                              && NotchMetricHealth.memory.warning == 70
                              && NotchMetricHealth.memory.critical == 85,

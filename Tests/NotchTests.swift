@@ -3865,6 +3865,7 @@ enum NotchTests {
                                                            locale: british, calendar: calendar) == "Tue 09:00",
                      "the tile reads a start today as its time and adds the weekday for a later day, in the calendar's zone")
         calendarMonthContracts(suite)
+        calendarSharedContracts(suite)
     }
 
     /// Events chosen from their menu in the island, with the countdown for
@@ -4034,13 +4035,9 @@ enum NotchTests {
         suite.expect(distant.duration <= 43 * 86400 && distant.start > now,
                "browsing a distant month reads only its grid, never every intervening event")
         let current = NotchCalendarSupport.readInterval(month: nil, now: now, calendar: calendar)
-        suite.expect(!NotchCalendarSupport.needsCurrentRead(visible: interval, current: current,
-                                                           countdownEnabled: true)
-                     && NotchCalendarSupport.needsCurrentRead(visible: distant, current: current,
-                                                              countdownEnabled: true)
-                     && !NotchCalendarSupport.needsCurrentRead(visible: distant, current: current,
-                                                               countdownEnabled: false),
-                     "the countdown keeps today's events while browsing another month without extra reads when off")
+        suite.expect(current == NotchCalendarSupport.readIntervals(month: nil, now: now, calendar: calendar).visible
+                         && current == NotchCalendarSupport.readIntervals(month: nil, now: now, calendar: calendar).current,
+                     "with no month shown, the reader is asked for today's seven days and nothing else")
         let resting = NotchCalendarSupport.readInterval(month: nil, now: now, calendar: calendar)
         suite.expect(resting.start == date(2026, 3, 31) && resting.end == date(2026, 4, 7),
                "closing the month returns the reader to today's seven-day interval")
@@ -4079,6 +4076,191 @@ enum NotchTests {
                "a repeating all-day occurrence keeps its local day")
         suite.expect(link(ended, identifier: "", recurring: false) == nil,
                "an appointment without an identifier falls back to opening Calendar itself")
+    }
+
+    /// The one calendar the island draws: the month its views share, the spans
+    /// a read covers, the marks a day carries, and the state that says which
+    /// month is being looked at.
+    ///
+    /// The dashboard's card and the Calendar page ask these same questions of
+    /// these same values, so a day cannot carry one set of marks in the card
+    /// and another on the page, and a visit to the page cannot leave the card
+    /// reading a week of its own.
+    private static func calendarSharedContracts(_ suite: TestSuite) {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "America/New_York")!
+        calendar.firstWeekday = 1
+        func date(_ year: Int, _ month: Int, _ day: Int, _ hour: Int = 0) -> Date {
+            calendar.date(from: DateComponents(year: year, month: month, day: day, hour: hour))!
+        }
+        let now = date(2026, 3, 31, 9)
+        let today = calendar.startOfDay(for: now)
+        let weekEnd = calendar.date(byAdding: .day, value: 7, to: today) ?? now
+
+        // One read, drawn twice
+
+        // Whatever month is browsed, the read covers the whole grid drawn for
+        // it, and keeps today's seven days for the countdown, the Controls
+        // tile and the week's agenda.
+        for month in [now, date(2026, 2, 14), date(2026, 4, 1), date(2026, 12, 25),
+                      date(2027, 12, 25), date(2028, 2, 29)] {
+            let reads = NotchCalendarSupport.readIntervals(month: month, now: now, calendar: calendar)
+            let days = NotchCalendarSupport.monthDays(containing: month, calendar: calendar)
+            let gridEnd = days.last.flatMap { calendar.date(byAdding: .day, value: 1, to: $0) } ?? now
+            suite.expect(days.allSatisfy { reads.visible.contains($0) }
+                             && reads.visible.start <= days[0] && reads.visible.end >= gridEnd,
+                   "the read covers every day of the six-week grid shown for \(calendar.component(.month, from: month))")
+            suite.expect(reads.current.start <= today && reads.current.end >= weekEnd,
+                   "the read keeps today's seven days while month \(calendar.component(.month, from: month)) is shown")
+        }
+        let same = NotchCalendarSupport.readIntervals(month: now, now: now, calendar: calendar)
+        suite.expect(same.current == same.visible, "the month the Mac is in is one read, not two")
+        let far = NotchCalendarSupport.readIntervals(month: date(2027, 12, 25), now: now, calendar: calendar)
+        suite.expect(far.current != far.visible && far.visible.duration <= 43 * 86400
+                         && far.current.duration <= 8 * 86400,
+               "a month a year away is its own grid and today its own week: no read of every month between")
+
+        // What a day carries
+
+        let red = NotchCalendarColor(red: 1, green: 0, blue: 0)
+        let blue = NotchCalendarColor(red: 0, green: 0, blue: 1)
+        let green = NotchCalendarColor(red: 0, green: 1, blue: 0)
+        func event(_ id: String, _ start: Date, _ end: Date, _ color: NotchCalendarColor) -> NotchCalendarEvent {
+            var event = NotchCalendarEvent(id: id, title: id, calendar: id, start: start, end: end,
+                                           allDay: false, location: "")
+            event.color = color
+            return event
+        }
+        let day = date(2026, 3, 31)
+        let crowded = [
+            event("late", date(2026, 3, 31, 15), date(2026, 3, 31, 16), green),
+            event("early", date(2026, 3, 31, 9), date(2026, 3, 31, 10), red),
+            event("nine", date(2026, 3, 31, 11), date(2026, 3, 31, 12), blue),
+            event("half", date(2026, 3, 31, 11), date(2026, 3, 31, 12), blue),
+            event("one", date(2026, 3, 31, 13), date(2026, 3, 31, 14), red),
+        ]
+        suite.expect(NotchCalendarSupport.dayMarks(crowded, on: day, calendar: calendar) == [red, blue, green],
+               "one day of five appointments carries three marks, in the order the appointments start")
+        suite.expect(NotchCalendarSupport.dayMarks([event("a", date(2026, 3, 31, 9), date(2026, 3, 31, 10), red),
+                                                    event("b", date(2026, 3, 31, 14), date(2026, 3, 31, 15), red)],
+                                                   on: day, calendar: calendar) == [red],
+               "two appointments of one calendar are one mark, not two")
+        suite.expect(NotchCalendarSupport.dayMarks([], on: day, calendar: calendar).isEmpty
+                         && NotchCalendarSupport.dayMarks(crowded, on: date(2026, 4, 1), calendar: calendar).isEmpty,
+               "a day with nothing on it carries no mark, in the month shown and in the month after")
+        let midnightEnd = event("night", date(2026, 3, 31, 22), date(2026, 4, 1), red)
+        suite.expect(NotchCalendarSupport.dayMarks([midnightEnd], on: day, calendar: calendar) == [red]
+                         && NotchCalendarSupport.dayMarks([midnightEnd], on: date(2026, 4, 1), calendar: calendar).isEmpty,
+               "an appointment ending at midnight marks its own day and not tomorrow's")
+        // A weekly series is read as its occurrences, and every occurrence falls
+        // on the day it happens on - which is what the grid marks.
+        let series = [event("w1", date(2026, 3, 2, 9), date(2026, 3, 2, 10), blue),
+                      event("w2", date(2026, 3, 9, 9), date(2026, 3, 9, 10), blue),
+                      event("w3", date(2026, 3, 16, 9), date(2026, 3, 16, 10), blue)]
+        let march = NotchCalendarSupport.monthDays(containing: date(2026, 3, 10), calendar: calendar)
+        suite.expect(march.compactMap { day in
+            NotchCalendarSupport.dayMarks(series, on: day, calendar: calendar).isEmpty
+                ? nil : calendar.component(.day, from: day)
+        } == [2, 9, 16],
+               "a weekly series marks every occurrence, and no other day of the grid")
+
+        // One month, two views
+
+        // The card's grid and the page's grid are the same days of the same
+        // month, read over the same list: a February, a March of series, and a
+        // December of one crowded day, each drawn twice.
+        let events = NotchCalendarSupport.ordered(crowded + series)
+        for month in [date(2026, 2, 14), date(2026, 3, 10), date(2026, 12, 25)] {
+            let reads = NotchCalendarSupport.readIntervals(month: month, now: now, calendar: calendar)
+            let card = NotchCalendarSupport.ordered(events + [])
+            let page = NotchCalendarSupport.ordered(events + [])
+            let days = NotchCalendarSupport.monthDays(containing: month, calendar: calendar)
+            suite.expect(days.allSatisfy { reads.visible.contains($0) },
+                   "every day of month \(calendar.component(.month, from: month))'s grid is inside the read")
+            suite.expect(days.allSatisfy {
+                NotchCalendarSupport.dayMarks(card, on: $0, calendar: calendar)
+                    == NotchCalendarSupport.dayMarks(page, on: $0, calendar: calendar)
+                    && NotchCalendarSupport.events(card, on: $0, calendar: calendar)
+                        == NotchCalendarSupport.events(page, on: $0, calendar: calendar)
+            }, "the card's grid and the page's grid of the same month carry the same marks and appointments")
+            let marked = days.filter { !NotchCalendarSupport.dayMarks(card, on: $0, calendar: calendar).isEmpty }
+            suite.expect(marked.allSatisfy { day in
+                !NotchCalendarSupport.events(card, on: day, calendar: calendar).isEmpty
+            } && days.allSatisfy { day in
+                NotchCalendarSupport.events(card, on: day, calendar: calendar).isEmpty
+                    == NotchCalendarSupport.dayMarks(card, on: day, calendar: calendar).isEmpty
+            }, "a day of the grid carries marks exactly when it has appointments, and none when it has nothing")
+        }
+
+        // The month and the day the island is looking at
+
+        func localDay(_ year: Int, _ month: Int, _ dayOfMonth: Int) -> Date {
+            var parts = DateComponents(); parts.year = year; parts.month = month; parts.day = dayOfMonth
+            return Calendar.current.startOfDay(for: Calendar.current.date(from: parts) ?? Date())
+        }
+        let display = NotchCalendarDisplay(now: Date())
+        suite.expect(display.focus == Calendar.current.startOfDay(for: Date()) && display.selectedDay == nil,
+               "the island's calendar opens on today and reads the coming week")
+        display.select(localDay(2026, 3, 31))
+        suite.expect(display.focus == localDay(2026, 3, 31) && display.selectedDay == localDay(2026, 3, 31),
+               "picking a day reads that day and builds the grid around it")
+        display.moveMonth(-1)
+        suite.expect(display.focus == localDay(2026, 2, 1) && display.selectedDay == localDay(2026, 2, 28),
+               "a month earlier keeps a day the new month has: the 31st of March becomes the 28th of February")
+        display.select(localDay(2028, 2, 29))
+        display.moveMonth(1)
+        suite.expect(display.selectedDay == localDay(2028, 3, 29), "a leap day moves to the 29th of March, and is not lost")
+        display.moveMonth(-1)
+        suite.expect(display.focus == localDay(2028, 2, 1) && display.selectedDay == localDay(2028, 2, 29),
+               "back to a leap February keeps its 29th")
+        display.showWeek()
+        suite.expect(display.selectedDay == nil, "back to the week leaves no day picked")
+        let weekStart = display.focus
+        display.moveWeek(1)
+        suite.expect(display.focus == Calendar.current.date(byAdding: .day, value: 7, to: weekStart)
+                         && display.selectedDay == Calendar.current.date(byAdding: .day, value: 7, to: weekStart),
+               "the strip steps a whole week and reads the day it lands on")
+        display.moveWeek(-1)
+        suite.expect(display.focus == weekStart, "and steps back to the week it left")
+        display.goToday()
+        suite.expect(display.focus == Calendar.current.startOfDay(for: Date())
+                         && display.selectedDay == Calendar.current.startOfDay(for: Date()),
+               "today lands on this month and reads today")
+        // A month is a read and a day is not: the grid's six weeks are read for
+        // any of its days, so what reaches the reader is the month, once. The
+        // island's own subscription to the month shown is this pipeline.
+        var months: [Date] = []
+        let watching = display.$focus
+            .map { NotchCalendarSupport.monthStart(of: $0) }
+            .removeDuplicates()
+            .dropFirst()
+            .sink { months.append($0) }
+        let shown = display.focus
+        let inMonth = Calendar.current.date(byAdding: .day, value: 1,
+                                            to: NotchCalendarSupport.monthStart(of: shown)) ?? shown
+        display.show(shown)
+        display.select(shown)
+        display.show(inMonth)
+        suite.expect(months.isEmpty,
+               "the same month asked again, and moved within, asks for no second read")
+        display.show(localDay(2030, 5, 5))
+        suite.expect(months == [localDay(2030, 5, 1)], "a new month is one read")
+        display.show(localDay(2030, 5, 20))
+        suite.expect(months.count == 1, "moving within the month shown asks for no second read")
+        watching.cancel()
+        // The card and the page ask the same two questions of one state, so the
+        // month browsed on the page is the month the card draws, and the day
+        // read on the page is the day the card reads.
+        suite.expect(display.focus == localDay(2030, 5, 20)
+                         && NotchCalendarSupport.monthStart(of: display.focus) == localDay(2030, 5, 1),
+               "the month the grid stands on is the month the read is asked for")
+        display.select(localDay(2030, 5, 12))
+        suite.expect(display.selectedDay == localDay(2030, 5, 12) && display.selectedDate == localDay(2030, 5, 12)
+                         && NotchCalendarSupport.monthStart(of: display.focus) == localDay(2030, 5, 1),
+               "the card and the page stand on one month and read one day")
+        display.showWeek()
+        suite.expect(display.selectedDate == Calendar.current.startOfDay(for: Date()),
+               "with no day picked, both read today")
     }
 
 }

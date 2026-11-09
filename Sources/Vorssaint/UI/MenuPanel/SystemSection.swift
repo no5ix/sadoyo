@@ -664,7 +664,7 @@ struct UsageBar: View {
 }
 
 /// Traffic-light pill for memory pressure: green = normal, yellow = caution,
-/// red = critical.
+/// red = critical, quiet when the machine grades nothing.
 struct PressureIndicator: View {
     @ObservedObject private var l10n = L10n.shared
     @Environment(\.colorScheme) private var colorScheme
@@ -686,11 +686,17 @@ struct PressureIndicator: View {
     }
 
     private var color: Color {
-        switch pressure {
-        case .normal: return PanelMetricColor.green(for: colorScheme)
+        // The tone is the shared classification, the one the dashboard's memory
+        // card colours its figure with: the machine's own grading of its
+        // memory, said twice. The ink is the window's, for a light panel and a
+        // dark island do not want the same green.
+        switch NotchMetricHealth.memoryTone(pressure) {
+        case .nominal: return PanelMetricColor.green(for: colorScheme)
         case .warning: return PanelMetricColor.yellow(for: colorScheme)
         case .critical: return PanelMetricColor.red(for: colorScheme)
-        case .unknown: return .secondary
+        // A machine that grades nothing, and a voice that is no verdict: the
+        // pill has nothing to shout, and rests in the page's own quiet ink.
+        case .none, .some(.identity): return .secondary
         }
     }
 

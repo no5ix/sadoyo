@@ -155,6 +155,11 @@ enum NotchDashboardLayout {
     /// The mark before the month's name, at the size the Calendar page's header
     /// wears a mark, so the card's month and the page's month lead alike.
     static let calendarMarkSize: CGFloat = 10.5
+    /// The section's mark is the card's way to the Calendar page, so it is a
+    /// button's own box: as tall as the header's row and as wide as the card's
+    /// other marks, so the click that opens the page can be aimed at and is
+    /// never the click that picks a day.
+    static var calendarMarkSide: CGFloat { calendarOpenMarkSide }
     /// Room kept at both edges of the month's name for the marks that ride the
     /// header's trailing edge: three of them, at the mark's own width and one
     /// gap. The name is centred, so the room is kept on both sides, and the

@@ -12,12 +12,17 @@ struct NotchCalendarView: View {
     @ObservedObject private var permissions = Permissions.shared
     @AppStorage(DefaultsKey.notchCalendarCountdown) private var countdownForEvery = false
     @Environment(\.notchBand) private var band
-    /// The day the month grid or the week strip is built around.
-    @State private var focus = Date()
-    @State private var selectedDay: Date?
+    /// The month the grid is built around, and the day read: the island's own
+    /// state, shared with the dashboard's card, so the two views are one
+    /// calendar and a visit to the page leaves the month where it was.
+    @ObservedObject private var islandDisplay = NotchCalendarDisplay.shared
+    /// A preview in Settings browses a month of its own, so what the settings
+    /// page is looking at never moves what the island shows.
+    @StateObject private var previewDisplay = NotchCalendarDisplay()
     /// The strip's month grid, in place of the strip and the cards.
     @State private var showingMonth = false
     private var text: NotchCalendarStrings { FeatureStrings.notchCalendar(l10n.language) }
+    private var display: NotchCalendarDisplay { preview ? previewDisplay : islandDisplay }
     /// A month grid needs six rows beside an agenda; anything shorter shows
     /// the week as a strip above a vertical agenda.
     private var showsMonth: Bool { size.height >= 300 && size.width >= 420 }
@@ -49,8 +54,8 @@ struct NotchCalendarView: View {
                             }
                         }
                     }
-                    .onChange(of: Calendar.current.startOfDay(for: context.date)) { _, _ in
-                        if selectedDay == nil { focus = context.date }
+                    .onChange(of: Calendar.current.startOfDay(for: context.date)) { _, date in
+                        if display.selectedDay == nil { display.show(date) }
                     }
                 }
                 // The month's name and the way through it head the page from
@@ -64,45 +69,34 @@ struct NotchCalendarView: View {
         // Day and month names follow the app's language; the order of the
         // date and the 12/24-hour clock follow the user's region.
         .environment(\.locale, l10n.language.formattingLocale())
-        .onAppear { if ownsMonth { calendar.showMonth(focus) } }
-        .onChange(of: focus) { previous, date in
-            // A month read already covers every week of that month, so
-            // moving the strip within it keeps the loaded events.
-            if !Calendar.current.isDate(previous, equalTo: date, toGranularity: .month) { calendar.showMonth(date) }
-        }
         // Escape returns from the month grid to the strip before the island closes.
         .onChange(of: showingMonth && !showsMonth) { _, showing in
             guard !preview else { return }
             NotchService.shared.setPageLayer(.calendar, close: showing ? { showingMonth = false } : nil)
         }
         .onDisappear {
-            if ownsMonth { calendar.showMonth(nil) }
+            // The month and the day are the island's and stay as they were:
+            // the dashboard's card draws the same month from the same events.
             if !preview { NotchService.shared.setPageLayer(.calendar, close: nil); calendar.revealing = nil }
         }
     }
 
-    /// The month the service reads belongs to the island's own page; a preview
-    /// in Settings borrows it only while the island shows another page.
-    private var ownsMonth: Bool {
-        !preview || !(NotchService.shared.expanded && NotchService.shared.selected == .calendar)
-    }
-
     private func monthView(now: Date) -> some View {
-        NotchCalendarMonthView(month: focus, selectedDay: selectedDay, now: now,
+        NotchCalendarMonthView(month: display.focus, selectedDay: display.selectedDay, now: now,
                                events: calendar.events, text: text, select: select)
     }
 
     private func weekStrip(now: Date) -> some View {
-        NotchCalendarWeekStrip(focus: focus, selectedDay: selectedDay, now: now,
+        NotchCalendarWeekStrip(focus: display.focus, selectedDay: display.selectedDay, now: now,
                                events: calendar.events, text: text, select: select) {
-            selectedDay = nil
-            focus = now
+            display.showWeek(now: now)
         }
     }
 
     /// Picking a day lands back on the strip with that day.
     private func monthGrid(now: Date) -> some View {
-        NotchCalendarMonthGrid(month: focus, selectedDay: selectedDay, now: now, height: size.height,
+        NotchCalendarMonthGrid(month: display.focus, selectedDay: display.selectedDay, now: now,
+                               height: size.height,
                                events: calendar.events, text: text) { date in
             select(date)
             showingMonth = false
@@ -114,8 +108,8 @@ struct NotchCalendarView: View {
     /// the week strip it opens the month grid, and over that grid it closes it.
     private var monthTitle: some View {
         let title = ViewThatFits(in: .horizontal) {
-            Text(focus, format: .dateTime.month(.wide).year())
-            Text(focus, format: .dateTime.month(.abbreviated).year())
+            Text(display.focus, format: .dateTime.month(.wide).year())
+            Text(display.focus, format: .dateTime.month(.abbreviated).year())
         }
         .font(.system(size: 13, weight: .semibold))
         .lineLimit(1)
@@ -171,32 +165,25 @@ struct NotchCalendarView: View {
     }
 
     private func moveWeek(_ offset: Int) {
-        guard let date = Calendar.current.date(byAdding: .day, value: offset * 7, to: focus) else { return }
-        selectedDay = Calendar.current.startOfDay(for: date)
-        focus = date
+        display.moveWeek(offset)
     }
 
     private func moveMonth(_ offset: Int) {
-        guard let start = Calendar.current.dateInterval(of: .month, for: focus)?.start,
-              let date = Calendar.current.date(byAdding: .month, value: offset, to: start) else { return }
-        selectedDay = date
-        focus = date
+        display.moveMonth(offset)
     }
 
     private func select(_ date: Date) {
-        selectedDay = date
-        focus = date
+        display.select(date)
     }
 
     private func today(now: Date) {
-        selectedDay = Calendar.current.startOfDay(for: now)
-        focus = now
+        display.goToday(now: now)
     }
 
     private var agendaHeader: some View {
         HStack(spacing: 6) {
             Group {
-                if let selectedDay {
+                if let selectedDay = display.selectedDay {
                     Text(selectedDay, format: .dateTime.weekday(.abbreviated).day().month(.abbreviated))
                 } else {
                     Text(text.week)
@@ -205,10 +192,9 @@ struct NotchCalendarView: View {
             .font(.system(size: 13, weight: .semibold))
             .lineLimit(2)
             .frame(maxWidth: .infinity, alignment: .leading)
-            if selectedDay != nil {
+            if display.selectedDay != nil {
                 NotchIconButton(symbol: "calendar.badge.clock", title: text.week) {
-                    selectedDay = nil
-                    focus = Date()
+                    display.showWeek(now: Date())
                 }
             }
         }
@@ -221,6 +207,7 @@ struct NotchCalendarView: View {
     }
 
     private func groups(now: Date) -> [DayGroup] {
+        let selectedDay = display.selectedDay
         let days = selectedDay.map { [$0] } ?? (0..<7).compactMap {
             Calendar.current.date(byAdding: .day, value: $0, to: Calendar.current.startOfDay(for: now))
         }
@@ -235,7 +222,7 @@ struct NotchCalendarView: View {
         ScrollViewReader { proxy in
             ScrollView { appointmentList(now: now) }
                 .scrollIndicators(.automatic)
-                .id(selectedDay)
+                .id(display.selectedDay)
                 .onChange(of: calendar.loading ? nil : calendar.revealing, initial: true) { _, target in
                     guard !preview, let target else { return }
                     DispatchQueue.main.async {
@@ -259,7 +246,7 @@ struct NotchCalendarView: View {
             LazyVStack(alignment: .leading, spacing: 14) {
                 ForEach(groups, id: \.day) { group in
                     VStack(alignment: .leading, spacing: 7) {
-                        if selectedDay == nil { dayLabel(group.day, now: now) }
+                        if display.selectedDay == nil { dayLabel(group.day, now: now) }
                         ForEach(group.events) { event in
                             NotchCalendarEventRow(event: event, day: group.day, now: now,
                                                   isNext: event.id == next?.id, text: text,
@@ -294,7 +281,7 @@ struct NotchCalendarView: View {
                 .foregroundStyle(.white.opacity(0.45))
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 8) {
-                Text(selectedDay == nil ? text.empty : text.emptyDay)
+                Text(display.selectedDay == nil ? text.empty : text.emptyDay)
                     .font(.system(size: 12)).foregroundStyle(.white.opacity(0.65))
                     .fixedSize(horizontal: false, vertical: true)
                 // With no card to open it from and no room for it in the row.

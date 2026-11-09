@@ -615,6 +615,11 @@ def main():
           + declaration("Sources/Vorssaint/UI/MenuPanel/MenuPanelView.swift",
                         "    private var monitorNeeds:").replace("private var", "var", 1)
           + "}\n}\n")
+    # The machine's grading of its own memory, as the compact card's figure and
+    # the panel's pill both draw it: one classification, read out of the
+    # monitor's own enum so the two surfaces cannot drift apart in a test.
+    write("MemoryPressure.swift", "import Foundation\n"
+          + declaration(monitor, "enum MemoryPressure {"))
     write("SystemSectionBreakdown.swift", "import Foundation\n"
           + "extension SystemSectionBreakdownTests {\nfinal class Section: Fixture {\n"
           + declaration("Sources/Vorssaint/UI/MenuPanel/SystemSection.swift",

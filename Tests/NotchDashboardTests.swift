@@ -89,6 +89,80 @@ enum NotchDashboardTests {
                          "the month's name keeps the marks' room at both edges")
         }
 
+        suite.run("the calendar card is a reading, and its mark is its one door") {
+            func source(_ path: String) -> String { (try? String(contentsOfFile: path, encoding: .utf8)) ?? "" }
+            let dashboard = source("Sources/Vorssaint/UI/Notch/NotchDashboardView.swift")
+            let card = dashboard.components(separatedBy: "private struct NotchDashboardCalendarCard: View {").last ?? ""
+            let section = card.components(separatedBy: "/// The calendar card's month line:").first ?? card
+            // The card is a reading and not a door: no whole-card control, and no
+            // hover of the whole card lighting as though it were a button.
+            suite.expect(!section.contains("Button(action: open)"),
+                         "the card's whole surface is no way to the page")
+            suite.expect(!section.contains(".onHover")
+                             && !section.contains("NotchControlSurface(cornerRadius: NotchDashboardLayout.cornerRadius"),
+                         "the card lights with no hover: it is a reading, and only its controls light")
+            // An appointment of the day is information: it is no button, it wears
+            // no wash under the pointer, and it promises no navigation.
+            let row = section.components(separatedBy: "private func eventRow(").last
+                .map { $0.components(separatedBy: "/// The same span").first ?? $0 } ?? ""
+            suite.expect(!row.isEmpty && !row.contains("Button(") && !row.contains("buttonStyle")
+                             && !row.contains(".help(") && !row.contains("accessibilityHint"),
+                         "an appointment of the day lights with nothing, answers no click, and promises no navigation")
+            // The section's mark at the header's leading edge is the card's one
+            // way to the Calendar page, and it is a control of its own.
+            let header = dashboard.components(separatedBy: "struct NotchDashboardCalendarHeader: View {").last ?? ""
+            suite.expect(header.contains("Button(action: onOpen)")
+                             && header.contains("Image(systemName: NotchModule.calendar.symbol)")
+                             && header.contains("notch.dashboard.calendar.mark"),
+                         "the section's mark, at the header's leading edge, is the card's way to the Calendar page")
+            suite.expect(section.contains("onOpen: openPage")
+                             && section.contains("service.select(.calendar)")
+                             && section.components(separatedBy: "service.select(").count - 1 == 1,
+                         "that way is the Calendar page, and it is the card's only one")
+            // The days, the months and the corner mark keep the clicks they had.
+            suite.expect(section.contains("display.select(date)")
+                             && section.contains("onPrevious: { display.moveMonth(-1) }")
+                             && section.contains("onNext: { display.moveMonth(1) }")
+                             && section.contains("openCalendarButton"),
+                         "a day still picks a day, the chevrons still move a month, and the corner mark still opens Calendar")
+            // The card draws the page's month, the page's day, and the service's
+            // one list: a day cannot carry one set of marks in the card and
+            // another on the page, and a visit to the page leaves the month and
+            // the day where they were, so nothing is read twice and nothing is
+            // drawn empty on the way back.
+            suite.expect(section.contains("NotchCalendarDisplay.shared")
+                             && section.contains("month: display.focus")
+                             && section.contains("selectedDay: display.selectedDay")
+                             && section.contains("events: calendar.events")
+                             && section.contains("NotchCalendarService.shared"),
+                         "the card draws the shared month, the shared day, and the one list of events")
+            // No page opens and closes a read of its own: the read follows the
+            // month shown, and leaving the page asks for no narrower read.
+            let page = source("Sources/Vorssaint/UI/Notch/NotchCalendarView.swift")
+            suite.expect(!page.contains("showMonth") && page.contains("NotchCalendarDisplay.shared"),
+                         "the Calendar page asks for no read of its own: it draws the month the island is showing")
+            // A month changing hands never blanks what is on screen: the events
+            // already read stay, and only a first read is a wait.
+            let service = source("Sources/Vorssaint/Services/Notch/NotchCalendarService.swift")
+            let refresh = service.components(separatedBy: "func refresh() {").last
+                .map { $0.components(separatedBy: "@objc private func timedRefresh").first ?? $0 } ?? ""
+            let asked = refresh.components(separatedBy: "task = Task").first ?? refresh
+            suite.expect(asked.contains("loading = events.isEmpty")
+                             && asked.components(separatedBy: "events = []").count - 1 == 1
+                             && asked.contains("guard EKEventStore.authorizationStatus(for: .event) == .fullAccess else {\n            events = []"),
+                         "a month changing hands clears nothing on screen: only a first read is a wait, and only a permission that stopped answering empties the grid")
+            let read = refresh.components(separatedBy: "task = Task").last ?? ""
+            suite.expect(read.components(separatedBy: "self.events = []").count - 1 == 1
+                             && read.contains("guard EKEventStore.authorizationStatus(for: .event) == .fullAccess else {\n                self.events = []"),
+                         "a read that finds the permission gone says so; a read that lands keeps what is on screen")
+            suite.expect(service.contains("NotchCalendarSupport.readIntervals")
+                             && refresh.contains("self.events = NotchCalendarSupport.ordered(result + currentResult)"),
+                         "the month's grid and today's week are joined into the one list every surface draws")
+            suite.expect(service.contains("NotchCalendarDisplay.shared.$focus")
+                             && service.components(separatedBy: "monthSubscription =").count - 1 == 2,
+                         "one subscription follows the month shown: made when the reader starts, dropped when it stops")
+        }
+
         suite.run("the calendar card has its place, and a page wide enough to hold it") {
             // The card is the page's, so it is measured as one shape: the grid
             // at the rows the grid draws itself, with the month's name above it.

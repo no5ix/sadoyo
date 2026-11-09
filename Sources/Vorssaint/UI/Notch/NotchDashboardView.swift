@@ -79,6 +79,7 @@ struct NotchDashboardView: View {
                                     netUp: snapshot.netUpBytesPerSec,
                                     diskRead: activity?.read, diskWrite: activity?.write,
                                     watts: snapshot.power?.systemWatts,
+                                    memoryPressure: snapshot.memoryPressure,
                                     diskFreeBytes: volume?.freeBytes, diskTotalBytes: volume?.totalBytes,
                                     samples: snapshot.metricSamples, sustained: sustain.tones)
     }
@@ -687,52 +688,41 @@ private struct NotchDashboardCard<Content: View>: View {
 /// The calendar as the page shows it: the month's grid at the rows the grid
 /// draws itself, the day's appointments beside it in the page's own colours,
 /// and the month's name with the way through the months above. It is the
-/// Calendar page's data, read by the Calendar page's own service — no second
-/// calendar, no second event list — drawn at the height of six weeks, and the
-/// card opens the page, where the month has room.
+/// Calendar page's data, read by the Calendar page's own service and around the
+/// Calendar page's own month and day - no second calendar, no second event
+/// list, no second idea of what month is being looked at - drawn at the height
+/// of six weeks.
+///
+/// The card is a reading and not a door: a day picks a day, a chevron moves a
+/// month, the mark at the header's leading edge opens the Calendar page, and
+/// the corner mark opens Calendar itself. An appointment is not a control: it
+/// says what is on that day, lights with nothing, and asks nothing of the page.
 private struct NotchDashboardCalendarCard: View {
     @ObservedObject var service: NotchService
     @ObservedObject private var calendar = NotchCalendarService.shared
+    /// The month the grid is built around and the day the appointments are read
+    /// for: the Calendar page's own state, so the card's month is the page's
+    /// month and the events under it are the events that month was read for.
+    @ObservedObject private var display = NotchCalendarDisplay.shared
     @ObservedObject private var permissions = Permissions.shared
     @ObservedObject private var l10n = L10n.shared
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    /// The month the grid is built around, and the day the appointments are read
-    /// for: the page's own two questions, asked here of the same grid.
-    @State private var focus = Date()
-    @State private var selectedDay: Date?
-    @State private var hover = false
 
     private var text: NotchCalendarStrings { FeatureStrings.notchCalendar(l10n.language) }
     private var now: Date { Date() }
-    private var selected: Date { selectedDay ?? Calendar.current.startOfDay(for: now) }
+    private var selected: Date { display.selectedDate }
 
     var body: some View {
-        ZStack(alignment: .topLeading) {
-            // The card is the way to the page, and the way is a control: the
-            // island's panel is not the key window, and a panel that is not key
-            // gives the first click of a pointer that has just arrived to a
-            // control. Everything in front of it keeps its own click: a day picks
-            // a day, a chevron moves a month, the corner mark opens Calendar
-            // itself, and an appointment opens the page at that appointment.
-            Button(action: open) { Color.clear.contentShape(Rectangle()) }
-                .buttonStyle(.plain)
-                .accessibilityHidden(true)
-            Group {
-                if permissions.calendarAccess == .fullAccess {
-                    content
-                } else {
-                    permission
-                }
+        Group {
+            if permissions.calendarAccess == .fullAccess {
+                content
+            } else {
+                permission
             }
-            .padding(NotchDashboardLayout.calendarCardPadding)
         }
+        .padding(NotchDashboardLayout.calendarCardPadding)
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .frame(height: NotchDashboardLayout.calendarCardHeight)
-        .modifier(NotchControlSurface(cornerRadius: NotchDashboardLayout.cornerRadius,
-                                      selected: hover, fillOpacity: NotchDashboardLayout.fillOpacity))
         .contentShape(RoundedRectangle(cornerRadius: NotchDashboardLayout.cornerRadius, style: .continuous))
-        .onHover { hover = $0 }
-        .animation(reduceMotion ? nil : .smooth(duration: 0.2), value: hover)
         // Calendar itself, in the card's own corner: the mark is there whatever
         // month is read and whatever day is picked, and its click is its own -
         // it opens the app, and asks nothing of the grid behind it.
@@ -776,12 +766,14 @@ private struct NotchDashboardCalendarCard: View {
             HStack(alignment: .top, spacing: NotchDashboardLayout.calendarColumnSpacing) {
                 VStack(alignment: .leading, spacing: NotchDashboardLayout.calendarHeaderGap) {
                     NotchDashboardCalendarHeader(
-                        month: focus, paneWidth: columns.left, text: text,
-                        onPrevious: { moveMonth(-1) }, onToday: today, onNext: { moveMonth(1) })
-                    NotchCalendarMonthGrid(month: focus, selectedDay: selectedDay, now: now,
+                        month: display.focus, paneWidth: columns.left, text: text,
+                        onOpen: openPage,
+                        onPrevious: { display.moveMonth(-1) }, onToday: { display.goToday(now: now) },
+                        onNext: { display.moveMonth(1) })
+                    NotchCalendarMonthGrid(month: display.focus, selectedDay: display.selectedDay, now: now,
                                            height: NotchDashboardLayout.calendarGridHeight,
                                            events: calendar.events, text: text) { date in
-                        selectedDay = Calendar.current.startOfDay(for: date)
+                        display.select(date)
                     }
                     .frame(width: NotchDashboardLayout.calendarGridWidth)
                 }
@@ -807,20 +799,10 @@ private struct NotchDashboardCalendarCard: View {
         }
     }
 
-    /// Back to the month the day is in, and to the day itself.
-    private func today() {
-        focus = now
-        selectedDay = nil
-    }
-
-    private func moveMonth(_ offset: Int) {
-        guard let next = Calendar.current.date(byAdding: .month, value: offset, to: focus) else { return }
-        focus = next
-        // The appointments follow the month being read, so the card never shows
-        // a day the grid no longer holds.
-        if let selectedDay, !Calendar.current.isDate(selectedDay, equalTo: next, toGranularity: .month) {
-            self.selectedDay = nil
-        }
+    /// The page's own way: the mark at the header's leading edge is the only
+    /// click in the card that opens the Calendar page.
+    private func openPage() {
+        service.select(.calendar)
     }
 
     /// The chosen day's appointments, in the page's order, with the page's
@@ -848,41 +830,41 @@ private struct NotchDashboardCalendarCard: View {
         }
     }
 
+    /// One appointment of the day, in the page's own colours. It is a reading
+    /// and not a control: it lights with nothing, it answers no click, and it
+    /// asks nothing of the page. The page, and the mark at the header's leading
+    /// edge, are the ways to the appointments.
     private func eventRow(_ event: NotchCalendarEvent, isNext: Bool) -> some View {
-        Button(action: open) {
-            HStack(alignment: .top, spacing: 5) {
-                RoundedRectangle(cornerRadius: 2)
-                    .fill(event.color.color)
-                    .frame(width: 3)
-                    .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 0) {
-                    HStack(spacing: 4) {
-                        Text(event.title.isEmpty ? text.untitled : event.title)
-                            .font(.system(size: 10, weight: .medium))
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-                        if isNext {
-                            Text(text.next)
-                                .font(.system(size: 8, weight: .semibold))
-                                .foregroundStyle(.white.opacity(0.7))
-                                .lineLimit(1)
-                        }
-                    }
-                    Text(eventTime(event))
-                        .font(.system(size: 9))
-                        .monospacedDigit()
-                        .foregroundStyle(.white.opacity(0.6))
+        HStack(alignment: .top, spacing: 5) {
+            RoundedRectangle(cornerRadius: 2)
+                .fill(event.color.color)
+                .frame(width: 3)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 4) {
+                    Text(event.title.isEmpty ? text.untitled : event.title)
+                        .font(.system(size: 10, weight: .medium))
                         .lineLimit(1)
+                        .truncationMode(.tail)
+                    if isNext {
+                        Text(text.next)
+                            .font(.system(size: 8, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.7))
+                            .lineLimit(1)
+                    }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                Text(eventTime(event))
+                    .font(.system(size: 9))
+                    .monospacedDigit()
+                    .foregroundStyle(.white.opacity(0.6))
+                    .lineLimit(1)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
         }
-        .buttonStyle(NotchButtonStyle(cornerRadius: 6, lifts: false))
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
         .accessibilityLabel(event.title.isEmpty ? text.untitled : event.title)
         .accessibilityValue(eventTime(event))
-        .accessibilityHint(text.openCalendar)
     }
 
     /// The same span the page's card spells for the same appointment.
@@ -925,10 +907,6 @@ private struct NotchDashboardCalendarCard: View {
         }
         .padding(.horizontal, 4)
     }
-
-    private func open() {
-        service.select(.calendar)
-    }
 }
 
 /// The calendar card's month line: the section's mark at the pane's leading
@@ -949,9 +927,12 @@ struct NotchDashboardCalendarHeader: View {
     /// The pane's width, from the card's own columns.
     let paneWidth: CGFloat
     let text: NotchCalendarStrings
+    /// The card's way to the Calendar page, asked of the section's own mark.
+    let onOpen: () -> Void
     let onPrevious: () -> Void
     let onToday: () -> Void
     let onNext: () -> Void
+    @ObservedObject private var l10n = L10n.shared
 
     var body: some View {
         ZStack {
@@ -967,12 +948,21 @@ struct NotchDashboardCalendarHeader: View {
                 .accessibilityIdentifier("notch.dashboard.calendar.title")
             HStack(spacing: 4) {
                 // The section's own mark, at the pane's leading edge: the card
-                // says what it is before it is read.
-                Image(systemName: NotchModule.calendar.symbol)
-                    .font(.system(size: NotchDashboardLayout.calendarMarkSize, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.7))
-                    .accessibilityHidden(true)
-                    .accessibilityIdentifier("notch.dashboard.calendar.mark")
+                // says what it is before it is read, and the mark is the card's
+                // one way to the Calendar page. Nothing else in the card is a
+                // way: a day picks a day, an appointment says what it is.
+                Button(action: onOpen) {
+                    Image(systemName: NotchModule.calendar.symbol)
+                        .font(.system(size: NotchDashboardLayout.calendarMarkSize, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.7))
+                        .frame(width: NotchDashboardLayout.calendarMarkSide,
+                               height: NotchDashboardLayout.calendarHeaderHeight)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(NotchButtonStyle(cornerRadius: 5, lifts: false))
+                .accessibilityLabel(NotchModule.calendar.title(l10n.language))
+                .accessibilityIdentifier("notch.dashboard.calendar.mark")
+                .help(NotchModule.calendar.title(l10n.language))
                 Spacer(minLength: 0)
                 monthButton("chevron.left", text.previousMonth, -1, action: onPrevious)
                 monthButton("circle.circle", text.today, 0, action: onToday)
