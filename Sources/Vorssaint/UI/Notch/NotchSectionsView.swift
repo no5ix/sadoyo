@@ -102,12 +102,14 @@ struct NotchSectionsView: View {
         let current = service.selected == module
         let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
         return Button { service.select(module) } label: {
-            VStack(spacing: 6) {
+            VStack(spacing: NotchSectionMark.titleGap) {
                 // The section's own mark, at the tile's size: the Codex knot
                 // for the section that reads that engine, the section's symbol
                 // for every other, and the same view the section's card wears.
+                // The box is wide enough for the largest mark the tiles draw, so
+                // every tile's name begins at the same height.
                 NotchSectionMark(module: module, size: 22)
-                    .frame(width: 25, height: 25)
+                    .frame(width: 28, height: 28)
                 Text(module.title(l10n.language))
                     .font(.system(size: 11, weight: .medium))
                     .lineLimit(2)
@@ -121,15 +123,30 @@ struct NotchSectionsView: View {
             .padding(.horizontal, 6)
             .frame(maxWidth: .infinity)
             .frame(height: NotchLayout.sectionTileHeight)
-            .background(.white.opacity(highlighted ? 0.12 : 0.045), in: shape)
+            // The checkmark is the selection, and the fill under it is only
+            // ground: a selected tile is a shade deeper than its neighbours, and
+            // it wears no outline of its own. An outline around the section that
+            // is already on the island competes with the mark that says so, and
+            // makes one tile the loudest thing on the page.
+            .background(.white.opacity(current ? 0.10 : highlighted ? 0.12 : 0.045), in: shape)
             .overlay {
-                shape.strokeBorder(.white.opacity(highlighted ? 0.55 : contrast == .increased ? 0.4 : 0.04), lineWidth: 1)
+                // The outline is the keys' own: it belongs to the tile the keys
+                // are on, and only while that tile is not the chosen one, so the
+                // pointer and the keyboard are told without a second selection
+                // mark. Where more contrast is asked for, an outline is kept on
+                // the chosen tile too, because a small mark at part white is not
+                // enough there to carry the answer by itself.
+                if highlighted, !current {
+                    shape.strokeBorder(.white.opacity(contrast == .increased ? 0.65 : 0.35), lineWidth: 1)
+                } else if contrast == .increased, current {
+                    shape.strokeBorder(.white.opacity(0.45), lineWidth: 1)
+                }
             }
             .overlay(alignment: .topTrailing) {
                 if current {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.system(size: 10))
-                        .foregroundStyle(.white.opacity(0.7))
+                        .foregroundStyle(.white.opacity(0.85))
                         .padding(7)
                 }
             }

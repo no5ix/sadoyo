@@ -1674,6 +1674,56 @@ enum NotchSplashTests {
         for key in keys { local.removeObject(forKey: key) }
     }
 
+
+    // MARK: The page, its spacing, and what it does not draw
+
+    /// The page before a reading, and the space a section's mark keeps from its
+    /// name.
+    ///
+    /// The page is its ruler, its value and its Start. The mark at display size
+    /// and the block of words that said what Start does and does not send are
+    /// gone, and the page's own height keeps no room for them: a page measured
+    /// for words it does not draw is a page of empty ground under the ruler.
+    /// The space between a mark and a name is the island's one rule, so the
+    /// section is not crowded in one surface and roomy in another.
+    static func pageChecks(_ suite: TestSuite) {
+        func source(_ path: String) -> String { (try? String(contentsOfFile: path, encoding: .utf8)) ?? "" }
+        let page = source("Sources/Vorssaint/UI/Notch/NotchSplashView.swift")
+        // One rule, in the island's own layout, at a gap a name is readable at.
+        suite.expect(NotchLayout.sectionMarkTitleGap >= 7 && NotchLayout.sectionMarkTitleGap <= 12,
+                     "a section's mark keeps a readable space from its name: \(NotchLayout.sectionMarkTitleGap)pt")
+        suite.expect(page.components(separatedBy: "\n")
+                         .filter { $0.contains("spacing: NotchLayout.sectionMarkTitleGap") }.count == 1,
+                     "the page's title line asks the shared rule, and writes no number of its own")
+        // The page before a session: the ruler, the value it rests on, and the
+        // ground under it. No mark at display size, no block of words.
+        suite.expect(NotchSplashLayout.pageSetupHeight
+                         == NotchLayout.timerRulerHeight + NotchLayout.rowSpacing + NotchSplashLayout.pageGroundHeight,
+                     "the page before a session is measured to its ruler and its ground: "
+                     + "\(NotchSplashLayout.pageSetupHeight)pt")
+        suite.expect(NotchSplashLayout.pageSetupHeight
+                         < NotchLayout.timerRulerHeight + NotchLayout.rowSpacing + 78,
+                     "the page keeps no room for the block of words it no longer draws: "
+                     + "\(NotchSplashLayout.pageSetupHeight)pt")
+        suite.expect(!page.contains("NotchSectionMark(module: .splash, size: 30")
+                         && !page.contains("Text(text.setupHint)"),
+                     "the page draws no display-size mark and no explanatory block")
+        suite.expect(page.contains("accessibilityIdentifier(\"notch.splash.start\")")
+                         && page.contains("notchBand(trailing:")
+                         && page.contains("intervalRow"),
+                     "the page keeps its header, its ruler and its one action")
+        // A reading's page is the longer page, and the ruler is the same control
+        // on both, so the setup page's shortening moves nothing the person aims at.
+        suite.expect(NotchSplashLayout.pageHeight > NotchSplashLayout.pageSetupHeight,
+                     "the page of a reading is the longer page, as it has been")
+        // The card in Live Activities is the compact card: measured without the
+        // trend it does not draw, which is what keeps the dashboard's height and
+        // the card's own the same number.
+        suite.expect(NotchSplashLayout.cardHeight(compact: true)
+                         < NotchSplashLayout.cardHeight(compact: false),
+                     "the dashboard's card is measured without the trend, as it is drawn")
+    }
+
     static func run(_ suite: TestSuite) {
         suite.run("splash settings") { settingsChecks(suite) }
         suite.run("splash reading") { readingChecks(suite) }
@@ -1688,6 +1738,7 @@ enum NotchSplashTests {
         suite.run("splash monitoring") { monitoringChecks(suite) }
         suite.run("splash ruler") { rulerChecks(suite) }
         suite.run("splash dashboard") { dashboardChecks(suite) }
+        suite.run("splash page") { pageChecks(suite) }
         suite.run("splash strings") { localizationChecks(suite) }
         suite.run("splash palette") { paletteChecks(suite) }
     }

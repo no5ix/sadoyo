@@ -759,15 +759,33 @@ struct NotchSectionMark: View {
     /// symbol the tint the gallery's tiles wear.
     var tint: Color? = nil
 
+    /// The gap a surface leaves between a mark and the name beside it, or under
+    /// it: one number for every surface, because the mark is drawn with a margin
+    /// of its own and a gap chosen per surface is a mark that sits tight in one
+    /// place and loose in another.
+    static let titleGap: CGFloat = NotchLayout.sectionMarkTitleGap
+
+    /// The side a mark of this module is drawn at. The Codex knot is drawn
+    /// larger than the type size it is asked for, because its artwork keeps a
+    /// margin of its own; a surface that reserves only the type size gives the
+    /// knot less room than it takes, and the overhang eats into the gap the
+    /// surface left for it. Reserving what is drawn keeps the gap the surface's
+    /// own, at every size and in every surface.
+    static func side(size: CGFloat, module: NotchModule) -> CGFloat {
+        module == .splash ? size * AgentProvider.codex.markScale : size
+    }
+
     var body: some View {
+        let side = Self.side(size: size, module: module)
         Group {
             if module == .splash {
                 NotchAgentMark(provider: .codex, size: size, tint: tint)
-                    .frame(width: size, height: size)
+                    .frame(width: side, height: side)
             } else {
                 Image(systemName: module.symbol)
                     .font(.system(size: size, weight: .medium))
                     .foregroundStyle(tint ?? module.dashboardTint)
+                    .frame(width: side, height: side)
             }
         }
         .accessibilityHidden(true)

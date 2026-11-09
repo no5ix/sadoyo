@@ -44,6 +44,24 @@ enum NotchSystemCardsTests {
         card.figures.indices.contains(index) ? card.figures[index] : nil
     }
 
+    /// Every throughput a card's corner says is said in full: the unit, the
+    /// slash, and the `s`. A corner that spells a speed the menu bar's compact
+    /// way - `17K`, `0B` - stops saying what its figure is a reading of, and
+    /// fails here.
+    private static func expectFullUnits(_ suite: TestSuite, _ cards: [NotchDashboardCardReading],
+                                         _ what: String) {
+        let missing = cards.flatMap { card in
+            card.figures.compactMap { figure -> String? in
+                guard let text = figure.text,
+                      text.contains(NotchDashboardCards.networkDownloadArrow)
+                        || text.contains(NotchDashboardCards.networkUploadArrow) else { return nil }
+                return text.contains("/s") ? nil : "\(card.metric.rawValue) \(text)"
+            }
+        }
+        suite.expect(missing.isEmpty,
+                     what + (missing.isEmpty ? "" : " - said short: \(missing.joined(separator: ", "))"))
+    }
+
     /// A full moment of the machine, at the numbers the reference's card shows.
     private static var full: NotchDashboardSample {
         NotchDashboardSample(cpu: 0.13, gpu: 0.22, memory: 0.41,
@@ -115,15 +133,17 @@ enum NotchSystemCardsTests {
             suite.expect(card(full, .power).symbol == "powerplug.fill"
                              && card(full, .power).figures[0].text == MetricFormat.wattsCompact(30),
                          "the draw's figure, in watts")
-            // A percent is already the shortest spelling of itself, so a card
-            // that reads a share has nothing smaller to fall back on.
+            // The share's figure is the whole of what the card has to say: it is
+            // spelled once, and the card has no second, shorter spelling of it.
             suite.expect(all.filter { $0.metric == .cpu || $0.metric == .gpu
-                                 || $0.metric == .memory }.allSatisfy { $0.figures[0].compact == nil },
-                         "a share has no shorter spelling of its own")
+                                 || $0.metric == .memory }.allSatisfy { $0.figures.count == 1 },
+                         "a share is one figure, spelled once")
             suite.expect(cpu.id == "cpu" && card(full, .disk).id == "disk",
                          "a card answers to its metric, and not to its place in the grid")
             suite.expect(all.filter { $0.sharesOneLine }.count == 5 && !card(full, .disk).sharesOneLine,
-                         "five cards read on one line; the disk's three are the page's wide corner")
+                         "five cards read on one line; the disk's corner is the page's two-line one")
+            suite.expect(all.allSatisfy { $0.figureLines.count == ($0.metric == .disk ? 2 : 1) },
+                         "the corner's lines are the metric's shape: two for the disk, one for the rest")
         }
 
         suite.run("a figure wears the reading's verdict and a line wears its metric") {
@@ -234,17 +254,12 @@ enum NotchSystemCardsTests {
             suite.expect(figure(net, 0)?.color == NotchSplashPalette.blue
                              && figure(net, 1)?.color == NotchSplashPalette.orange,
                          "blue in, orange out")
-            // The corner's short spelling: the same reading, written in fewer
-            // characters, for a tile whose corner is narrower than the words.
-            let netDown = figure(net, 0)
-            suite.expect(netDown?.compact == NotchDashboardCards.networkDownloadArrow
-                             + MetricFormat.networkRateCompact(6_200, inBits: false)
-                             && (netDown?.compact?.count ?? 0) < (netDown?.text?.count ?? 0)
-                             && (figure(net, 1)?.compact ?? "").hasPrefix(NotchDashboardCards.networkUploadArrow),
-                         "the card carries the same reading in a shorter spelling: "
-                             + (netDown?.text ?? "") + " at a pinch " + (netDown?.compact ?? ""))
-            suite.expect(card(NotchDashboardSample(), .network).figures.allSatisfy { $0.compact == nil },
-                         "a direction with no reading has no short spelling either")
+            // A card that has to fit says the same words smaller; it never says
+            // fewer of them. There is no short spelling of a throughput in the
+            // page at all, so no corner can be drawn without the unit.
+            expectFullUnits(suite, [net, card(NotchDashboardSample(netDown: 0, netUp: 0), .network),
+                                    card(NotchDashboardSample(netDown: 5_120_000, netUp: 12), .network)],
+                            "a throughput is spelled in full, unit and /s, at every speed")
             // The two directions of one wire are a pair: the card draws both
             // against the same instants.
             let samples = [SystemMetricSample(at: t0, netDown: 100, netUp: 200),
@@ -267,6 +282,71 @@ enum NotchSystemCardsTests {
                          "a negative and a not-a-number are both readings the Mac does not have")
         }
 
+        suite.run("the network pair keeps its order, its arrows and its whole unit at every speed") {
+            // The pair is read left to right: the download first and the upload
+            // second, at every relation between the two numbers. The order is
+            // the directions' and never the numbers', so a wire that is sending
+            // more than it takes does not turn the card's first figure into an
+            // upload.
+            for (down, up) in [(6_200_000.0, 2_400.0), (2_400.0, 986_000.0), (0.0, 0.0),
+                               (0.0, 102_400.0), (102_400.0, 0.0), (512.0, 128.0),
+                               (17_400.0, 6_450.0)] {
+                let pair = card(NotchDashboardSample(netDown: down, netUp: up), .network)
+                let first = figure(pair, 0)?.text ?? ""
+                let second = figure(pair, 1)?.text ?? ""
+                suite.expect(pair.figures.count == 2
+                                 && first.hasPrefix(NotchDashboardCards.networkDownloadArrow)
+                                 && second.hasPrefix(NotchDashboardCards.networkUploadArrow)
+                                 && first.contains(MetricFormat.networkRate(down, inBits: false))
+                                 && second.contains(MetricFormat.networkRate(up, inBits: false)),
+                             "the download first and the upload second at \(down) / \(up): \(first) \(second)")
+                suite.expect(first.contains("/s") && second.contains("/s"),
+                             "both directions keep their whole unit: \(first) \(second)")
+                suite.expect(pair.figureLines.count == 1 && pair.figureLines[0].figures.count == 2,
+                             "the pair is one line whatever the two numbers are")
+            }
+            // The colour belongs to the direction, so a pair whose upload is the
+            // bigger of the two cannot read as a pair that has changed places.
+            let sending = card(NotchDashboardSample(netDown: 100, netUp: 9_000_000), .network)
+            suite.expect(figure(sending, 0)?.color == NotchSplashPalette.blue
+                             && figure(sending, 1)?.color == NotchSplashPalette.orange,
+                         "the blue stays with the download and the orange with the upload")
+            // The card's own mark names the direction, and the mapping is the
+            // sample's: the first figure is the download's reading, the second
+            // the upload's, and not the bigger of the two.
+            let asymmetric = card(NotchDashboardSample(netDown: 1_024, netUp: 8_192), .network)
+            suite.expect(figure(asymmetric, 0)?.text == NotchDashboardCards.networkDownloadArrow + " "
+                             + MetricFormat.networkRate(1_024, inBits: false)
+                             && figure(asymmetric, 1)?.text == NotchDashboardCards.networkUploadArrow + " "
+                             + MetricFormat.networkRate(8_192, inBits: false),
+                         "the download's figure is the download's reading, and the upload's the upload's")
+        }
+
+        suite.run("the disk card is always two lines, the room above its arrows") {
+            for (free, read, write) in [(193_000_000_000.0, 2_400_000.0, 6_200_000.0),
+                                         (1_000.0, 0.0, 0.0),
+                                         (500_000_000_000.0, 0.0, 900.0),
+                                         (193_000_000_000.0, 5_120_000.0, 128.0)] {
+                let disk = card(NotchDashboardSample(diskRead: read, diskWrite: write,
+                                                     diskFreeBytes: UInt64(free)), .disk)
+                let lines = disk.figureLines
+                suite.expect(lines.count == 2 && lines[0].figures.count == 1 && lines[1].figures.count == 2,
+                             "the room on its line and the two arrows under it: \(lines.count) lines")
+                suite.expect(lines[0].figures[0].text == MetricFormat.diskBytes(UInt64(free)),
+                             "the room left stands alone on the first line")
+                suite.expect(lines[1].figures[0].text?.hasPrefix(NotchDashboardCards.diskWriteArrow) == true
+                                 && lines[1].figures[1].text?.hasPrefix(NotchDashboardCards.diskReadArrow) == true,
+                             "the write is the first arrow and the read the second, at \(read) / \(write)")
+                suite.expect((lines[1].figures[0].text ?? "").contains("/s")
+                                 && (lines[1].figures[1].text ?? "").contains("/s"),
+                             "both of the disk's arrows carry their whole unit")
+                suite.expect(lines[1].figures[0].color == NotchSplashPalette.blue
+                                 && lines[1].figures[1].color == NotchSplashPalette.green,
+                             "the write is the blue going in and the read the green coming out")
+                suite.expect(!disk.sharesOneLine, "the disk's corner is never one line of three")
+            }
+        }
+
         suite.run("the disk card reads its room and what goes in and comes out") {
             let disk = card(full, .disk)
             suite.expect(disk.figures.count == 3, "the room, the write, and the read")
@@ -281,12 +361,10 @@ enum NotchSystemCardsTests {
             suite.expect(figure(disk, 1)?.color == NotchSplashPalette.blue
                              && figure(disk, 2)?.color == NotchSplashPalette.green,
                          "the write is the blue going in, the read is the green coming out")
-            suite.expect(figure(disk, 0)?.compact == nil
-                             && (figure(disk, 1)?.compact ?? "").hasPrefix(NotchDashboardCards.diskWriteArrow)
-                             && (figure(disk, 2)?.compact ?? "").hasPrefix(NotchDashboardCards.diskReadArrow)
-                             && figure(disk, 1)?.compact == NotchDashboardCards.diskWriteArrow
-                                 + MetricFormat.networkRateCompact(6_200_000, inBits: false),
-                         "the room is one word, and the two arrows carry their short spelling too")
+            expectFullUnits(suite, [disk, card(NotchDashboardSample(diskRead: 0, diskWrite: 0), .disk),
+                                    card(NotchDashboardSample(diskRead: 900, diskWrite: 5_120_000,
+                                                              diskFreeBytes: 1_000), .disk)],
+                            "the disk's two arrows carry their whole unit, as the network's do")
             // The arrows, stated: a disk's down is a write and its up is a read,
             // which is the direction IOKit's block-storage counters keep from.
             suite.expect(NotchDashboardCards.diskWriteArrow == NotchDashboardCards.networkDownloadArrow

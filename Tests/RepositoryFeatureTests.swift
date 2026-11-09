@@ -1729,13 +1729,18 @@ enum RepositoryFeatureTests {
         var monthLeadsWithMark = false
         let dashboardLines = repository.lines(at: "Sources/Vorssaint/UI/Notch/NotchDashboardView.swift")
         if let head = dashboardLines.firstIndex(where: {
-            $0.contains("Text(focus, format: .dateTime.month(.wide).year())")
+            $0.contains("Text(month, format: .dateTime.month(.wide).year())")
         }) {
-            let window = dashboardLines[max(0, head - 8)..<head]
+            let window = dashboardLines[head..<min(head + 16, dashboardLines.count)]
             monthLeadsWithMark = window.contains { $0.contains("Image(systemName: NotchModule.calendar.symbol)") }
+                // The name is centred by the pane and not by the marks: the
+                // marks are a leading group and a trailing group, and a spacer
+                // keeps the navigation at the pane's edge whatever the name is.
+                && window.contains { $0.contains("Spacer(minLength: 0)") }
+                && window.contains { $0.contains("frame(maxWidth: .infinity, alignment: .center)") }
         }
         suite.expect(monthLeadsWithMark,
-               "the month's card leads with the calendar's mark, before its name")
+               "the month's card keeps its mark at the pane's leading edge and its name at the pane's centre")
 
         // A player's card is media being heard, and the rule is one rule.
         let playerLines = repository.lines(at: "Sources/Vorssaint/Services/Notch/NotchDashboardSupport.swift")
@@ -1774,7 +1779,7 @@ enum RepositoryFeatureTests {
         // round way to today, forward - and the way to Calendar itself is drawn
         // in the card's corner in every month, with the page's own mark, title
         // and route. The word "Today" is not printed beside the circle.
-        suite.expect(cardLines.contains { $0.contains("monthButton(\"circle.circle\", text.today, 0)") }
+        suite.expect(cardLines.contains { $0.contains("monthButton(\"circle.circle\", text.today, 0, action: onToday)") }
                          && cardLines.contains { $0.contains("openCalendarButton") }
                          && cardLines.contains { $0.contains("NotchCalendarSupport.openApplication") },
                "the month is centred with its three marks, and Calendar is a persistent mark in the corner")
@@ -1787,14 +1792,28 @@ enum RepositoryFeatureTests {
         // Activities and in the page, and the space is its one value: a mark
         // that touches its name in one place and stands apart in the other is
         // the same view drawn twice, and not one view.
-        suite.expect(NotchSplashLayout.markTitleGap > 0 && NotchSplashLayout.markTitleGap <= 10
-                         && splashCardLines.filter { $0.contains("spacing: NotchSplashLayout.markTitleGap") }.count == 1,
-               "the header's mark and its name keep one stated space, and it is named once")
+        suite.expect(NotchLayout.sectionMarkTitleGap >= 7 && NotchLayout.sectionMarkTitleGap <= 12
+                         && splashCardLines.filter { $0.contains("spacing: NotchLayout.sectionMarkTitleGap") }.count == 1,
+               "the header's mark and its name keep one stated space, and it is named once, in the island's own layout")
+        // The rule is the island's and not the page's: the gallery's tile asks
+        // the shared mark for the same space under it, and no surface writes a
+        // number of its own beside a section's mark.
+        let sectionMarkLines = repository.lines(at: "Sources/Vorssaint/UI/Notch/NotchComponents.swift")
+        let tileLines = repository.lines(at: "Sources/Vorssaint/UI/Notch/NotchSectionsView.swift")
+        suite.expect(sectionMarkLines.contains { $0.contains("static let titleGap: CGFloat = NotchLayout.sectionMarkTitleGap") }
+                         && tileLines.contains { $0.contains("VStack(spacing: NotchSectionMark.titleGap)") },
+               "the gallery's tile keeps the island's one space between a mark and its name")
+        // The mark is drawn with a margin of its own, so a surface that reserves
+        // only the type size loses part of its space to the artwork: the space
+        // reserved is the space drawn.
+        suite.expect(sectionMarkLines.contains { $0.contains("static func side(size: CGFloat, module: NotchModule) -> CGFloat") }
+                         && sectionMarkLines.contains { $0.contains(".frame(width: side, height: side)") },
+               "a mark's surface reserves what the mark draws, so the stated space is the space seen")
         // The space is between the section's mark and its name, in the header
         // the card and the page share.
         var markAndTitle = false
         if let gap = splashCardLines.firstIndex(where: {
-            $0.contains("HStack(spacing: NotchSplashLayout.markTitleGap) {")
+            $0.contains("HStack(spacing: NotchLayout.sectionMarkTitleGap) {")
         }) {
             let window = splashCardLines[gap..<min(gap + 6, splashCardLines.count)]
             markAndTitle = window.contains { $0.contains("NotchSectionMark(module: .splash") }
@@ -1812,6 +1831,33 @@ enum RepositoryFeatureTests {
                          && splashCardLines.contains { $0.contains("NotchSplashSupport.tokensText(taskTokens.output)") }
                          && !splashCardLines.contains { $0.contains("tokens: service.status") },
                "the header shows the task's tokens, and not the engine's cumulative counters")
+
+        // The page before a reading is its ruler and the ground under it. The
+        // mark at display size and the block of words that said what Start does
+        // are gone from the page, and the page keeps no room for them; the
+        // header, the way back, the ruler, its value and Start stay.
+        suite.expect(!splashCardLines.contains { $0.contains("NotchSectionMark(module: .splash, size: 30") }
+                         && !splashCardLines.contains { $0.contains("Text(text.setupHint)") },
+               "the page draws no big mark and no block of words under its ruler")
+        suite.expect(NotchSplashLayout.pageSetupHeight
+                         == NotchLayout.timerRulerHeight + NotchLayout.rowSpacing + NotchSplashLayout.pageGroundHeight
+                         && NotchSplashLayout.pageSetupHeight < NotchSplashLayout.pageHeight,
+               "the page before a reading is measured to the ruler it draws, and keeps no room for words")
+        suite.expect(splashCardLines.contains { $0.contains("notchBand(trailing:") }
+                         && splashCardLines.contains { $0.contains("accessibilityIdentifier(\"notch.splash.start\")") },
+               "the way back, the page's name and its one action stay where the island puts them")
+
+        // The gallery's tiles say which section is on the island with a mark in
+        // the corner, and with that alone: the chosen tile is not outlined, and
+        // the outline is the keys' own, kept for the tile the keys are on while
+        // that tile is not the chosen one. One rule for every tile, so the
+        // Splash tile is no louder than the calendar's.
+        suite.expect(tileLines.contains { $0.contains("if highlighted, !current {") }
+                         && tileLines.contains { $0.contains("checkmark.circle.fill") }
+                         && !tileLines.contains { $0.contains("strokeBorder(.white.opacity(highlighted ? 0.55") },
+               "a chosen tile wears the checkmark and no outline of its own, in every tile")
+        suite.expect(tileLines.contains { $0.contains(".background(.white.opacity(current ? 0.10 : highlighted ? 0.12 : 0.045)") },
+               "the chosen tile's ground is a shade deeper, and that is all the ground says")
 
         // The page's readings are six compact cards in three columns, drawn
         // from the model that decides their figures and their lines. A card has

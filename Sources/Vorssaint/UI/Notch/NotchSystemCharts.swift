@@ -167,56 +167,44 @@ struct NotchSystemMetricTile: View {
         .help(title)
     }
 
-    /// The readings, in the card's top-right corner.
+    /// The card's readings, in its top-right corner.
     ///
-    /// One and two figures sit on the card's one line. The disk's three are
-    /// the page's one wide card: its room left, and the two arrows of what is
-    /// going in and coming out. The corner is the width a tile has left, so a
-    /// row is tried at its full size, then at the size that fits, and then in
-    /// the short spelling of the same readings; the disk's three end as the
-    /// room on one line with the two arrows under it. Nothing is clipped and
-    /// nothing is shrunk past what can be read: the corner keeps its figures,
-    /// and the card keeps its height.
+    /// The lines are the model's, in the model's order: the card draws one line
+    /// for every line the reading has, and a disk's room and its two arrows are
+    /// therefore always two lines and never one. Each line is drawn whole, at
+    /// the largest of the sizes the model offers it, by measuring the line at
+    /// its own width - so the words, their order, their arrows and their units
+    /// are the same at every width, and a narrow corner says them smaller.
     @ViewBuilder private var figures: some View {
-        if reading.metric == .disk && reading.figures.count > 2 {
-            let head = Array(reading.figures.prefix(1))
-            let arrows = Array(reading.figures.dropFirst(1))
-            ViewThatFits(in: .horizontal) {
-                figureRow(reading.figures, size: 10, spacing: 5)
-                figureRow(reading.figures, size: 9, spacing: 4)
-                VStack(alignment: .trailing, spacing: 1) {
-                    figureRow(head, size: 11, spacing: 4)
-                    figureRow(arrows, size: 9, spacing: 4)
-                }
-                VStack(alignment: .trailing, spacing: 1) {
-                    figureRow(head, size: 11, spacing: 4)
-                    figureRow(arrows, size: 10, spacing: 4, short: true)
-                }
-            }
-        } else {
-            ViewThatFits(in: .horizontal) {
-                figureRow(reading.figures, size: 13, spacing: 5)
-                figureRow(reading.figures, size: 11, spacing: 4)
-                figureRow(reading.figures, size: 11, spacing: 4, short: true)
+        VStack(alignment: .trailing, spacing: 1) {
+            ForEach(Array(reading.figureLines.enumerated()), id: \.offset) { _, line in
+                figureRow(line.figures, sizes: line.sizes, spacing: line.spacing)
             }
         }
     }
 
-    private func figureRow(_ figures: [NotchMetricFigure], size: CGFloat, spacing: CGFloat,
-                           short: Bool = false) -> some View {
+    /// One line of the corner, at the largest size it fits at.
+    private func figureRow(_ figures: [NotchMetricFigure], sizes: [CGFloat], spacing: CGFloat) -> some View {
+        ViewThatFits(in: .horizontal) {
+            ForEach(sizes, id: \.self) { size in
+                figureLine(figures, size: size, spacing: spacing)
+            }
+        }
+    }
+
+    private func figureLine(_ figures: [NotchMetricFigure], size: CGFloat, spacing: CGFloat) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: spacing) {
             ForEach(Array(figures.enumerated()), id: \.offset) { _, figure in
-                Text((short ? figure.compact ?? figure.text : figure.text) ?? NotchSplashSupport.placeholder)
+                Text(figure.text ?? NotchSplashSupport.placeholder)
                     .font(.system(size: size, weight: .semibold, design: .rounded))
                     .monospacedDigit()
                     .foregroundStyle(figure.color)
                     .lineLimit(1)
-                    .minimumScaleFactor(0.7)
                     .fixedSize(horizontal: true, vertical: false)
                     .contentTransition(.numericText())
-                    .animation(reduceMotion ? nil : .smooth(duration: 0.25),
-                               value: short ? figure.compact ?? figure.text : figure.text)
+                    .animation(reduceMotion ? nil : .smooth(duration: 0.25), value: figure.text)
             }
         }
     }
 }
+

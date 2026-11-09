@@ -230,6 +230,7 @@ enum NotchCompactTests {
     static func run(_ suite: TestSuite) {
         camera(suite)
         calendarRows(suite)
+        calendarGeometry(suite)
         rail(suite)
         scratchpad(suite)
         readingLayout(suite)
@@ -311,6 +312,90 @@ enum NotchCompactTests {
         suite.expect(!service.isEmbeddedPresented && service.stops == 2,
                      "leaving the camera page still stops capture")
     }
+    // MARK: The calendar card's geometry
+
+    /// The card's two columns and the divider between them, laid out for real
+    /// in a window, at three months whose names are three lengths.
+    ///
+    /// A layout that grows a pane to the words put in it moves the divider from
+    /// February to September to November, and a long day's appointment list
+    /// moves it again. Measured in a window, the divider is one point wide,
+    /// stands at the card's centre, and keeps that place across all three
+    /// months, whatever the words in either pane.
+    private static func calendarGeometry(_ suite: TestSuite) {
+        let cardWidth: CGFloat = 576
+        let columns = NotchDashboardLayout.calendarColumns(cardWidth: cardWidth)
+        let months = ["February", "September", "November"]
+        var dividers: [(String, CGFloat)] = []
+        for (index, name) in months.enumerated() {
+            let text = index == 0
+                ? "Monday, Nov 9"
+                : "Wednesday, Sep 9 - a very long appointment title that goes on"
+            let host = NSHostingView(rootView: CalendarCardShaped(
+                title: "\(name) 2026", appointments: text, cardWidth: cardWidth))
+            host.frame = NSRect(x: 0, y: 0, width: cardWidth, height: 160)
+            let window = NSWindow(contentRect: NSRect(x: -10000, y: -10000, width: cardWidth, height: 160),
+                                  styleMask: [.borderless], backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false
+            window.contentView = host
+            settle(host)
+            let divider = descendants(host).first {
+                $0.identifier?.rawValue == "notch.dashboard.calendar.divider"
+            }.map { $0.convert($0.bounds, to: host) }
+            window.contentView = nil
+            dividers.append((name, divider?.midX ?? -1))
+            suite.expect(divider.map { abs($0.width - 1) < 0.5 } == true,
+                         "the divider is one point of a line, not a column of words")
+        }
+        suite.expect(dividers.allSatisfy { abs($0.1 - dividers[0].1) < 0.5 },
+                     "the divider keeps one place across \(dividers.map { $0.0 }.joined(separator: ", "))")
+        suite.expect(abs(dividers[0].1 - cardWidth / 2) < 0.75,
+                     "the divider is the card's centre: \(dividers[0].1) of \(cardWidth / 2)")
+    }
+
+    /// The card's divider, as a view that can be measured: one point wide, and
+    /// identified by the name the card's divider carries.
+    struct DividerMark: NSViewRepresentable {
+        func makeNSView(context: Context) -> NSView {
+            let view = NSView()
+            view.identifier = NSUserInterfaceItemIdentifier("notch.dashboard.calendar.divider")
+            view.wantsLayer = true
+            view.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.12).cgColor
+            return view
+        }
+        func updateNSView(_ nsView: NSView, context: Context) {}
+    }
+
+    /// The calendar card's columns, drawn the way the card draws them - two
+    /// panes of the card's own measure and a divider at their join - with words
+    /// of a month's length in one pane and appointments in the other.
+    private struct CalendarCardShaped: View {
+        let title: String
+        let appointments: String
+        let cardWidth: CGFloat
+
+        var body: some View {
+            let columns = NotchDashboardLayout.calendarColumns(cardWidth: cardWidth)
+            HStack(alignment: .top, spacing: NotchDashboardLayout.calendarColumnSpacing) {
+                VStack(alignment: .leading, spacing: NotchDashboardLayout.calendarHeaderGap) {
+                    Text(title)
+                        .font(.system(size: 10.5, weight: .semibold))
+                        .lineLimit(1)
+                    Color.clear
+                        .frame(width: NotchDashboardLayout.calendarGridWidth,
+                               height: NotchDashboardLayout.calendarMonthMinimumHeight)
+                }
+                .frame(width: columns.left, alignment: .topLeading)
+                DividerMark().frame(width: 1)
+                Text(appointments)
+                    .font(.system(size: 9.5))
+                    .frame(width: columns.right, alignment: .topLeading)
+            }
+            .padding(.horizontal, NotchDashboardLayout.calendarCardPadding)
+            .frame(width: cardWidth, alignment: .topLeading)
+        }
+    }
+
     private static func rail(_ suite: TestSuite) {
         let state = RailState()
         let host = NSHostingView(rootView: Rail(state: state))

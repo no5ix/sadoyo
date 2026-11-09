@@ -22,12 +22,6 @@ enum NotchSplashLayout {
     static let padding: CGFloat = 10
     static let headerHeight: CGFloat = 20
     static let headerSpacing: CGFloat = 10
-    /// The gap between the section's mark and its name, on every line where the
-    /// two stand side by side: the page's card and the dashboard's compact card
-    /// are the same line, drawn from the same number, at every width. A mark
-    /// crowded against a name in one place and spaced from it in another is two
-    /// sections with one name.
-    static let markTitleGap: CGFloat = 7
     /// The gap between the four readings: one gap, four columns, one row.
     static let metricSpacing: CGFloat = 8
     /// The gap between the card's sections: the readings, the memory, the
@@ -85,15 +79,18 @@ enum NotchSplashLayout {
         NotchLayout.timerRulerHeight + NotchLayout.rowSpacing + cardHeight(compact: false)
     }
 
-    /// The page before a session: the ruler's row, the mark and the words of
-    /// what to do next, and the gap between. Measured without the card, whose
-    /// charts, memory and trend have nothing to draw before a reading.
+    /// The page before a session: the interval's ruler, and the ground under it
+    /// and nothing else. The mark and the words that used to sit below said what
+    /// Start does and does not do; the page's header, its ruler, its value and
+    /// its Start say that, so the page is measured to what it draws and keeps no
+    /// room for a block it no longer draws.
     static var pageSetupHeight: CGFloat {
-        NotchLayout.timerRulerHeight + NotchLayout.rowSpacing + setupHeight
+        NotchLayout.timerRulerHeight + NotchLayout.rowSpacing + pageGroundHeight
     }
 
-    /// The mark, and the two lines that say what Start does and does not do.
-    static let setupHeight: CGFloat = 78
+    /// The ground a page of one row keeps below it, which is the shortest ground
+    /// the island's pages have ever kept.
+    static let pageGroundHeight: CGFloat = NotchLayout.emptyHeight / 3
 
     /// The shortest page that stays usable: the ruler at its shortest, and
     /// the words that say what to do before Start.

@@ -766,85 +766,45 @@ private struct NotchDashboardCalendarCard: View {
     }
 
     private var content: some View {
-        HStack(alignment: .top, spacing: NotchDashboardLayout.calendarColumnSpacing) {
-            VStack(alignment: .leading, spacing: NotchDashboardLayout.calendarHeaderGap) {
-                header
-                NotchCalendarMonthGrid(month: focus, selectedDay: selectedDay, now: now,
-                                       height: NotchDashboardLayout.calendarGridHeight,
-                                       events: calendar.events, text: text) { date in
-                    selectedDay = Calendar.current.startOfDay(for: date)
+        // The card's two columns are measured from the card, in its own
+        // geometry, and not from what stands in them: the month grid's half and
+        // the appointments' half are equal, and the divider between them is the
+        // card's centre at every width and in every month.
+        GeometryReader { edge in
+            let columns = NotchDashboardLayout.calendarColumns(
+                cardWidth: edge.size.width + NotchDashboardLayout.calendarCardPadding * 2)
+            HStack(alignment: .top, spacing: NotchDashboardLayout.calendarColumnSpacing) {
+                VStack(alignment: .leading, spacing: NotchDashboardLayout.calendarHeaderGap) {
+                    NotchDashboardCalendarHeader(
+                        month: focus, paneWidth: columns.left, text: text,
+                        onPrevious: { moveMonth(-1) }, onToday: today, onNext: { moveMonth(1) })
+                    NotchCalendarMonthGrid(month: focus, selectedDay: selectedDay, now: now,
+                                           height: NotchDashboardLayout.calendarGridHeight,
+                                           events: calendar.events, text: text) { date in
+                        selectedDay = Calendar.current.startOfDay(for: date)
+                    }
+                    .frame(width: NotchDashboardLayout.calendarGridWidth)
                 }
-                .frame(width: NotchDashboardLayout.calendarGridWidth)
-            }
-            Rectangle().fill(.white.opacity(0.12)).frame(width: 1)
-                .padding(.vertical, 2)
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(selected, format: .dateTime.weekday(.wide).day().month(.abbreviated))
-                    .font(.system(size: 9.5, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.7))
-                    .lineLimit(1)
-                    // The card's corner is the way to Calendar, and it is drawn
-                    // there in every month: the day's name stands clear of it.
-                    .padding(.trailing, NotchDashboardLayout.calendarOpenMarkSide + 2)
-                events
-                Spacer(minLength: 0)
-            }
-            .frame(maxWidth: .infinity, alignment: .topLeading)
-        }
-    }
-
-    /// The month's name and the way through it, as the Calendar page's own row
-    /// draws them: the month centred in the pane the grid is built in, and the
-    /// arrows and the way back to today at that pane's far edge. The name is
-    /// centred in the calendar's half of the card and not in the whole card,
-    /// because it names the grid under it, and it keeps room at both edges for
-    /// the marks, so a long month's name is scaled before it is overlapped.
-    ///
-    /// The way back to today is the page's round mark, and no word: the card is
-    /// a narrow thing, and the circle is the shape the page taught.
-    private var header: some View {
-        ZStack {
-            HStack(spacing: 4) {
-                // The month's name leads with the section's own mark, as the
-                // gallery's tile wears it, at the size the page's header wears
-                // a mark, so the card says what it is before it is read.
-                Image(systemName: NotchModule.calendar.symbol)
-                    .font(.system(size: NotchDashboardLayout.calendarMarkSize, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.7))
+                .frame(width: columns.left, alignment: .topLeading)
+                Rectangle().fill(.white.opacity(0.12)).frame(width: 1)
+                    .padding(.vertical, 2)
+                    .accessibilityIdentifier("notch.dashboard.calendar.divider")
                     .accessibilityHidden(true)
-                Text(focus, format: .dateTime.month(.wide).year())
-                    .font(.system(size: 10.5, weight: .semibold))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(selected, format: .dateTime.weekday(.wide).day().month(.abbreviated))
+                        .font(.system(size: 9.5, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.7))
+                        .lineLimit(1)
+                        // The card's corner is the way to Calendar, and it is drawn
+                        // there in every month: the day's name stands clear of it.
+                        .padding(.trailing, NotchDashboardLayout.calendarOpenMarkSide + 2)
+                    events
+                    Spacer(minLength: 0)
+                }
+                .frame(width: columns.right, alignment: .topLeading)
             }
-            // Room at both edges for the marks, and the name centred between
-            // them, which is the middle of the pane the grid stands in.
-            .padding(.horizontal, NotchDashboardLayout.calendarHeaderTitleInset)
-            .layoutPriority(1)
-            HStack(spacing: 2) {
-                Spacer(minLength: 0)
-                monthButton("chevron.left", text.previousMonth, -1)
-                monthButton("circle.circle", text.today, 0)
-                monthButton("chevron.right", text.nextMonth, 1)
-            }
+            .frame(width: edge.size.width, alignment: .topLeading)
         }
-        .frame(height: NotchDashboardLayout.calendarHeaderHeight)
-    }
-
-    private func monthButton(_ symbol: String, _ title: String, _ offset: Int) -> some View {
-        Button { offset == 0 ? today() : moveMonth(offset) } label: {
-            Image(systemName: symbol)
-                .font(.system(size: offset == 0 ? 10 : 9, weight: .semibold))
-                .frame(width: 16, height: 14)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(NotchButtonStyle(cornerRadius: 5, lifts: false))
-        .accessibilityLabel(title)
-        .accessibilityIdentifier(offset == 0
-                                 ? "notch.dashboard.calendar.today"
-                                 : "notch.dashboard.calendar.\(offset < 0 ? "previous" : "next")")
-        .help(title)
     }
 
     /// Back to the month the day is in, and to the day itself.
@@ -968,5 +928,76 @@ private struct NotchDashboardCalendarCard: View {
 
     private func open() {
         service.select(.calendar)
+    }
+}
+
+/// The calendar card's month line: the section's mark at the pane's leading
+/// edge, the month's name at the pane's centre, and the way through the month
+/// at its trailing edge.
+///
+/// The three are regions of a pane whose width the card has already decided,
+/// drawn over one another and not in a row beside one another. A row of mark,
+/// name and marks is as wide as the name is, and the name is a different
+/// length in February, September and November: the pane would grow and shrink
+/// with the month, and the divider standing beside it would be seen to shift.
+/// Measured from the pane, the name keeps its centre, the mark keeps the
+/// leading edge, and the navigation keeps the trailing edge, in every month
+/// and at every width the island comes at.
+struct NotchDashboardCalendarHeader: View {
+    /// The month being read.
+    let month: Date
+    /// The pane's width, from the card's own columns.
+    let paneWidth: CGFloat
+    let text: NotchCalendarStrings
+    let onPrevious: () -> Void
+    let onToday: () -> Void
+    let onNext: () -> Void
+
+    var body: some View {
+        ZStack {
+            // The month's name, at the pane's centre: it names the grid under
+            // it, and a long name is scaled before it is overlapped by the
+            // marks, whose room is kept at both edges.
+            Text(month, format: .dateTime.month(.wide).year())
+                .font(.system(size: 10.5, weight: .semibold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+                .padding(.horizontal, NotchDashboardLayout.calendarHeaderTitleInset)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .accessibilityIdentifier("notch.dashboard.calendar.title")
+            HStack(spacing: 4) {
+                // The section's own mark, at the pane's leading edge: the card
+                // says what it is before it is read.
+                Image(systemName: NotchModule.calendar.symbol)
+                    .font(.system(size: NotchDashboardLayout.calendarMarkSize, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.7))
+                    .accessibilityHidden(true)
+                    .accessibilityIdentifier("notch.dashboard.calendar.mark")
+                Spacer(minLength: 0)
+                monthButton("chevron.left", text.previousMonth, -1, action: onPrevious)
+                monthButton("circle.circle", text.today, 0, action: onToday)
+                monthButton("chevron.right", text.nextMonth, 1, action: onNext)
+            }
+        }
+        .frame(width: paneWidth, height: NotchDashboardLayout.calendarHeaderHeight)
+    }
+
+    /// The way through the month: a chevron, the round mark back to today, and
+    /// a chevron, at the pane's trailing edge, in the same places whatever
+    /// month is read.
+    private func monthButton(_ symbol: String, _ title: String, _ offset: Int,
+                             action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: offset == 0 ? 10 : 9, weight: .semibold))
+                .frame(width: 16, height: 14)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(NotchButtonStyle(cornerRadius: 5, lifts: false))
+        .accessibilityLabel(title)
+        .accessibilityIdentifier(offset == 0
+                                 ? "notch.dashboard.calendar.today"
+                                 : "notch.dashboard.calendar.\(offset < 0 ? "previous" : "next")")
+        .help(title)
     }
 }

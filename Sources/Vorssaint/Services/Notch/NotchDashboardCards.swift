@@ -92,9 +92,9 @@ enum NotchDashboardCards {
             let up = line(.networkUp, in: samples, \.netUp, window: window, now: now)
             return NotchDashboardCardReading(metric: .network, symbol: "network",
                                              figures: [
-                                                 arrowFigure(rate(sample.netDown, inBits: networkSpeedInBits,
+                                                 figure(rate(sample.netDown, inBits: networkSpeedInBits,
                                                              prefix: networkDownloadArrow), .networkDown),
-                                                 arrowFigure(rate(sample.netUp, inBits: networkSpeedInBits,
+                                                 figure(rate(sample.netUp, inBits: networkSpeedInBits,
                                                              prefix: networkUploadArrow), .networkUp),
                                              ],
                                              lines: [down, up])
@@ -114,9 +114,9 @@ enum NotchDashboardCards {
                                              figures: [
                                                  verdict(free.map { MetricFormat.diskBytes($0) }, tone,
                                                            .diskCapacity),
-                                                 arrowFigure(rate(sample.diskWrite, inBits: false,
+                                                 figure(rate(sample.diskWrite, inBits: false,
                                                              prefix: diskWriteArrow), .diskWrite),
-                                                 arrowFigure(rate(sample.diskRead, inBits: false,
+                                                 figure(rate(sample.diskRead, inBits: false,
                                                              prefix: diskReadArrow), .diskRead),
                                              ],
                                              lines: [
@@ -140,28 +140,19 @@ enum NotchDashboardCards {
         }
     }
 
-    /// A throughput with its arrow, in the unit the settings chose for the
-    /// network, and the same reading in the short spelling. A reading that is
-    /// not a number says nothing in either.
-    private static func rate(_ bytesPerSecond: Double?, inBits: Bool,
-                             prefix: String) -> (full: String?, short: String?) {
-        guard let bytesPerSecond, bytesPerSecond.isFinite, bytesPerSecond >= 0 else { return (nil, nil) }
-        return (prefix + " " + MetricFormat.networkRate(bytesPerSecond, inBits: inBits),
-                prefix + MetricFormat.networkRateCompact(bytesPerSecond, inBits: inBits))
+    /// A throughput, led by the arrow that says which way it goes, in the unit
+    /// the settings chose for the network. The spelling is the full one -
+    /// `17 KB/s`, and `0 B/s` at a standstill - because a card that drops the
+    /// `/s` stops saying what its figure is a reading of, and the card has room
+    /// for the whole of it. A reading that is not a number says nothing.
+    private static func rate(_ bytesPerSecond: Double?, inBits: Bool, prefix: String) -> String? {
+        guard let bytesPerSecond, bytesPerSecond.isFinite, bytesPerSecond >= 0 else { return nil }
+        return prefix + " " + MetricFormat.networkRate(bytesPerSecond, inBits: inBits)
     }
 
-    /// A throughput's figure: the full spelling and the short one, in the
-    /// arrow's colour, and quiet when there is nothing to say.
-    /// A figure that is only a number: the metric's own colour, and no shorter
-    /// spelling of its own.
+    /// A figure in a metric's own colour, and quiet when there is nothing.
     private static func figure(_ text: String?, _ role: NotchChartRole) -> NotchMetricFigure {
         NotchMetricFigure(text: text, voice: text == nil ? .quiet : .identity(role))
-    }
-
-    private static func arrowFigure(_ rate: (full: String?, short: String?),
-                                    _ role: NotchChartRole) -> NotchMetricFigure {
-        NotchMetricFigure(text: rate.full, compact: rate.short,
-                          voice: rate.full == nil ? .quiet : .identity(role))
     }
 
     private static func verdict(_ text: String?, _ tone: NotchMetricTone,
@@ -243,14 +234,12 @@ enum NotchChartPalette {
 /// One figure of a compact card: what it says, and the voice it is spoken in.
 struct NotchMetricFigure: Equatable {
     /// The figure, or nil when the machine has no reading for it.
+    ///
+    /// A throughput is spelled in full, unit and `/s` and all, and the card's
+    /// corner is measured to that spelling: the card says what a reading is a
+    /// reading of, and when the corner is narrow it draws the same words
+    /// smaller rather than fewer of them.
     let text: String?
-    /// The same reading in the page's short spelling, for a corner too narrow
-    /// for the full one: `↓ 17 KB/s` written `↓ 17K`. The reading and the unit
-    /// family are the same; only the spelling is shorter, so a card whose
-    /// corner is narrow says less about the width of its words and nothing less
-    /// about the machine. A figure with no shorter spelling of its own has none
-    /// here, and the card has one fewer way to shrink.
-    let compact: String?
     enum Voice: Equatable {
         /// The reading's verdict: green while ordinary, amber at a limit, red
         /// past it. The sustained-load gate has already been answered, so the
@@ -273,9 +262,8 @@ struct NotchMetricFigure: Equatable {
         }
     }
 
-    init(text: String?, compact: String? = nil, voice: Voice) {
+    init(text: String?, voice: Voice) {
         self.text = text
-        self.compact = compact
         self.voice = voice
     }
 }
@@ -286,6 +274,19 @@ struct NotchChartLine: Equatable {
     let points: [SystemMetricPoint]
 
     var hasLine: Bool { points.count > 1 }
+}
+
+/// One line of a compact card's corner: the figures that stand on it, the sizes
+/// it may be drawn at, largest first, and the gap between them.
+///
+/// The size is the only thing a narrow corner is allowed to answer with. A line
+/// of figures is drawn whole at the largest of these sizes it fits at, so the
+/// words, their order, their arrows and their units are the same at every width
+/// and at every reading.
+struct NotchFigureLine: Equatable {
+    let figures: [NotchMetricFigure]
+    let sizes: [CGFloat]
+    let spacing: CGFloat
 }
 
 /// One compact card, ready to draw.
@@ -305,13 +306,32 @@ struct NotchDashboardCardReading: Identifiable, Equatable {
             return false }
     }
 
-    /// The figures that fit on one line of the corner.
+    /// The lines the corner draws, in the order it draws them from its top down.
     ///
-    /// A card of one reading has one figure, and a card of two has a line. The
-    /// disk's three are the page's one exception: its card draws the room on
-    /// one line and the two arrows under it when the width will not hold all
-    /// three, which is the view's doing, not this model's.
-    var sharesOneLine: Bool { figures.count <= 2 }
+    /// The lines are the metric's shape and not the words' length. The disk's
+    /// room is one line and its two arrows are the line under it, at every speed
+    /// and at every amount of room; the network's two directions are one line,
+    /// the download first and the upload second, at every speed. Nothing here
+    /// is chosen from a reading, so no pair of numbers can merge the disk's two
+    /// lines into one, split the network's one line into two, or trade the two
+    /// directions of a pair.
+    var figureLines: [NotchFigureLine] {
+        switch metric {
+        case .disk where figures.count > 2:
+            return [NotchFigureLine(figures: Array(figures.prefix(1)), sizes: [12, 11, 10], spacing: 4),
+                    NotchFigureLine(figures: Array(figures.dropFirst(1)), sizes: [10, 9, 8], spacing: 6)]
+        case .network:
+            return [NotchFigureLine(figures: figures, sizes: [12, 11, 10, 9], spacing: 7)]
+        default:
+            return [NotchFigureLine(figures: figures, sizes: [13, 12, 11], spacing: 5)]
+        }
+    }
+
+    /// The card's corner is one line of figures.
+    ///
+    /// A card of one reading has one figure, and the network's pair is one line
+    /// of two; the disk's card is the page's one two-line corner.
+    var sharesOneLine: Bool { figureLines.count == 1 }
 }
 
 /// The readings the six cards are built from.

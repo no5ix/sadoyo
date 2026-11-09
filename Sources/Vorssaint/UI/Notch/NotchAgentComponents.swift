@@ -421,10 +421,6 @@ private extension AgentProvider {
         }
     }
 
-    /// The menu bar images keep a margin; the spark's thin rays need more
-    /// of the box than the knot to look the same size.
-    var markScale: CGFloat { self == .claude ? 1.45 : 1.2 }
-
     /// What those apps name the mark they show in the menu bar.
     var menuBarImageNames: [String] {
         switch self {
@@ -435,6 +431,15 @@ private extension AgentProvider {
         case .copilot: return []
         }
     }
+}
+
+/// The share of its box a maker's mark fills: the menu bar images keep a
+/// margin, and the spark's thin rays need more of the box than the knot to look
+/// the same size. A surface that reserves room for a mark - a section's title
+/// line, a gallery's tile - reserves this much of it, so the space it leaves
+/// beside a name is the space a person sees.
+extension AgentProvider {
+    var markScale: CGFloat { self == .claude ? 1.45 : 1.2 }
 }
 
 /// An agent's mark at the size of the symbol it stands in for.

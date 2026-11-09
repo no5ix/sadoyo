@@ -245,7 +245,7 @@ struct NotchSplashDashboardCard: View {
     private var header: some View {
         let clock = NotchSplashSupport.taskClock(elapsed)
         return HStack(spacing: 6) {
-            HStack(spacing: NotchSplashLayout.markTitleGap) {
+            HStack(spacing: NotchLayout.sectionMarkTitleGap) {
                 NotchSectionMark(module: .splash, size: compact ? NotchSplashLayout.titleIconSize - 1
                                                                 : NotchSplashLayout.titleIconSize)
                 Text(text.title)
@@ -917,25 +917,25 @@ struct NotchSplashView: View {
         .accessibilityLabel(text.title)
     }
 
-    /// The interval, before anything is read, above what to do.
+    /// The interval, before anything is read, and nothing under it.
+    ///
+    /// The page's header says what the page is, the ruler says the interval and
+    /// the value it rests on, and the top row carries Start. What used to sit
+    /// under the ruler - the section's mark at display size and two lines of
+    /// what Start does and does not send - repeated the header and the button
+    /// in a bigger voice, and made the page reserve room for a block of words.
+    /// Where the engine is switched off in Settings, the one way on from here is
+    /// Settings, so that ask stays.
     private var setup: some View {
         VStack(alignment: .leading, spacing: NotchLayout.rowSpacing) {
             intervalRow
-            VStack(alignment: .leading, spacing: 8) {
-                NotchSectionMark(module: .splash, size: 30, tint: .mint.opacity(0.75))
-                Text(text.setupHint)
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .multilineTextAlignment(.center)
-                if !NotchSplashSupport.isEnabled() {
-                    NotchPillButton(title: text.openSettings, prominent: true) {
-                        NotchService.shared.openSettings(showing: .splash)
-                    }
+            if !NotchSplashSupport.isEnabled() {
+                NotchPillButton(title: text.openSettings, prominent: true) {
+                    NotchService.shared.openSettings(showing: .splash)
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     /// The ruler, at the island's own scale for whole seconds, beside the

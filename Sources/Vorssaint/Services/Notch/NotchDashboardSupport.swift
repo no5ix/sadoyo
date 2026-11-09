@@ -167,6 +167,21 @@ enum NotchDashboardLayout {
     /// The card's edge to its content, the same on every side: the month's grid
     /// and the day's appointments sit the same distance from the card's outline.
     static let calendarCardPadding: CGFloat = 8
+    /// The card's two columns, at the width the card is drawn at: the calendar's
+    /// half, the appointments' half, and where the divider stands.
+    ///
+    /// The two halves are equal by construction and the divider is one point at
+    /// their join, so the divider's leading edge is `(cardWidth - 1) / 2` at
+    /// every width - the card's own centre. Nothing the month's name, the
+    /// navigation marks, or a day's appointments say can move it, because the
+    /// panes are measured from the card and not from what is put in them.
+    static func calendarColumns(cardWidth: CGFloat) -> (left: CGFloat, right: CGFloat, divider: CGFloat) {
+        let ground = max(0, cardWidth - calendarCardPadding * 2 - 1 - calendarColumnSpacing * 2)
+        let half = ground / 2
+        // The divider is one point wide, so its centre is half a point past the
+        // ground it sits on: the card's centre to the point.
+        return (half, half, calendarCardPadding + half + calendarColumnSpacing + 0.5)
+    }
     /// The card is as tall as what it holds: the edge, the month's name, the
     /// grid, and the edge again. Nothing is left empty at the bottom, and
     /// nothing of the grid is cut off at the last week.
@@ -200,14 +215,22 @@ enum NotchDashboardLayout {
     static var timerCardHeight: CGFloat { activityCardPadding * 2 + timerControlSide }
     /// How a card of this section comes and goes.
     ///
-    /// One movement, and one movement only. The card fades and is carried the
-    /// short way, the cards beside it close the gap in the same breath, and the
-    /// page's own height is animated by the island's shape - so the spring here
-    /// *is* the island's height spring, chosen from the same `NotchMotion`
-    /// springs the window's sides are drawn with. A card leaving and a page
-    /// shrinking are one event when they are timed the same; timed apart, the
-    /// person sees a card go and then the page fall in after it.
+    /// One movement, and one movement only. The cards and the page's height are
+    /// animated by the spring the window's sides are drawn with - the shrinking
+    /// spring when a card leaves, the growing spring when one arrives - so the
+    /// card going and the page taking its ground are one event on the screen and
+    /// not a card leaving followed by a collapse.
     static let cardTransitionOffset: CGFloat = -6
+
+    /// How far a departing card is carried: nowhere.
+    ///
+    /// The mark a person clicks to end a card sits in that card's corner, and a
+    /// card carried off the page carries its corner mark with it a moment before
+    /// the card is gone. A departing card is faded where it stands, and the
+    /// ground it occupied is taken by the section's height spring, so the mark
+    /// stays exactly in the place it was clicked in and the card, the section
+    /// and the page's height are one movement.
+    static let cardRemovalOffset: CGFloat = 0
 
     /// The motion of the section, asked of the page's own springs: the height
     /// the page is shrinking to moves at the island's shrinking-height spring,
@@ -218,11 +241,18 @@ enum NotchDashboardLayout {
             : .spring(duration: NotchMotion.shrinkingHeight.duration, bounce: 0)
     }
 
-    /// The transition of one activity card. With motion reduced it is the
-    /// fade, and nothing else.
+    /// The transition of one activity card, which is not the same movement
+    /// going and coming.
+    ///
+    /// A card arriving is carried the short way into its place, because the page
+    /// is growing at the same moment and a card that appears with the page's edge
+    /// reads as one event. A card leaving is faded in the place it stands in.
+    ///
+    /// With motion reduced, both ways are the fade, and nothing is carried.
     static func cardTransition(reduceMotion: Bool) -> AnyTransition {
         reduceMotion ? .opacity
-            : .offset(y: cardTransitionOffset).combined(with: .opacity)
+            : .asymmetric(insertion: .offset(y: cardTransitionOffset).combined(with: .opacity),
+                          removal: .offset(y: cardRemovalOffset).combined(with: .opacity))
     }
     /// The timer card's two controls are one control: the same box, the same
     /// circle, the same place in the row. The pause is filled with the timer's

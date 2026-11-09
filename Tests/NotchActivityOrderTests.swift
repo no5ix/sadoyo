@@ -227,10 +227,35 @@ enum NotchActivityOrderTests {
                          "the page's height is timed by the row's word for which way it is moving")
             suite.expect(layout.contains("reduceMotion ? .opacity"),
                          "with motion reduced a card only fades, and the row's height is the only movement left")
+            // A card coming is carried the short way in; a card going is faded
+            // where it stands. The mark a person clicks to end a card - the
+            // close, in the card's corner - is carried nowhere, so it is seen in
+            // the place it was clicked in until the card is gone.
+            suite.expect(NotchDashboardLayout.cardRemovalOffset == 0,
+                         "a departing card travels nowhere: its corner mark keeps its place")
+            suite.expect(NotchDashboardLayout.cardTransitionOffset != 0,
+                         "a card arriving is carried into its place, so the page and the card are one movement")
+            suite.expect(layout.contains("removal: .offset(y: cardRemovalOffset).combined(with: .opacity)")
+                             && layout.contains("insertion: .offset(y: cardTransitionOffset).combined(with: .opacity)")
+                             && layout.contains(".asymmetric("),
+                         "coming and going are two rules, and the going is a fade in place")
             // The mark in the corner of a card that is closing does not jump:
-            // it takes no lift, so the card is the thing that moves.
+            // it takes no lift, so the card is the thing that moves. The timer's
+            // card and the reading's card are the same rule, in their own files.
             suite.expect(view.contains("lifts: false"),
                          "a card's marks are drawn without the lift, so a closing card is one thing going")
+            let splashView = source("Sources/Vorssaint/UI/Notch/NotchSplashView.swift")
+            suite.expect(splashView.contains("lifts: false"),
+                         "the reading's card ends by the same mark, and that mark takes no lift either")
+            suite.expect(splashView.contains("stopMark")
+                             && splashView.contains("NotchDashboardLayout.timerControlCorner")
+                             || splashView.contains("NotchCircularIconButton("),
+                         "the reading's card carries one close mark, in the card's corner")
+            // Both cards' close marks live in the same corner as the row draws
+            // them, so a dismissal of the timer and a dismissal of the reading
+            // are the one movement, on the same transition the row gives them.
+            suite.expect(view.contains("case .timer:") && view.contains("case .splash:"),
+                         "the timer's card and the reading's card are drawn by the row's one rule")
         }
     }
 }

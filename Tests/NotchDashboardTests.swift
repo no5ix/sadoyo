@@ -41,6 +41,54 @@ enum NotchDashboardTests {
             }
         }
 
+        suite.run("the calendar card's two columns, and the divider at its centre") {
+            // The card is two columns of one measure and a divider of one point
+            // at their join, so the divider stands at the card's centre at every
+            // width the island comes at, and the two panes are equal halves.
+            for width in [304.0, 424.0, 576.0, 700.0, 900.0] {
+                let columns = NotchDashboardLayout.calendarColumns(cardWidth: width)
+                suite.expect(columns.left == columns.right,
+                             "the month's half and the appointments' half are equal at \(width)pt")
+                suite.expect(abs(columns.divider - width / 2) < 0.001,
+                             "the divider is the card's centre at \(width)pt: \(columns.divider) of \(width / 2)")
+                // The panes and the card's edge leave no ground over: the two
+                // halves, the divider and the two gaps are the card between its
+                // edges, which is what keeps the edge the same on every side.
+                let ground = columns.left + columns.right + 1
+                    + NotchDashboardLayout.calendarColumnSpacing * 2
+                    + NotchDashboardLayout.calendarCardPadding * 2
+                suite.expect(abs(ground - width) < 0.001,
+                             "the card's width is its two panes, its gaps, its divider and its edge: \(ground)")
+            }
+            // The month's name is not among the things the columns are measured
+            // from: the same card at February, September and November - three
+            // names of three lengths - is the same two columns and the same
+            // divider, because the rule takes the card's width and nothing else.
+            let calendar = Calendar(identifier: .gregorian)
+            let months = ["February", "September", "November"].compactMap { name -> Date? in
+                var parts = DateComponents(); parts.year = 2026
+                parts.month = ["February", "September", "November"].firstIndex(of: name).map { [1, 8, 10][$0] }
+                parts.day = 9
+                return calendar.date(from: parts)
+            }
+            suite.expect(months.count == 3, "the three months the card is asked about")
+            let widths = months.map { _ in NotchDashboardLayout.calendarColumns(cardWidth: 576) }
+            suite.expect(Set(widths.map { $0.divider }).count == 1
+                             && Set(widths.map { $0.left }).count == 1,
+                         "a February, a September and a November are one card of one geometry")
+            // The month grid is a fixed width inside the calendar's half, so a
+            // pane of its own width does not grow to what stands in it.
+            suite.expect(NotchDashboardLayout.calendarGridWidth
+                             < NotchDashboardLayout.calendarColumns(cardWidth: 576).left,
+                         "the grid sits inside its pane, with the pane's own width to spare")
+            // The header's name keeps the room the marks need at both of the
+            // pane's edges, and the room is the same on both, so the name stays
+            // at the pane's centre and is never pushed to one side.
+            suite.expect(NotchDashboardLayout.calendarHeaderTitleInset
+                             >= 3 * NotchDashboardLayout.calendarOpenMarkSide,
+                         "the month's name keeps the marks' room at both edges")
+        }
+
         suite.run("the calendar card has its place, and a page wide enough to hold it") {
             // The card is the page's, so it is measured as one shape: the grid
             // at the rows the grid draws itself, with the month's name above it.

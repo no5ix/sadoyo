@@ -264,6 +264,12 @@ struct NotchBand: Equatable {
 /// Shared measurements keep the window's content budget and its SwiftUI
 /// layout in agreement, including small screens and custom sizes.
 enum NotchLayout {
+    /// The space between a section's mark and its name, on every surface that
+    /// puts the two together: a page's header, a card's title line, the
+    /// gallery's tile. One rule for the whole island, because a mark that is
+    /// crowded against its name in one place and roomy from it in another reads
+    /// as two sections wearing one name.
+    static let sectionMarkTitleGap: CGFloat = 8
     static let shoulder: CGFloat = 14
     static let horizontalInset: CGFloat = 28
     static let headerHeight: CGFloat = 36
