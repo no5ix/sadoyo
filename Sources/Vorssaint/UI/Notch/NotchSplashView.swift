@@ -11,16 +11,23 @@ import SwiftUI
 ///
 /// The address is kept in the app's own settings, as every other section keeps
 /// what it needs: this is a tool on a Mac that reads a server on the same Mac.
-/// The key is stored plainly, next to the address it belongs to, because the
-/// dashboard is turned on by its owner for their own server and the app keeps
-/// no credential service of its own.
+/// The settings start at the Splash server on this Mac, at the port that
+/// server answers on, with the key that server hands out, so the dashboard
+/// works before anyone has typed anything; a value written into the settings
+/// takes the place of the one the app starts with, and nothing already written
+/// is touched. The key is kept beside the address it belongs to and is never
+/// written on the screen: the field starts empty, a key typed into it is kept
+/// and the field is emptied again, and all the settings say about it is that a
+/// key is in use.
 struct NotchSplashSettingsControls: View {
     @ObservedObject private var l10n = L10n.shared
     @AppStorage(DefaultsKey.notchSplashEnabled) private var enabled = false
-    @AppStorage(DefaultsKey.notchSplashHost) private var host = ""
+    @AppStorage(DefaultsKey.notchSplashHost) private var host = NotchSplashEndpoint.localHost
     @AppStorage(DefaultsKey.notchSplashPort) private var port = NotchSplashEndpoint.defaultPort
-    @AppStorage(DefaultsKey.notchSplashAPIKey) private var apiKey = ""
     @State private var portText = NotchSplashEndpoint.portText(NotchSplashEndpoint.defaultPort)
+    /// A key typed, which is kept and then forgotten by the field.
+    @State private var typedKey = ""
+    @State private var keyIsSet = NotchSplashSupport.hasAPIKey()
     private var text: NotchSplashStrings { FeatureStrings.notchSplash(l10n.language) }
 
     var body: some View {
@@ -28,7 +35,10 @@ struct NotchSplashSettingsControls: View {
             switchRow
             if enabled { serverRows }
         }
-        .onAppear { portText = NotchSplashEndpoint.portText(port) }
+        .onAppear {
+            portText = NotchSplashEndpoint.portText(port)
+            keyIsSet = NotchSplashSupport.hasAPIKey()
+        }
         .onChange(of: portText) { _, typed in
             if let number = NotchSplashEndpoint.port(typed) { port = number }
         }
@@ -39,7 +49,6 @@ struct NotchSplashSettingsControls: View {
         .onChange(of: enabled) { _, on in if on { Notifier.requestPermission() } }
         .onChange(of: host) { _, _ in NotchSplashService.shared.syncWithPreferences() }
         .onChange(of: port) { _, _ in NotchSplashService.shared.syncWithPreferences() }
-        .onChange(of: apiKey) { _, _ in NotchSplashService.shared.syncWithPreferences() }
         .onChange(of: enabled) { _, _ in NotchService.shared.syncWithPreferences() }
     }
 
@@ -56,7 +65,7 @@ struct NotchSplashSettingsControls: View {
     }
 
     /// Where to read, and with what key. The address and the port are written
-    /// as they are stored, and a key is written as a secret is written.
+    /// as they are stored; the key is written once and never shown again.
     private var serverRows: some View {
         VStack(alignment: .leading, spacing: 10) {
             SettingsRow(symbol: "network", title: text.host, caption: text.hostHint) {
@@ -68,24 +77,53 @@ struct NotchSplashSettingsControls: View {
             }
             SettingsRow(symbol: "point.topleft.down.curvedto.point.bottomright.up",
                         title: text.port, caption: nil) {
-                TextField("8000", text: $portText)
+                TextField(NotchSplashEndpoint.portText(NotchSplashEndpoint.defaultPort), text: $portText)
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 80)
                     .multilineTextAlignment(.trailing)
                     .accessibilityLabel(text.port)
             }
-            SettingsRow(symbol: "key", title: text.apiKey, caption: text.apiKeyHint) {
-                SecureField("sk-…", text: $apiKey)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 180)
-                    .multilineTextAlignment(.trailing)
-                    .accessibilityLabel(text.apiKey)
+            SettingsRow(symbol: "key", title: text.apiKey,
+                        caption: keyIsSet ? text.apiKeySet : text.apiKeyHint) {
+                HStack(spacing: 6) {
+                    SecureField("sk-…", text: $typedKey) { commitKey() }
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 150)
+                        .multilineTextAlignment(.trailing)
+                        .accessibilityLabel(text.apiKey)
+                        .accessibilityIdentifier("notch.splash.key")
+                    if NotchSplashSupport.hasWrittenAPIKey() {
+                        Button(text.apiKeyClear) { clearKey() }
+                            .accessibilityIdentifier("notch.splash.key.clear")
+                    }
+                }
             }
             // The end of a task is told by a macOS notice, which the system
             // gates behind its own permission: asking here is the app's own
             // permission flow, and says what the notice is for.
             Button(text.openSettings) { NotchService.shared.perform { Notifier.requestPermission() } }
         }
+    }
+
+    /// A key typed is kept and the field emptied: a key on the screen is a key
+    /// for the room, and the field's job is to take a key in, not to show one
+    /// out.
+    private func commitKey() {
+        let typed = typedKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !typed.isEmpty else { return }
+        UserDefaults.standard.set(typed, forKey: DefaultsKey.notchSplashAPIKey)
+        typedKey = ""
+        keyIsSet = true
+        NotchSplashService.shared.syncWithPreferences()
+    }
+
+    /// Taking back a key written by hand, which leaves the key the app starts
+    /// with in place. The key itself is not named.
+    private func clearKey() {
+        UserDefaults.standard.set("", forKey: DefaultsKey.notchSplashAPIKey)
+        typedKey = ""
+        keyIsSet = NotchSplashSupport.hasAPIKey()
+        NotchSplashService.shared.syncWithPreferences()
     }
 }
 
@@ -120,7 +158,6 @@ struct NotchSplashDashboardCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: NotchSplashLayout.headerSpacing) {
             header
-            rule
             metrics
         }
         .padding(NotchSplashLayout.padding)
@@ -147,14 +184,23 @@ struct NotchSplashDashboardCard: View {
     private var header: some View {
         let clock = NotchSplashSupport.taskClock(elapsed)
         return HStack(spacing: 6) {
-            Text(text.title)
-                .font(.system(size: compact ? NotchSplashLayout.headerSize - 1 : NotchSplashLayout.headerSize,
-                              weight: .bold))
-                .textCase(.uppercase)
-                .foregroundStyle(NotchSplashPalette.beige)
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)
-                .layoutPriority(1)
+            HStack(spacing: 4) {
+                // The dashboard's own mark, the one its tile in the Explorer
+                // wears, so the card and the section are the same thing.
+                Image(systemName: NotchModule.splash.symbol)
+                    .font(.system(size: compact ? NotchSplashLayout.titleIconSize - 1
+                                                : NotchSplashLayout.titleIconSize,
+                                  weight: .semibold))
+                    .foregroundStyle(NotchSplashPalette.beige.opacity(0.85))
+                    .accessibilityHidden(true)
+                Text(text.title)
+                    .font(.system(size: compact ? NotchSplashLayout.headerSize - 1 : NotchSplashLayout.headerSize,
+                                  weight: .bold))
+                    .foregroundStyle(NotchSplashPalette.beige)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+            }
+            .layoutPriority(1)
             Spacer(minLength: 6)
             if failure != nil {
                 reasonLine(clock)
@@ -311,18 +357,15 @@ struct NotchSplashDashboardCard: View {
     /// of Splash: a generation already running there keeps running.
     @ViewBuilder private var stopMark: some View {
         if let onStop, isMonitoring {
+            // The same round plate the Explorer's controls and the timer card
+            // wear: a lit circle under the mark, the circle lighting further
+            // under the pointer. The mark's job is unchanged - the way out of
+            // the reading, and nothing else.
             NotchCircularIconButton(symbol: "xmark", title: text.stop,
-                                    side: NotchDashboardLayout.transportMarkSide - 4, filled: false,
-                                    action: onStop)
+                                    side: NotchDashboardLayout.transportMarkSide - 4, filled: true,
+                                    tint: NotchSplashPalette.beige, action: onStop)
                 .accessibilityIdentifier("notch.splash.stop")
         }
-    }
-
-    private var rule: some View {
-        Rectangle()
-            .fill(.white.opacity(0.08))
-            .frame(height: NotchSplashLayout.ruleHeight)
-            .accessibilityHidden(true)
     }
 
     // MARK: The four readings, in one row
@@ -439,7 +482,6 @@ struct NotchSplashMetricCard<Footer: View>: View {
         VStack(alignment: .leading, spacing: 3) {
             Text(label)
                 .font(.system(size: NotchSplashLayout.labelSize, weight: .semibold))
-                .textCase(.uppercase)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .truncationMode(.tail)
@@ -577,7 +619,7 @@ struct NotchSplashView: View {
         HStack(spacing: 12) {
             NotchValueRuler(value: interval, scale: .seconds, label: text.interval, tint: .systemMint,
                             valueText: { text.intervalLabel($0) },
-                            labelText: { NotchSplashSupport.intervalText($0) })
+                            labelText: { NotchSplashSupport.tickIntervalText($0) })
                 .frame(maxWidth: .infinity)
                 .frame(height: rulerHeight)
             Text(NotchSplashSupport.intervalText(service.intervalSeconds))

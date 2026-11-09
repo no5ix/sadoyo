@@ -909,11 +909,15 @@ final class NotchService: ObservableObject {
         modules.contains(.timer) && NotchTimerService.shared.session.hasSession
     }
 
-    /// A Splash session being read is a live activity: the card appears when
-    /// Start begins the reading and goes when X stops it. Navigating away
-    /// from the page leaves the session reading, and the card with it.
+    /// A Splash session being read is a live activity, and the reading is the
+    /// whole rule. The card appears when Start begins the reading; a task's
+    /// ending leaves the reading running, so the card stands through the idle
+    /// stretch after a prompt, holding that task's frozen clock and last
+    /// numbers until the next request replaces them; navigating away leaves
+    /// the session reading, and the card with it; the way out ends both.
     private var showsDashboardSplash: Bool {
-        modules.contains(.splash) && NotchSplashService.shared.isMonitoring
+        NotchSplashSupport.showsDashboardCard(sectionVisible: modules.contains(.splash),
+                                              isMonitoring: NotchSplashService.shared.isMonitoring)
     }
 
     /// The width the page lays its sections out at: the page's own, short of
@@ -4381,6 +4385,24 @@ final class NotchService: ObservableObject {
         subscriptions.removeAll()
         if modules.contains(.timer) {
             NotchTimerService.shared.$session.removeDuplicates().receive(on: DispatchQueue.main)
+                .sink { [weak self] _ in
+                    self?.syncMenuSpaceMonitoring()
+                    self?.objectWillChange.send()
+                    self?.refreshPresentation()
+                }.store(in: &subscriptions)
+        }
+        if modules.contains(.splash) {
+            let splash = NotchSplashService.shared
+            // The card stands as long as the reading stands, and its numbers,
+            // its clock, and its task all move with a reading. The dashboard
+            // is told about the three together, so the card appears at Start
+            // without a trip back through the pages, keeps its readings live
+            // across an idle stretch, holds a finished task's last numbers,
+            // and leaves when the way out is pressed.
+            Publishers.CombineLatest3(splash.$isMonitoring.removeDuplicates(),
+                                      splash.$phase.removeDuplicates(),
+                                      splash.$snapshot.removeDuplicates())
+                .receive(on: DispatchQueue.main)
                 .sink { [weak self] _ in
                     self?.syncMenuSpaceMonitoring()
                     self?.objectWillChange.send()

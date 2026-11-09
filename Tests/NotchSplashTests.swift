@@ -300,91 +300,220 @@ enum NotchSplashTests {
     // MARK: - The task and its clock
 
     static func taskChecks(_ suite: TestSuite) {
-        let idle = #"{"instance": {"id": "a"}, "requests": {"completed": 3}, "active_requests": []}"#
-        let busy = #"{"instance": {"id": "a"}, "requests": {"completed": 3}, "active_requests": [{"id": "r1"}]}"#
-        let done = #"{"instance": {"id": "a"}, "requests": {"completed": 4}, "active_requests": []}"#
+        // The window is shortened so a whole task, with its pauses, fits in a
+        // minute of the test's clock. The app's window is the long one, and it
+        // is checked below at its own value.
+        func task() -> NotchSplashTaskTracker { NotchSplashTaskTracker(quiescence: 30, quietReadingsNeeded: 2) }
+        suite.expect(NotchSplashSupport.taskQuiescenceSeconds == 60
+                         && NotchSplashSupport.taskQuiescenceReadings == 2,
+                     "the app's window is a minute of quiet and two quiet readings, which is longer than the pauses a task takes between its turns")
 
-        var tracker = NotchSplashTaskTracker()
+        let busy = #"{"instance": {"id": "a"}, "requests": {"completed": 3}, "active_requests": [{"id": "r1"}]}"#
+        let turn = #"{"instance": {"id": "a"}, "requests": {"completed": 4}, "active_requests": []}"#
+        let nextTurn = #"{"instance": {"id": "a"}, "requests": {"completed": 4}, "active_requests": [{"id": "r2"}]}"#
+        let lastTurn = #"{"instance": {"id": "a"}, "requests": {"completed": 5}, "active_requests": []}"#
+
+        var tracker = task()
         suite.expect(tracker.phase == .idle && tracker.elapsed(at: start) == 0,
                      "a session begun over an idle server has no task and no clock")
-        suite.expect(tracker.observe(snapshot(idle), at: start) == nil,
-                     "an empty active list starts nothing")
         suite.expect(tracker.observe(snapshot(busy), at: start) == .started(id: "r1", at: start),
-                     "a request seen is a task begun")
+                     "work seen is a task begun")
         suite.expect(tracker.elapsed(at: start.addingTimeInterval(7)) == 7,
-                     "the clock runs with the request")
+                     "the clock runs with the work")
         suite.expect(tracker.observe(snapshot(busy), at: start.addingTimeInterval(8)) == nil,
-                     "the same request in the next reading adds no news")
-        suite.expect(tracker.observe(snapshot(done), at: start.addingTimeInterval(10))
-                         == .finished(id: "r1", outcome: .completed, at: start.addingTimeInterval(10), elapsed: 10),
-                     "a completed count that grew confirms the completion, and the clock freezes at its length")
-        suite.expect(tracker.elapsed(at: start.addingTimeInterval(600)) == 10,
+                     "the same work in the next reading adds no news")
+
+        // The heart of the rule. A coding agent's task is a run of requests:
+        // one answers, the engine goes quiet while its client thinks and runs
+        // a tool, the next request arrives. The counters move, one request
+        // ends, and the task is not over - so nothing is announced and the
+        // clock does not freeze.
+        suite.expect(tracker.observe(snapshot(turn), at: start.addingTimeInterval(10)) == nil,
+                     "a request answered in the middle of a task is not the task's end")
+        suite.expect(tracker.isRunning && tracker.trackedID == "r1",
+                     "the task is still the same task after a turn answered")
+        suite.expect(tracker.observe(snapshot(turn), at: start.addingTimeInterval(20)) == nil,
+                     "a quiet stretch inside the window says nothing")
+        suite.expect(tracker.elapsed(at: start.addingTimeInterval(21)) == 21,
+                     "and its clock keeps running across the pause")
+        suite.expect(tracker.observe(snapshot(nextTurn), at: start.addingTimeInterval(22)) == nil,
+                     "the next request of the same task is not a new task")
+        suite.expect(tracker.isRunning && tracker.trackedID == "r1"
+                         && tracker.elapsed(at: start.addingTimeInterval(25)) == 25,
+                     "the task goes on as one task, its clock never reset by a turn")
+        suite.expect(tracker.observe(snapshot(lastTurn), at: start.addingTimeInterval(26)) == nil,
+                     "the first quiet reading is not yet the end")
+        suite.expect(tracker.observe(snapshot(lastTurn), at: start.addingTimeInterval(50)) == nil,
+                     "a quiet of 24 seconds is inside the window, and says nothing")
+        suite.expect(tracker.observe(snapshot(lastTurn), at: start.addingTimeInterval(60))
+                         == .finished(id: "r1", outcome: .completed, at: start.addingTimeInterval(26), elapsed: 26),
+                     "a quiet that outlasts the window ends the task, timed to where the quiet began")
+        suite.expect(tracker.elapsed(at: start.addingTimeInterval(600)) == 26,
                      "a finished task's clock stays at the length it froze at")
-        // The completion does not start a new task by itself; the page clears it.
-        suite.expect(tracker.observe(snapshot(busy), at: start.addingTimeInterval(601)) == nil,
-                     "a finished task holds until it is cleared")
-        tracker.clearFinished()
-        suite.expect(tracker.phase == .idle, "clearing a finished task returns the tracker to idle")
-        suite.expect(tracker.observe(snapshot(busy), at: start.addingTimeInterval(602))
-                         == .started(id: "r1", at: start.addingTimeInterval(602)),
-                     "the next request begins the next task, its clock at zero")
-        suite.expect(tracker.elapsed(at: start.addingTimeInterval(604)) == 2, "the new task is timed on its own")
+        suite.expect(tracker.observe(snapshot(lastTurn), at: start.addingTimeInterval(300)) == nil,
+                     "an idle reading after a completion says nothing")
+        suite.expect(tracker.phase == .finished(id: "r1", outcome: .completed,
+                                                at: start.addingTimeInterval(26), elapsed: 26),
+                     "the finished task is held across the idle stretch, its clock where it froze")
+        // The next prompt the server works on is the next task, at once, with
+        // its own clock from zero - no clearing asked of the page, and the
+        // counters read from where they stand now.
+        suite.expect(tracker.observe(snapshot(nextTurn), at: start.addingTimeInterval(301))
+                         == .started(id: "r2", at: start.addingTimeInterval(301)),
+                     "work seen after a finished task begins the next task with no clearing")
+        suite.expect(tracker.elapsed(at: start.addingTimeInterval(303)) == 2,
+                     "the new task is timed on its own, from zero")
+        // Two tasks the server named the same are two news, keyed by the
+        // second each began - which is what lets the second one be told.
+        let firstKey = NotchSplashTaskTracker.announceKey(id: "r1", at: start.addingTimeInterval(26), elapsed: 26)
+        let secondKey = NotchSplashTaskTracker.announceKey(id: "r1", at: start.addingTimeInterval(326), elapsed: 25)
+        suite.expect(firstKey != secondKey,
+                     "two tasks under one id are keyed apart, so the second completion is news")
+        suite.expect(NotchSplashTaskTracker.announceKey(id: "r1", at: start.addingTimeInterval(326), elapsed: 25)
+                         == secondKey,
+                     "one task's key is the same every time it is asked, so it is never told twice")
+        // Clearing is the way out's doing, and it works on a finished task:
+        // a running task is the person's own business and is left alone.
+        var cleared = task()
+        _ = cleared.observe(snapshot(busy), at: start)
+        _ = cleared.observe(snapshot(turn), at: start.addingTimeInterval(10))
+        _ = cleared.observe(snapshot(turn), at: start.addingTimeInterval(60))
+        suite.expect(cleared.isFinished, "a task that ran out its quiet window is finished")
+        cleared.clearFinished()
+        suite.expect(cleared.phase == .idle && cleared.elapsed(at: start) == 0,
+                     "clearing a finished task returns the tracker to idle, which is what the way out does")
+        var runningCleared = task()
+        _ = runningCleared.observe(snapshot(busy), at: start)
+        runningCleared.clearFinished()
+        suite.expect(runningCleared.isRunning,
+                     "a task still running is not cleared by a page reopening, so its clock survives")
 
-        // A request that vanishes with nothing moved is not a completion.
-        var vanished = NotchSplashTaskTracker()
+        // A server that numbers its requests by position hands the same id to
+        // every request, and consecutive tasks must still be two tasks.
+        let positionalBusy = #"{"instance": {"id": "a"}, "requests": {"completed": 3}, "active_requests": [{"model": "splash"}]}"#
+        var positional = task()
+        suite.expect(positional.observe(snapshot(positionalBusy), at: start)
+                         == .started(id: "position.0", at: start),
+                     "a request with no id of its own is timed by its place")
+        suite.expect(positional.observe(snapshot(turn), at: start.addingTimeInterval(6)) == nil,
+                     "a turn answered inside the window is not the end of a positional task")
+        suite.expect(positional.observe(snapshot(turn), at: start.addingTimeInterval(40))
+                         == .finished(id: "position.0", outcome: .completed,
+                                      at: start.addingTimeInterval(6), elapsed: 6),
+                     "the first positional task is completed on its counters")
+        suite.expect(positional.observe(snapshot(positionalBusy), at: start.addingTimeInterval(70))
+                         == .started(id: "position.0", at: start.addingTimeInterval(70)),
+                     "the next request is a new task even when the server's only name for it is the same place")
+        suite.expect(NotchSplashTaskTracker.announceKey(id: "position.0", at: start.addingTimeInterval(6), elapsed: 6)
+                         != NotchSplashTaskTracker.announceKey(id: "position.0",
+                                                                at: start.addingTimeInterval(76), elapsed: 6),
+                     "two positional tasks are keyed apart, so each one's news is told")
+
+        // Work is work on any count the server keeps, not only in the list of
+        // requests it names: the scheduler's own figures, what the transport
+        // holds, what HTTP has in flight, and a snapshot the engine answered
+        // from while it was mid-loop, all say the server is busy.
+        suite.expect(status(#"{"instance": {"id": "a"}, "scheduler": {"decoding": 1}}"#).hasWork,
+                     "the scheduler decoding is work")
+        suite.expect(status(#"{"instance": {"id": "a"}, "scheduler": {"queued": 2}}"#).hasWork,
+                     "a request queued behind another is work")
+        suite.expect(status(#"{"instance": {"id": "a"}, "transport": {"pending": 1}}"#).hasWork,
+                     "a request the server has accepted is work")
+        suite.expect(status(#"{"instance": {"id": "a"}, "http": {"requests": {"active": 1}}}"#).hasWork,
+                     "a client request in flight is work, before the engine names it")
+        suite.expect(status(#"{"instance": {"id": "a"}, "transport": {"status_stale": true}}"#).hasWork,
+                     "a snapshot answered from mid-loop is not proof of quiet")
+        suite.expect(!status(#"{"instance": {"id": "a"}, "requests": {"completed": 4}, "active_requests": [], "scheduler": {"decoding": 0}, "http": {"requests": {"active": 0}}}"#).hasWork,
+                     "a server with nothing in hand is quiet, and the counts say so")
+        var unnumbered = task()
+        suite.expect(unnumbered.observe(snapshot(#"{"instance": {"id": "a"}, "scheduler": {"prefilling": 1}}"#), at: start)
+                         == .started(id: NotchSplashTaskTracker.unnumbered, at: start),
+                     "work the server does not name is a task too, timed from its start")
+
+        // A server that restarted, a server with no counters, and a run that
+        // moved nothing are not completions.
+        var vanished = task()
         suite.expect(vanished.observe(snapshot(busy), at: start) != nil, "the task begins")
-        suite.expect(vanished.observe(snapshot(idle), at: start.addingTimeInterval(2)) == nil,
-                     "one reading with the request gone is not proof of anything")
-        suite.expect(vanished.observe(snapshot(idle), at: start.addingTimeInterval(4))
+        suite.expect(vanished.observe(snapshot(busy), at: start.addingTimeInterval(2)) == nil,
+                     "work seen in the next reading is the task going on")
+        suite.expect(vanished.observe(snapshot(#"{"instance": {"id": "a"}, "requests": {"completed": 3}, "active_requests": []}"#),
+                                      at: start.addingTimeInterval(4)) == nil,
+                     "one quiet reading with every counter where it was is not proof of anything")
+        suite.expect(vanished.observe(snapshot(#"{"instance": {"id": "a"}, "requests": {"completed": 3}, "active_requests": []}"#),
+                                      at: start.addingTimeInterval(40))
                          == .finished(id: "r1", outcome: .lost, at: start.addingTimeInterval(4), elapsed: 4),
-                     "a request gone with every counter where it was is lost, never completed")
+                     "work gone with every counter where it was is lost, never completed")
 
-        // A server that restarted lost the request; that is not a completion.
         let restarted = #"{"instance": {"id": "b"}, "requests": {"completed": 9}, "active_requests": []}"#
-        var restart = NotchSplashTaskTracker()
+        var restart = task()
         suite.expect(restart.observe(snapshot(busy), at: start) != nil, "the task begins")
-        suite.expect(restart.observe(snapshot(restarted), at: start.addingTimeInterval(3))
+        suite.expect(restart.observe(snapshot(restarted), at: start.addingTimeInterval(3)) == nil,
+                     "a new instance mid-task is not an ending yet")
+        suite.expect(restart.observe(snapshot(restarted), at: start.addingTimeInterval(35))
                          == .finished(id: "r1", outcome: .lost, at: start.addingTimeInterval(3), elapsed: 3),
-                     "a new instance is a lost request, and its higher counters are not its own completion")
+                     "a new instance is a lost task, and its higher counters are not its own completion")
 
-        // A server with no counters cannot confirm an ending.
-        var mute = NotchSplashTaskTracker()
+        var mute = task()
         let muteBusy = #"{"instance": {"id": "a"}, "active_requests": [{"id": "r1"}]}"#
-        let muteIdle = #"{"instance": {"id": "a"}, "active_requests": []}"#
+        let muteQuiet = #"{"instance": {"id": "a"}, "active_requests": []}"#
         suite.expect(mute.observe(snapshot(muteBusy), at: start) != nil, "the task begins with no counters in sight")
-        suite.expect(mute.observe(snapshot(muteIdle), at: start.addingTimeInterval(2))
-                         == .finished(id: "r1", outcome: .lost, at: start.addingTimeInterval(2), elapsed: 2),
-                     "a server that reports no counters says nothing about how a request ended")
+        suite.expect(mute.observe(snapshot(muteQuiet), at: start.addingTimeInterval(3)) == nil,
+                     "no counters and one quiet reading say nothing")
+        suite.expect(mute.observe(snapshot(muteQuiet), at: start.addingTimeInterval(34))
+                         == .finished(id: "r1", outcome: .lost, at: start.addingTimeInterval(3), elapsed: 3),
+                     "a server that reports no counters says nothing about how a task ended")
 
-        // Failure and cancellation are their own endings.
-        var failed = NotchSplashTaskTracker()
+        // Failure and cancellation are their own endings, told once, and they
+        // are told only when the counters say so across the whole run.
+        var failed = task()
         suite.expect(failed.observe(snapshot(busy), at: start) != nil, "the task begins")
         suite.expect(failed.observe(snapshot(#"{"instance": {"id": "a"}, "requests": {"completed": 3, "failed": 1}, "active_requests": []}"#),
-                                     at: start.addingTimeInterval(5))
-                         == .finished(id: "r1", outcome: .failed, at: start.addingTimeInterval(5), elapsed: 5),
+                                     at: start.addingTimeInterval(3)) == nil,
+                     "a failure inside the window is not told yet")
+        suite.expect(failed.observe(snapshot(#"{"instance": {"id": "a"}, "requests": {"completed": 3, "failed": 1}, "active_requests": []}"#),
+                                     at: start.addingTimeInterval(35))
+                         == .finished(id: "r1", outcome: .failed, at: start.addingTimeInterval(3), elapsed: 3),
                      "a failed count that grew is a failure, not a completion")
-        var cancelled = NotchSplashTaskTracker()
+        var cancelled = task()
         suite.expect(cancelled.observe(snapshot(busy), at: start) != nil, "the task begins")
         suite.expect(cancelled.observe(snapshot(#"{"instance": {"id": "a"}, "requests": {"completed": 3, "cancelled": 2}, "active_requests": []}"#),
-                                        at: start.addingTimeInterval(5))
-                         == .finished(id: "r1", outcome: .cancelled, at: start.addingTimeInterval(5), elapsed: 5),
+                                        at: start.addingTimeInterval(3)) == nil,
+                     "a cancellation inside the window is not told yet")
+        suite.expect(cancelled.observe(snapshot(#"{"instance": {"id": "a"}, "requests": {"completed": 3, "cancelled": 2}, "active_requests": []}"#),
+                                        at: start.addingTimeInterval(35))
+                         == .finished(id: "r1", outcome: .cancelled, at: start.addingTimeInterval(3), elapsed: 3),
                      "a cancelled count that grew is a cancellation")
+        // A run in which a turn failed and a later turn answered is a task
+        // that produced an answer: the completed count outranks the failed.
+        var retried = task()
+        _ = retried.observe(snapshot(busy), at: start)
+        suite.expect(retried.observe(snapshot(#"{"instance": {"id": "a"}, "requests": {"completed": 3, "failed": 1}, "active_requests": [{"id": "r2"}]}"#),
+                                     at: start.addingTimeInterval(5)) == nil,
+                     "a failed turn with the next turn already running is not an ending")
+        suite.expect(retried.observe(snapshot(#"{"instance": {"id": "a"}, "requests": {"completed": 4, "failed": 1}, "active_requests": []}"#),
+                                     at: start.addingTimeInterval(40)) == nil,
+                     "the quiet after the retried turn has to outlast the window before it is told")
+        suite.expect(retried.observe(snapshot(#"{"instance": {"id": "a"}, "requests": {"completed": 4, "failed": 1}, "active_requests": []}"#),
+                                     at: start.addingTimeInterval(75))
+                         == .finished(id: "r1", outcome: .completed, at: start.addingTimeInterval(40), elapsed: 40),
+                     "a task that answered after a failed turn is a completion, not a failure")
 
-        // Overlapping requests: the one being timed keeps its own clock, and
+        // Overlapping requests: the run being timed keeps its own clock, and
         // a request that joins does not replace it.
-        var overlap = NotchSplashTaskTracker()
+        var overlap = task()
         _ = overlap.observe(snapshot(busy), at: start)
         suite.expect(overlap.observe(snapshot(#"{"instance": {"id": "a"}, "requests": {"completed": 3}, "active_requests": [{"id": "r1"}, {"id": "r2"}]}"#),
                                      at: start.addingTimeInterval(4)) == nil,
                      "a request that joins leaves the tracked one alone")
         suite.expect(overlap.trackedID == "r1" && overlap.elapsed(at: start.addingTimeInterval(9)) == 9,
                      "the tracked request keeps its own clock")
-        // r1 leaves while r2 goes on, and the counters moved once: that one
-        // ending is read as r1's, and the next request starts afresh.
+        // One of the two answers while the other goes on: the run is not over,
+        // and the counters that moved are not the run's ending.
         suite.expect(overlap.observe(snapshot(#"{"instance": {"id": "a"}, "requests": {"completed": 4}, "active_requests": [{"id": "r2"}]}"#),
-                                     at: start.addingTimeInterval(10))
-                         == .finished(id: "r1", outcome: .completed, at: start.addingTimeInterval(10), elapsed: 10),
-                     "one completed count moved is attributed to the request being timed")
+                                     at: start.addingTimeInterval(10)) == nil,
+                     "one of two requests answering, with work still in hand, ends nothing")
+        suite.expect(overlap.isRunning && overlap.trackedID == "r1",
+                     "the run goes on with the request that stayed")
 
         // Spilling is told by a counter that grew between two readings.
         var spilling = NotchSplashTaskTracker()
@@ -399,7 +528,7 @@ enum NotchSplashTests {
         suite.expect(!spilling.isSpilling, "a counter that stopped growing is not spilling any more")
 
         // A session begun again starts the clock over.
-        var begun = NotchSplashTaskTracker()
+        var begun = task()
         _ = begun.observe(snapshot(busy), at: start)
         begun.begin()
         suite.expect(begun.phase == .idle && begun.elapsed(at: start.addingTimeInterval(100)) == 0,
@@ -432,11 +561,53 @@ enum NotchSplashTests {
         suite.expect(!notices.takeUnsuccessful(id: "r2", outcome: .failed), "a failed task is announced once")
         suite.expect(notices.takeUnsuccessful(id: "r3", outcome: .cancelled), "a cancellation is news")
         suite.expect(!notices.takeUnsuccessful(id: "r3", outcome: .cancelled), "a cancellation is news once")
+        // Two tasks of one server, whose only name for a request is its
+        // place: the key carries the second each began, so the second task is
+        // told and told once.
+        suite.expect(notices.take(id: "position.0@1800000000", outcome: .completed),
+                     "the first task of a server that names its requests by place is news")
+        suite.expect(notices.take(id: "position.0@1800000060", outcome: .completed),
+                     "the second task is news too, because its key is its own")
+        suite.expect(!notices.take(id: "position.0@1800000060", outcome: .completed),
+                     "and the second task is told once, like the first")
         suite.expect(!notices.takeUnsuccessful(id: "r4", outcome: .completed),
                      "a completion is not told as a failure")
         suite.expect(notices.announcedIDs.isSuperset(of: ["r1", "r2", "r3"]), "the ids announced are kept")
         notices.reset()
         suite.expect(notices.announcedIDs.isEmpty, "a new session announces afresh")
+    }
+
+    // MARK: - The reading that keeps going
+
+    /// The rule the polling loop is asked, tested for the states a running
+    /// session is really in. The dashboard promises to read until a hand takes
+    /// the way out, and the idle stretch between two prompts - which is where
+    /// a person spends most of an afternoon - is the state the rule must
+    /// answer "keep reading" to, for as long as it lasts, and after any task's
+    /// ending.
+    static func monitoringChecks(_ suite: TestSuite) {
+        typealias Rule = NotchSplashMonitoringPolicy
+        suite.expect(!Rule.endsMonitoring(.init(idleSeconds: 5 * 60)),
+                     "an idle five minutes is not a reason to stop reading")
+        suite.expect(!Rule.endsMonitoring(.init(idleSeconds: 60 * 60 * 9)),
+                     "an idle morning is not a reason to stop reading")
+        for outcome: NotchSplashTaskTracker.Outcome in [.completed, .failed, .cancelled, .lost] {
+            suite.expect(!Rule.endsMonitoring(.init(idleSeconds: 600, outcome: outcome)),
+                         "a task that ended - and this one ended \(outcome) - is not a reason to stop reading")
+        }
+        suite.expect(!Rule.endsMonitoring(.init(idleSeconds: 10 * 60, outcome: .completed)),
+                     "the state a session is in ten minutes after a prompt: idle, completed, and reading")
+        suite.expect(!Rule.endsMonitoring(.init(stoppedByHand: false, sectionDisabled: false, noAddress: false)),
+                     "nothing happening is not a reason to stop")
+        suite.expect(Rule.endsMonitoring(.init(stoppedByHand: true, idleSeconds: 5, outcome: .completed)),
+                     "a hand on the way out ends the reading")
+        suite.expect(Rule.endsMonitoring(.init(sectionDisabled: true, idleSeconds: 600)),
+                     "the section switched off ends the reading")
+        suite.expect(Rule.endsMonitoring(.init(noAddress: true)),
+                     "an address taken away ends the reading")
+        suite.expect(Rule.endsMonitoring(.init(noAddress: true, idleSeconds: 0, outcome: nil))
+                         && !Rule.endsMonitoring(.init(noAddress: false, idleSeconds: 0, outcome: nil)),
+                     "the three reasons are the whole rule: nothing else in the condition ends a reading")
     }
 
     // MARK: - The ruler shared with the timer
@@ -458,26 +629,70 @@ enum NotchSplashTests {
                      "a long drag never leaves the range")
         suite.expect(seconds.offset(of: 3, selected: 5) == -2 * seconds.spacing,
                      "a value two seconds behind the one in effect sits two spacings left")
-        // A short range is centred inside the ruler, so the 1s and 10s ticks
-        // both show, as the timer's do near their ends.
-        let centre = seconds.selectionX(selected: 5, width: 300)
-        suite.expect(centre == (300 - 9 * seconds.spacing) / 2 + 4 * seconds.spacing,
-                     "the middle of a short range sits in the middle of the ruler")
-        let first = seconds.selectionX(selected: 1, width: 300)
-        suite.expect(first == (300 - 9 * seconds.spacing) / 2, "the first second sits where its ticks fit")
+        // A range that fits the row is drawn as a fixed strip across four
+        // fifths of it, so the ten numbers use the row they stand in, the
+        // numbers do not touch each other, and the two ends keep the same
+        // margin. This is the ruler's own arithmetic, not a smaller font.
+        let width = 400.0
+        let pitch = seconds.spacing(width: width)
+        suite.expect(seconds.fitsEntireScale(width: width),
+                     "the ten seconds are known to fit a row, which is what makes the ruler fixed and not sliding")
+        suite.expect(abs(pitch - width * NotchRulerScale.fixedSpanFraction / 9) < 0.001,
+                     "the ten ticks stand four fifths of the row apart, start to end")
+        let widestLabel = Double(NotchRulerScale.widestLabelWidth(digits: 2))
+        suite.expect(pitch >= widestLabel + 6,
+                     "the pitch between ticks is wider than the widest number it carries, so 10 does not touch 9")
+        suite.expect(pitch >= NotchRulerScale.minimumLabelPitch,
+                     "ticks are never packed closer than the floor a label needs")
+        let firstX = seconds.selectionX(selected: 1, width: width)
+        let lastX = seconds.selectionX(selected: 10, width: width)
+        suite.expect(abs((lastX - firstX) - width * NotchRulerScale.fixedSpanFraction) < 0.001,
+                     "the first and last ticks are four fifths of the row apart")
+        suite.expect(abs(firstX - (width - lastX)) < 0.001,
+                     "the first and last ticks keep the same margin at either end")
+        for value in 1...10 {
+            suite.expect(abs(seconds.selectionX(selected: value, width: width)
+                                 - (firstX + Double(value - 1) * pitch)) < 0.001,
+                         "second \(value) stands on the pitch its neighbours use, so its number lines up with its tick")
+        }
+        suite.expect(seconds.selectionX(selected: 5, width: width) == seconds.pointerX(selected: 5, width: width),
+                     "the pointer is above the tick in effect")
+        suite.expect(seconds.moving(5, by: pitch, width: width) == 4
+                         && seconds.moving(5, by: -pitch, width: width) == 6,
+                     "a drag and a wheel travel by the ticks as they are drawn")
+        suite.expect(seconds.offset(of: 3, selected: 5, width: width) == -2 * pitch,
+                     "two seconds behind the tick in effect stand two pitches to the left")
         suite.expect(seconds.selectionX(selected: 1, width: 60) >= 0
                          && seconds.selectionX(selected: 10, width: 60) <= 60,
                      "a narrow ruler keeps its pointer inside itself")
         suite.expect(seconds.showsLabel(1) && seconds.showsLabel(7) && seconds.showsLabel(10),
                      "every second of the interval ruler is written")
+        suite.expect(NotchSplashSupport.tickIntervalText(1) == "1"
+                         && NotchSplashSupport.tickIntervalText(9) == "9"
+                         && NotchSplashSupport.tickIntervalText(10) == "10",
+                     "a tick's number is the whole seconds alone")
+        suite.expect((1...10).allSatisfy { !NotchSplashSupport.tickIntervalText($0).contains("s") },
+                     "no tick carries the unit, which is what was crowding the row")
+        suite.expect(NotchSplashSupport.intervalText(2) == "2s",
+                     "the value read beside the ruler keeps the unit, and the default is two seconds")
         let minutes = NotchRulerScale.minutes
         suite.expect(minutes.minimum == 1 && minutes.maximum == 180 && minutes.labelEvery == 5,
                      "the timer's ruler keeps its own range and labelling")
         suite.expect(minutes.showsLabel(1) && minutes.showsLabel(5) && !minutes.showsLabel(7),
                      "the timer writes every fifth minute, and the first")
+        suite.expect(!minutes.fitsEntireScale(width: 300) && !minutes.fitsEntireScale(width: 1_000),
+                     "180 minutes never fit a row, so the timer's ruler slides as it always has")
+        suite.expect(minutes.spacing(width: 300) == 14 && minutes.spacing(width: 1_000) == 14
+                         && minutes.spacing(width: 60) == 14,
+                     "the timer's ruler keeps its own spacing at every width")
         suite.expect(minutes.selectionX(selected: 5, width: 300) == 80
                          && minutes.selectionX(selected: 90, width: 300) == 150,
                      "the shared arithmetic answers the timer's ruler as it always did")
+        suite.expect(minutes.offset(of: 91, selected: 90) == 14
+                         && minutes.offset(of: 91, selected: 90, width: 300) == 14
+                         && minutes.moving(90, by: 14) == 89
+                         && minutes.moving(90, by: 14, width: 300) == 89,
+                     "the timer's dragging and its tick spacing are the numbers they were")
         suite.expect(NotchTimerRulerScale.minute(200) == 180
                          && NotchTimerRulerScale.moving(1, by: -3_000) == 180
                          && NotchTimerRulerScale.moving(180, by: 3_000) == 1,
@@ -487,6 +702,30 @@ enum NotchSplashTests {
     // MARK: - The dashboard's composition
 
     static func dashboardChecks(_ suite: TestSuite) {
+        suite.expect(NotchSplashSupport.showsDashboardCard(sectionVisible: true, isMonitoring: true),
+                     "a reading begun at Start has its card in Live Activities at once")
+        suite.expect(NotchSplashSupport.showsDashboardCard(sectionVisible: true, isMonitoring: true),
+                     "the same card stands through the idle stretch after a task, because a task's ending leaves the reading running")
+        suite.expect(!NotchSplashSupport.showsDashboardCard(sectionVisible: true, isMonitoring: false),
+                     "the way out ends the reading and takes the card with it")
+        suite.expect(!NotchSplashSupport.showsDashboardCard(sectionVisible: false, isMonitoring: true),
+                     "a section not in the island has no card, reading or not")
+        // The three rules as the service puts them together, for the state a
+        // session is in right after a prompt finishes: the task froze, the
+        // reading is not asked to stop, and the rule keeps the card.
+        var finished = NotchSplashTaskTracker(quiescence: 30, quietReadingsNeeded: 2)
+        _ = finished.observe(snapshot(#"{"instance": {"id": "a"}, "requests": {"completed": 3}, "active_requests": [{"id": "r1"}]}"#),
+                             at: start)
+        suite.expect(finished.observe(snapshot(#"{"instance": {"id": "a"}, "requests": {"completed": 4}, "active_requests": []}"#),
+                                      at: start.addingTimeInterval(10)) == nil,
+                     "a prompt answered inside the window keeps the card on a task that is still running")
+        let ended = finished.observe(snapshot(#"{"instance": {"id": "a"}, "requests": {"completed": 4}, "active_requests": []}"#),
+                                     at: start.addingTimeInterval(45))
+        suite.expect(ended == .finished(id: "r1", outcome: .completed, at: start.addingTimeInterval(10), elapsed: 10)
+                         && finished.elapsed(at: start.addingTimeInterval(600)) == 10
+                         && !NotchSplashMonitoringPolicy.endsMonitoring(.init(idleSeconds: 600, outcome: .completed))
+                         && NotchSplashSupport.showsDashboardCard(sectionVisible: true, isMonitoring: true),
+                     "a completed task freezes its clock, leaves the reading running, and keeps its card across the idle stretch")
         suite.expect(NotchDashboardSupport.activities(players: [7], timer: true, splash: true)
                          == [.player(id: 7), .timer, .splash],
                      "the Splash card follows the timer's in the Live Activities section")
@@ -503,6 +742,10 @@ enum NotchSplashTests {
                          == NotchDashboardLayout.timerCardHeight + NotchSplashLayout.cardHeight
                             + NotchDashboardLayout.cardSpacing,
                      "two cards are their heights and the gap between them")
+        suite.expect(NotchSplashLayout.cardHeight
+                         == NotchSplashLayout.padding * 2 + NotchSplashLayout.headerHeight
+                            + NotchSplashLayout.headerSpacing + NotchSplashLayout.metricCardHeight,
+                     "the card is the header's line, one gap, and the four readings: the rule under the header is gone from the measure")
         suite.expect(NotchSplashLayout.cardHeight > NotchSplashLayout.metricCardHeight
                          && NotchSplashLayout.metricCardHeight > NotchSplashLayout.valueSize,
                      "the card is taller than the reading inside it, and the reading taller than its figure")
@@ -555,6 +798,8 @@ enum NotchSplashTests {
         }
         suite.expect(english.notifyCompletedTitle == "Splash Task Completed",
                      "the completion notice is titled as the task's own")
+        suite.expect(english.title == "Splash Dashboard",
+                     "the header is written as the words of a heading, and the card writes them as they are")
         suite.expect(english.decode == "Decode Speed" && english.prefill == "Prefill Speed"
                          && english.ttft == "TTFT" && english.cacheHitRate == "Cache Hit Rate",
                      "the four readings are named as the reference names them")
@@ -582,6 +827,261 @@ enum NotchSplashTests {
         suite.expect(NotchSplashPalette.tone(.neutral) != NotchSplashPalette.green
                          && NotchSplashPalette.red != NotchSplashPalette.green,
                      "a missing reading is not shown as a good one")
+    }
+
+    // MARK: - A whole session, read
+
+    /// The promise the dashboard makes, tested as a session that runs: the
+    /// reading begins at Start, goes on across an idle afternoon, times a
+    /// request, freezes at its end, tells its news once, keeps reading, takes
+    /// up the next request as its own task with its own news, and stops only
+    /// when a hand stops it.
+    ///
+    /// The session is the app's own class, given a world it can be asked
+    /// questions about: the status documents are made here, the clock is
+    /// turned forward by hand, and the notices are caught in a list. The
+    /// polling, the task, the freezing and the notices are the code the island
+    /// runs.
+    static func pollingChecks(_ suite: TestSuite) {
+        let server = URL(string: "http://127.0.0.1:8010/status")!
+        let idle = #"{"instance": {"id": "a"}, "requests": {"completed": 3, "failed": 0, "cancelled": 0}, "active_requests": []}"#
+        func running(_ id: String, completed: Int) -> String {
+            "{\"instance\": {\"id\": \"a\"}, \"requests\": {\"completed\": \(completed), \"failed\": 0, \"cancelled\": 0}, "
+                + "\"active_requests\": [{\"id\": \"\(id)\"}]}"
+        }
+        func done(_ completed: Int, failed: Int = 0) -> String {
+            "{\"instance\": {\"id\": \"a\"}, \"requests\": {\"completed\": \(completed), \"failed\": \(failed), \"cancelled\": 0}, "
+                + "\"active_requests\": []}"
+        }
+
+        let world = PollingWorld(start: start, documents: [idle])
+        let service = NotchSplashService(
+            read: { _, _, key in
+                world.keys.append(key ?? "")
+                return (Data(world.nextDocument().utf8), world.code)
+            },
+            address: { world.address },
+            enabled: { world.enabled },
+            savedInterval: { world.interval },
+            savedKey: { world.key },
+            keepInterval: { world.kept.append($0) },
+            clock: { world.now },
+            strings: { FeatureStrings.notchSplash(.enUS) },
+            deliver: { world.notices.append($0) })
+
+        func spin(_ seconds: TimeInterval) {
+            let end = Date().addingTimeInterval(seconds)
+            while Date() < end { RunLoop.main.run(until: Date().addingTimeInterval(0.05)) }
+        }
+
+        MainActor.assumeIsolated {
+            service.start()
+            suite.expect(service.isMonitoring, "Start begins the reading")
+            spin(1.4)
+            suite.expect(service.reads >= 1 && service.snapshot != nil,
+                         "the reading asks the server and has its first answer")
+            suite.expect(service.phase == .idle && service.trackedID == nil && service.elapsed() == 0,
+                         "a reading begun over an idle server times nothing and shows no clock")
+            suite.expect(world.notices.isEmpty, "an idle server has nothing to announce")
+
+            // An idle afternoon: the clock is turned forward by five minutes,
+            // which is the state a person is in between two prompts, and the
+            // reading is asked what it does.
+            world.now = world.now.addingTimeInterval(5 * 60)
+            let before = service.reads
+            spin(2.4)
+            suite.expect(service.reads > before + 1 && service.isMonitoring,
+                         "an idle five minutes does not stop the reading: it is still asking")
+            suite.expect(service.phase == .idle && service.snapshot != nil,
+                         "and it is still showing what it last read")
+
+            // A prompt begins: the request appears, and the task is timed.
+            world.documents = [running("req-a", completed: 3)]
+            spin(1.4)
+            suite.expect(service.phase == .running(id: "req-a", startedAt: world.now)
+                             && service.isTaskRunning && service.trackedID == "req-a",
+                         "a request the server reports is taken up as a task")
+            world.now = world.now.addingTimeInterval(34)
+            spin(1.4)
+            suite.expect(service.elapsed() >= 34 && service.isMonitoring,
+                         "the task's clock runs with the request")
+
+            // One request answers and the engine goes quiet for ten seconds:
+            // the shape of a coding task between two of its turns. The
+            // completed count moved, and the task is not over - so nothing is
+            // announced, the clock does not freeze, and the card keeps
+            // counting. This is the false completion the dashboard must not
+            // tell.
+            world.documents = [done(4)]
+            world.now = world.now.addingTimeInterval(10)
+            spin(1.4)
+            suite.expect(service.isTaskRunning && service.taskOutcome == nil,
+                         "a request answered in the middle of a task leaves the task running")
+            suite.expect(world.notices.isEmpty,
+                         "and no completion is told, however much the counters moved")
+            suite.expect(service.elapsed() >= 44, "the clock keeps running through the pause")
+
+            // The next turn arrives inside the window: the same task, one
+            // clock, no second task begun and no second notice.
+            world.documents = [running("req-a2", completed: 4)]
+            spin(1.4)
+            suite.expect(service.isTaskRunning && service.trackedID == "req-a",
+                         "the next request inside the window does not begin a second task")
+            suite.expect(service.isMonitoring && world.notices.isEmpty,
+                         "the reading goes on and nothing is told")
+
+            // The engine answers and stays quiet. The task is over when the
+            // quiet has outlasted the window: its clock freezes at where the
+            // quiet began, its news is told once with that length, and the
+            // reading goes on - which is the whole of what the dashboard
+            // promises.
+            world.documents = [done(5)]
+            world.now = world.now.addingTimeInterval(5)
+            spin(1.4)
+            suite.expect(service.isTaskRunning && world.notices.isEmpty,
+                         "the first quiet reading is not the end of the task")
+            world.now = world.now.addingTimeInterval(61)
+            spin(2.6)
+            suite.expect(service.taskOutcome == .completed && service.isTaskFinished,
+                         "a quiet that outlasts the window is the task's end, confirmed by its counter")
+            suite.expect(Int(service.elapsed()) == 49,
+                         "the clock froze at where the quiet began, not at where the notice was sent")
+            suite.expect(service.isMonitoring, "the completion did not stop the reading")
+            suite.expect(world.notices.count == 1,
+                         "one task is one notice, whatever turns it had")
+            suite.expect(world.notices.first?.title == "Splash Task Completed"
+                             && world.notices.first?.body.contains("00:49") == true,
+                         "the notice names the task and carries its frozen length")
+            let afterCompletion = service.reads
+            world.now = world.now.addingTimeInterval(6 * 60)
+            spin(2.4)
+            suite.expect(service.reads > afterCompletion && service.isMonitoring,
+                         "the reading goes on across the idle stretch after a task")
+            suite.expect(service.taskOutcome == .completed && Int(service.elapsed()) == 49,
+                         "the finished task holds its clock and its numbers across that stretch")
+            spin(1.4)
+            suite.expect(world.notices.count == 1, "the same completion is not told twice")
+
+            // The next prompt: its own request, its own clock from zero, its
+            // own news - and the same card, since the reading never ended.
+            world.documents = [running("req-b", completed: 5)]
+            spin(1.4)
+            suite.expect(service.trackedID == "req-b" && service.isTaskRunning
+                             && service.elapsed(at: world.now) < 2,
+                         "the second request is a second task, its clock at zero")
+            world.now = world.now.addingTimeInterval(7)
+            spin(1.4)
+            world.documents = [done(6)]
+            world.now = world.now.addingTimeInterval(5)
+            spin(1.4)
+            world.now = world.now.addingTimeInterval(61)
+            spin(2.6)
+            suite.expect(service.taskOutcome == .completed && Int(service.elapsed()) == 12,
+                         "the second task is timed and frozen on its own length")
+            suite.expect(world.notices.count == 2 && world.notices.last?.body.contains("00:12") == true,
+                         "the second completion is its own notice")
+            suite.expect(service.isMonitoring, "and the reading is still running")
+
+            // A task that fails is told as a failure, and the reading goes on
+            // to take up the next request. The completed count does not move:
+            // only the failed one does, which is what makes this a failure.
+            world.documents = [running("req-c", completed: 5)]
+            spin(1.4)
+            world.documents = [done(5, failed: 1)]
+            world.now = world.now.addingTimeInterval(5)
+            spin(1.4)
+            world.now = world.now.addingTimeInterval(61)
+            spin(2.6)
+            suite.expect(world.notices.count == 3 && world.notices.last?.title.contains("Failed") == true
+                             && service.isMonitoring && service.phase == .idle,
+                         "a failed task is told as a failure, the clock is cleared, and the reading goes on")
+
+            // A server that does not answer is a reason to say so, never a
+            // reason to stop reading.
+            world.code = 401
+            spin(1.4)
+            suite.expect(service.failure == .status(401) && service.isMonitoring,
+                         "an answer that is not 200 is named on the card, and the reading goes on")
+            world.code = 200
+            world.documents = ["not a document at all"]
+            spin(1.4)
+            suite.expect(service.failure == .unreadable && service.isMonitoring,
+                         "an answer that is not a status is named, and the reading goes on")
+            world.documents = [idle]
+            spin(1.4)
+            suite.expect(service.failure == nil, "an answer that arrives again clears the word about the one that did not")
+
+            // The interval the ruler is set to is kept, and the running
+            // session takes it up.
+            service.setInterval(7)
+            suite.expect(service.intervalSeconds == 7 && world.kept == [7],
+                         "the interval is kept, and the running session reads at it")
+            world.interval = 4
+            service.syncWithPreferences()
+            suite.expect(service.intervalSeconds == 4 && service.isMonitoring,
+                         "the interval moved under the session is taken up, and the session is not ended")
+
+            // The key goes with the reading, and nothing else is asked.
+            world.key = "sk-test"
+            spin(1.4)
+            suite.expect(world.keys.contains("sk-test"),
+                         "the reading carries the key, and it is the only thing the reading sends")
+
+            // The way out.
+            service.stop()
+            suite.expect(!service.isMonitoring && service.phase == .idle,
+                         "the way out ends the reading and the task")
+            let stopped = service.reads
+            spin(2.4)
+            suite.expect(service.reads == stopped, "after the way out nothing is asked any more")
+            suite.expect(service.snapshot != nil && service.showsDashboard,
+                         "the card keeps what was last read, as the page has always done")
+
+            // Start again: the reading begins afresh.
+            service.start()
+            spin(1.4)
+            suite.expect(service.isMonitoring && service.reads > stopped, "Start reads again")
+            service.stop()
+
+            // A section switched off is a reason to stop, and the page's own
+            // rule about it is the settings'.
+            world.enabled = false
+            service.start()
+            suite.expect(!service.isMonitoring, "a section switched off cannot begin a reading")
+            world.enabled = true
+            service.start()
+            spin(1.2)
+            service.syncWithPreferences()
+            suite.expect(service.isMonitoring, "settings that are simply still there do not end a reading")
+            world.address = nil
+            service.syncWithPreferences()
+            suite.expect(!service.isMonitoring, "an address taken away ends the reading")
+            service.stop()
+        }
+    }
+
+    /// The world a polling session is asked to run in: the documents it
+    /// answers with, the clock it is told, and the list its notices land in.
+    final class PollingWorld {
+        var documents: [String]
+        var code = 200
+        var address: URL? = URL(string: "http://127.0.0.1:8010/status")
+        var enabled = true
+        var interval = 1
+        var key = ""
+        var now: Date
+        var keys: [String] = []
+        var kept: [Int] = []
+        var notices: [NotchSplashService.Notice] = []
+
+        init(start: Date, documents: [String]) {
+            self.now = start
+            self.documents = documents
+        }
+
+        /// The next answer: the last document the test left, so a state holds
+        /// across the readings between two of the test's own moves.
+        func nextDocument() -> String { documents.last ?? "{}" }
     }
 
     // MARK: - The session's rules
@@ -640,6 +1140,55 @@ enum NotchSplashTests {
         suite.expect(NotchSplashSupport.endpoint(in: defaults) == nil,
                      "an address with a space in it is no server, and the session says so")
         for key in keys { defaults.removeObject(forKey: key) }
+
+        // The dashboard's own beginning: this Mac's Splash server, the port it
+        // answers on, and the key it hands out. A person switches the section
+        // on and the dashboard reads, with nothing typed and no key shown.
+        suite.expect(Defaults.registeredDefaults[DefaultsKey.notchSplashHost] as? String
+                         == NotchSplashEndpoint.localHost
+                         && Defaults.registeredDefaults[DefaultsKey.notchSplashPort] as? Int
+                             == NotchSplashEndpoint.defaultPort
+                         && Defaults.registeredDefaults[DefaultsKey.notchSplashAPIKey] as? String
+                             == NotchSplashEndpoint.localAPIKey,
+                     "the settings begin at the local Splash server, its port, and its key")
+        suite.expect(NotchSplashEndpoint.localHost == "127.0.0.1"
+                         && NotchSplashEndpoint.defaultPort == 8001
+                         && NotchSplashEndpoint.statusURL(host: NotchSplashEndpoint.localHost,
+                                                          port: NotchSplashEndpoint.defaultPort)?
+                             .absoluteString == "http://127.0.0.1:8001/status",
+                     "that is the local engine, on the port it answers on")
+
+        let localName = "vorss.tests.splash.local.\(ProcessInfo.processInfo.processIdentifier)"
+        let local = UserDefaults(suiteName: localName) ?? .standard
+        for key in keys { local.removeObject(forKey: key) }
+        local.register(defaults: [
+            DefaultsKey.notchSplashHost: NotchSplashEndpoint.localHost,
+            DefaultsKey.notchSplashPort: NotchSplashEndpoint.defaultPort,
+            DefaultsKey.notchSplashAPIKey: NotchSplashEndpoint.localAPIKey,
+            DefaultsKey.notchSplashIntervalSeconds: NotchSplashSupport.defaultInterval,
+        ])
+        suite.expect(NotchSplashSupport.endpoint(in: local)?.absoluteString == "http://127.0.0.1:8001/status",
+                     "a dashboard switched on with nothing typed reads this Mac's Splash server")
+        suite.expect(NotchSplashSupport.savedAPIKey(in: local) == NotchSplashEndpoint.localAPIKey
+                         && NotchSplashSupport.hasAPIKey(in: local)
+                         && !NotchSplashSupport.hasWrittenAPIKey(in: local),
+                     "the key the app starts with is used, is known to be there, and is not reported as written by hand")
+        local.set("sk-written", forKey: DefaultsKey.notchSplashAPIKey)
+        suite.expect(NotchSplashSupport.savedAPIKey(in: local) == "sk-written"
+                         && NotchSplashSupport.hasWrittenAPIKey(in: local),
+                     "a key written into the settings takes the place of the one the app starts with")
+        local.set("  sk-padded  ", forKey: DefaultsKey.notchSplashAPIKey)
+        suite.expect(NotchSplashSupport.savedAPIKey(in: local) == "sk-padded",
+                     "a key is sent as it stands, without the spaces around it")
+        local.set("", forKey: DefaultsKey.notchSplashAPIKey)
+        suite.expect(NotchSplashSupport.savedAPIKey(in: local) == NotchSplashEndpoint.localAPIKey
+                         && !NotchSplashSupport.hasWrittenAPIKey(in: local),
+                     "clearing the field leaves the key the app starts with in place")
+        local.set("splash.local", forKey: DefaultsKey.notchSplashHost)
+        local.set(9009, forKey: DefaultsKey.notchSplashPort)
+        suite.expect(NotchSplashSupport.endpoint(in: local)?.absoluteString == "http://splash.local:9009/status",
+                     "an address written by hand outlasts the default, which is what a saved setting is for")
+        for key in keys { local.removeObject(forKey: key) }
     }
 
     static func run(_ suite: TestSuite) {
@@ -650,6 +1199,8 @@ enum NotchSplashTests {
         suite.run("splash task") { taskChecks(suite) }
         suite.run("splash notices") { noticeChecks(suite) }
         suite.run("splash session") { sessionChecks(suite) }
+        suite.run("splash polling") { pollingChecks(suite) }
+        suite.run("splash monitoring") { monitoringChecks(suite) }
         suite.run("splash ruler") { rulerChecks(suite) }
         suite.run("splash dashboard") { dashboardChecks(suite) }
         suite.run("splash strings") { localizationChecks(suite) }

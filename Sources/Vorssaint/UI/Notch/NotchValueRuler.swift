@@ -105,7 +105,7 @@ final class NotchValueRulerControl: NSSlider {
     override func mouseDragged(with event: NSEvent) {
         guard isEnabled, let previous = drag else { return }
         let x = convert(event.locationInWindow, from: nil).x
-        let value = scale.moving(previous.value, by: Double(x - previous.x))
+        let value = scale.moving(previous.value, by: Double(x - previous.x), width: bounds.width)
         drag = (x, value)
         didDrag = true
         select(value)
@@ -115,7 +115,7 @@ final class NotchValueRulerControl: NSSlider {
         guard isEnabled, drag != nil else { drag = nil; return }
         if !didDrag {
             let offset = convert(event.locationInWindow, from: nil).x - selectionX
-            select(scale.moving(doubleValue, by: -Double(offset)))
+            select(scale.moving(doubleValue, by: -Double(offset), width: bounds.width))
         }
         drag = nil
     }
@@ -125,8 +125,11 @@ final class NotchValueRulerControl: NSSlider {
         if event.phase.contains(.began) { scrollValue = nil }
         let delta = abs(event.scrollingDeltaX) > abs(event.scrollingDeltaY)
             ? event.scrollingDeltaX : event.scrollingDeltaY
-        let points = Double(delta) * (event.hasPreciseScrollingDeltas ? 1 : scale.spacing)
-        let value = scale.moving(scrollValue ?? doubleValue, by: points)
+        // A precise wheel travels by points; a notched wheel travels by whole
+        // ticks, whichever pitch the ruler is drawn at.
+        let pitch = scale.spacing(width: bounds.width)
+        let points = Double(delta) * (event.hasPreciseScrollingDeltas ? 1 : pitch)
+        let value = scale.moving(scrollValue ?? doubleValue, by: points, width: bounds.width)
         scrollValue = value
         select(value)
         if !event.hasPreciseScrollingDeltas || event.phase.contains(.ended) || event.phase.contains(.cancelled)
@@ -181,14 +184,19 @@ final class NotchValueRulerControl: NSSlider {
 
     override func draw(_ dirtyRect: NSRect) {
         let edgeFade = max(1, bounds.width * 0.12)
+        // A ruler whose whole range stands in the row needs no edge fade: its
+        // first and last ticks are set in from the ends on purpose. A range
+        // that slides is faded, so the eye reads the ticks near the pointer.
+        let fixed = scale.fitsEntireScale(width: bounds.width)
         // Drawn for the full ruler height; a shorter island compresses the
         // ticks and pointer below the labels instead of cutting them off.
         let factor = bounds.height / NotchLayout.timerRulerHeight
         let selectionX = self.selectionX
         for value in scale.minimum...scale.maximum {
-            let x = selectionX + CGFloat(scale.offset(of: value, selected: integerValue))
+            let x = selectionX + CGFloat(scale.offset(of: value, selected: integerValue, width: bounds.width))
             guard x >= bounds.minX - 16, x <= bounds.maxX + 16 else { continue }
-            let fade = value == integerValue ? 1 : min(1, max(0, min(x - bounds.minX, bounds.maxX - x) / edgeFade))
+            let fade = fixed || value == integerValue
+                ? 1 : min(1, max(0, min(x - bounds.minX, bounds.maxX - x) / edgeFade))
             let strength = value <= integerValue ? 1.0 : increasedContrast ? 0.65 : 0.35
             let color = tint.withAlphaComponent(fade * strength * (isEnabled ? 1 : 0.4))
             color.setFill()

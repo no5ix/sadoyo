@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Vorssaint
 
+import AppKit
 import CoreGraphics
 import Foundation
 
@@ -432,19 +433,83 @@ enum NotchDashboardSupport {
         return .send(pid: Int32(sourcePID), bundleIdentifier: bundleIdentifier, action: action)
     }
 
-    /// How a card's mark opens the app that plays: a process that is running is
-    /// brought forward, and a player that is not running is opened by the
-    /// bundle the adapter named for it. A card with neither is asked nothing.
+    /// How a card's mark opens the app that plays: a process that is running
+    /// and answers to the app the cover names is brought forward, and anything
+    /// else is opened by the bundle the adapter named for it. A card with
+    /// neither is asked nothing.
     enum AppOpening: Equatable {
         case activate(pid: Int)
         case open(bundleIdentifier: String)
         case none
     }
 
-    static func appOpening(pid: Int, isRunning: Bool, bundleIdentifier: String?) -> AppOpening {
-        if pid > 0, isRunning { return .activate(pid: pid) }
+    static func appOpening(pid: Int, isRunning: Bool, bundleIdentifier: String?,
+                           runningBundleIdentifier: String? = nil) -> AppOpening {
+        if pid > 0, isRunning {
+            // A process id is handed out again when an app quits, so a process
+            // is only the player when it answers to the bundle the player
+            // names. Otherwise the click would raise a stranger - and the app
+            // the song belongs to, which is what a cover is for, would never
+            // come up, which is what a click that does nothing looks like.
+            guard let wanted = bundleIdentifier, !wanted.isEmpty else { return .activate(pid: pid) }
+            if let runningBundleIdentifier,
+               runningBundleIdentifier.caseInsensitiveCompare(wanted) == .orderedSame {
+                return .activate(pid: pid)
+            }
+            return .open(bundleIdentifier: wanted)
+        }
         if let bundleIdentifier, !bundleIdentifier.isEmpty { return .open(bundleIdentifier: bundleIdentifier) }
         return .none
+    }
+
+    /// The click's work, done: the app that owns the song comes to the front.
+    ///
+    /// The island is a panel that never becomes the active app, and a running
+    /// app is not reliably raised by asking it directly from the background -
+    /// the request is honoured when the system feels like it, which is the
+    /// click that works on Tuesday and not on Wednesday. Opening the app's own
+    /// bundle through the workspace is the way that works from the background,
+    /// and it raises an app already running and starts one that is not, in one
+    /// ask. A process asked to come forward by its id, and unhidden, is the way
+    /// left for a player that is not an app bundle at all. Where the system
+    /// knows nothing about the app, nothing is asked of it: the click is quiet
+    /// and the song keeps playing.
+    static func openApplication(pid: Int, bundleIdentifier: String) {
+        let wanted = bundleIdentifier.trimmingCharacters(in: .whitespacesAndNewlines)
+        let running = pid > 0 ? NSRunningApplication(processIdentifier: pid_t(pid)) : nil
+        switch appOpening(pid: pid, isRunning: running != nil,
+                          bundleIdentifier: wanted.isEmpty ? nil : wanted,
+                          runningBundleIdentifier: running?.bundleIdentifier) {
+        case .activate(let pid):
+            bringForward(NSRunningApplication(processIdentifier: pid_t(pid)))
+        case .open(let identifier):
+            if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: identifier) {
+                launch(url)
+            } else if let running {
+                // No bundle to open, and a process to ask: a player that is
+                // not an app bundle is raised the only way it can be.
+                bringForward(running)
+            }
+        case .none:
+            break
+        }
+    }
+
+    private static func bringForward(_ application: NSRunningApplication?) {
+        guard let application else { return }
+        application.unhide()
+        if let url = application.bundleURL {
+            launch(url)
+        } else {
+            application.activate()
+        }
+    }
+
+    private static func launch(_ url: URL) {
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.activates = true
+        configuration.createsNewApplicationInstance = false
+        NSWorkspace.shared.openApplication(at: url, configuration: configuration, completionHandler: nil)
     }
 
     /// The activity cards, in order: every player that is playing, in the

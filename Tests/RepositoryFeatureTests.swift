@@ -1648,6 +1648,49 @@ enum RepositoryFeatureTests {
         suite.expect(typewriterMarks.isEmpty,
                "visible text curls its apostrophes (\(typewriterMarks.prefix(6).joined(separator: ", ")))")
 
+        // The island's cards close with the round control the Explorer's
+        // controls are: a lit circle under the mark, not a plain mark. The
+        // Splash card leads with the mark its section is known by, so the
+        // card, the tile and the settings name the same thing. These are the
+        // shapes a screenshot shows, and a person asks to keep.
+        func closesLit(_ path: String) -> Bool {
+            let lines = repository.lines(at: path)
+            guard let mark = lines.firstIndex(where: {
+                $0.contains("NotchCircularIconButton(symbol: \"xmark\"")
+            }) else { return false }
+            guard mark + 1 <= lines.count - 1 else { return false }
+            let window = lines[(mark + 1)...min(mark + 3, lines.count - 1)]
+            return window.contains { $0.contains("filled: true") }
+        }
+        suite.expect(closesLit("Sources/Vorssaint/UI/Notch/NotchDashboardView.swift")
+                         && closesLit("Sources/Vorssaint/UI/Notch/NotchSplashView.swift"),
+               "the timer's and the dashboard's way out are lit circles (\(closesLit("Sources/Vorssaint/UI/Notch/NotchDashboardView.swift")), \(closesLit("Sources/Vorssaint/UI/Notch/NotchSplashView.swift")))")
+
+        var headerLeadsWithMark = false
+        let splashCardLines = repository.lines(at: "Sources/Vorssaint/UI/Notch/NotchSplashView.swift")
+        if let head = splashCardLines.firstIndex(where: {
+            $0.contains("private var header: some View {")
+        }) {
+            let window = splashCardLines[head...min(head + 24, splashCardLines.count - 1)]
+            let mark = window.firstIndex { $0.contains("Image(systemName: NotchModule.splash.symbol)") }
+            let name = window.firstIndex { $0.contains("Text(text.title)") }
+            headerLeadsWithMark = mark != nil && name != nil && mark! < name!
+        }
+        suite.expect(headerLeadsWithMark,
+               "the dashboard card leads with its section's mark, before its name")
+
+        // A key is taken in and kept, and is never written back out to the
+        // screen: the field is not bound to the stored key, and the words
+        // about it say only that a key is there.
+        let splashSettingsLines = repository.lines(at: "Sources/Vorssaint/UI/Notch/NotchSplashView.swift")
+        let boundToTheKey = splashSettingsLines.filter { $0.contains("$apiKey") }
+        suite.expect(boundToTheKey.isEmpty
+                         && splashSettingsLines.contains { $0.contains("SecureField") }
+                         && splashSettingsLines.contains { $0.contains("commitKey()") }
+                         && splashSettingsLines.contains { $0.contains("text.apiKeySet") }
+                         && !splashSettingsLines.contains { $0.contains("NotchSplashEndpoint.localAPIKey") },
+               "a key is typed in, kept, and never shown back (\(boundToTheKey.prefix(3).joined(separator: ", ")))")
+
         // French double punctuation and guillemets use non-breaking spaces.
         func frenchLines(_ path: String) -> ArraySlice<String> {
             let lines = repository.lines(at: path)

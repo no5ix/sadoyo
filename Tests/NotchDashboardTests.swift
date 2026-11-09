@@ -447,11 +447,29 @@ enum NotchDashboardTests {
         }
 
         suite.run("a card's mark opens the app that plays") {
-            // A process that runs is brought forward, so no second copy of the
-            // app is started; an app the adapter names is opened by that name.
+            // A process that runs and answers to the app the cover names is
+            // brought forward, so no second copy of the app is started; an app
+            // that is not running, or a process that belongs to a different
+            // app, is opened by the bundle the adapter named.
             suite.expect(NotchDashboardSupport.appOpening(pid: 7, isRunning: true,
-                                                          bundleIdentifier: "com.spotify.client") == .activate(pid: 7),
+                                                          bundleIdentifier: "com.spotify.client",
+                                                          runningBundleIdentifier: "com.spotify.client")
+                             == .activate(pid: 7),
                          "a running player is activated, not launched again")
+            suite.expect(NotchDashboardSupport.appOpening(pid: 7, isRunning: true,
+                                                          bundleIdentifier: "com.spotify.client",
+                                                          runningBundleIdentifier: "com.apple.Music")
+                             == .open(bundleIdentifier: "com.spotify.client"),
+                         "a process id handed out again to another app is not the player, and is not raised")
+            suite.expect(NotchDashboardSupport.appOpening(pid: 7, isRunning: true,
+                                                          bundleIdentifier: "com.NETEASE.163music",
+                                                          runningBundleIdentifier: "com.netease.163music")
+                             == .activate(pid: 7),
+                         "a bundle name written in another case is the same app")
+            suite.expect(NotchDashboardSupport.appOpening(pid: 7, isRunning: true,
+                                                          bundleIdentifier: nil,
+                                                          runningBundleIdentifier: nil) == .activate(pid: 7),
+                         "a player that is a process and not an app bundle is raised by its process")
             suite.expect(NotchDashboardSupport.appOpening(pid: 7, isRunning: false,
                                                           bundleIdentifier: "com.netease.163music")
                              == .open(bundleIdentifier: "com.netease.163music"),
@@ -460,6 +478,10 @@ enum NotchDashboardTests {
                          "a card that names no app asks for nothing")
             suite.expect(NotchDashboardSupport.appOpening(pid: 7, isRunning: false, bundleIdentifier: "") == .none,
                          "an empty bundle name is not a way to an app")
+            suite.expect(NotchDashboardSupport.appOpening(pid: -1, isRunning: false,
+                                                          bundleIdentifier: "com.apple.Music")
+                             == .open(bundleIdentifier: "com.apple.Music"),
+                         "a track whose app is not running at all is asked of the system, and a click that can find nothing does nothing")
         }
 
         suite.run("the timer's pause and close are one control") {

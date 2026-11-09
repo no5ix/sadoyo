@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Vorssaint
 
+import Combine
 import CoreGraphics
 import Foundation
 import SwiftUI
@@ -30,12 +31,15 @@ enum NotchSplashLayout {
     static let valueSize: CGFloat = 22
     static let footerSize: CGFloat = 9.5
     static let headerSize: CGFloat = 12
+    /// The mark that stands before the card's name, a little under the name's
+    /// own size so the two read as one line.
+    static let titleIconSize: CGFloat = 11
     static let readingSize: CGFloat = 11
-    /// The hairline under the header.
-    static let ruleHeight: CGFloat = 1
-    /// The card as the page and the section measure it.
+    /// The card as the page and the section measure it: the header's line, the
+    /// gap, the four readings. The header is not underlined, so the card is
+    /// measured without a rule.
     static var cardHeight: CGFloat {
-        padding * 2 + headerHeight + headerSpacing + ruleHeight + headerSpacing + metricCardHeight
+        padding * 2 + headerHeight + headerSpacing + metricCardHeight
     }
 
     /// The page: the ruler's row, the card under it, and the gap between.
@@ -124,6 +128,19 @@ enum SplashJSON: Decodable {
         return Int64(value)
     }
 
+    var bool: Bool? {
+        switch self {
+        case .boolean(let value): return value
+        case .number(let value): return value == 1 ? true : (value == 0 ? false : nil)
+        case .string(let value):
+            let word = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            if word == "true" { return true }
+            if word == "false" { return false }
+            return nil
+        default: return nil
+        }
+    }
+
     /// The first of `names` the document carries, skipping a field it spells
     /// as `null`.
     subscript(_ names: String...) -> SplashJSON? { field(names) }
@@ -147,6 +164,7 @@ enum SplashJSON: Decodable {
     func readInt(_ names: [String]) -> Int? { field(names)?.int }
     func readBytes(_ names: [String]) -> Int64? { field(names)?.int64 }
     func readText(_ names: [String]) -> String? { field(names)?.string }
+    func readBool(_ names: [String]) -> Bool? { field(names)?.bool }
     func readArray(_ names: [String]) -> [SplashJSON]? { field(names)?.array }
 
     /// A document read from a response body, or nil for anything that is not
@@ -166,6 +184,7 @@ extension Optional where Wrapped == SplashJSON {
     func readInt(_ names: [String]) -> Int? { self?.readInt(names) }
     func readBytes(_ names: [String]) -> Int64? { self?.readBytes(names) }
     func readText(_ names: [String]) -> String? { self?.readText(names) }
+    func readBool(_ names: [String]) -> Bool? { self?.readBool(names) }
     func readArray(_ names: [String]) -> [SplashJSON]? { self?.readArray(names) }
 }
 
@@ -230,8 +249,44 @@ struct NotchSplashStatus: Equatable {
         let chargedBytes: Int64?
     }
 
+    /// What the engine has in hand right now.
+    ///
+    /// The engine counts requests, not tasks: a coding agent's task is a run
+    /// of requests with pauses between them, while it runs a tool, while it
+    /// thinks, while its client composes the next prompt. So the card asks
+    /// the one question the endpoint can answer - is this server doing
+    /// anything, on any of the counts it keeps - and leaves the shape of a
+    /// task to the run of readings, which is `NotchSplashTaskTracker`'s.
+    struct Activity: Equatable {
+        /// Requests the server names as running.
+        let activeRequests: Int
+        let queued: Int
+        let prefilling: Int
+        let decoding: Int
+        /// Waiting for resources, for a prefix, for a mask, and in a terminal
+        /// state not yet reaped: work that has not left the building.
+        let waiting: Int
+        /// Requests the server has accepted and not finished.
+        let pending: Int
+        /// Client requests in flight, which covers the time between a request
+        /// arriving and the engine picking it up.
+        let httpRequests: Int
+        /// The engine is mid-loop and the answer is a snapshot: a snapshot
+        /// that shows nothing running is not proof that nothing is.
+        let statusIsStale: Bool
+
+        static let quiet = Activity(activeRequests: 0, queued: 0, prefilling: 0, decoding: 0,
+                                    waiting: 0, pending: 0, httpRequests: 0, statusIsStale: false)
+
+        var hasWork: Bool {
+            activeRequests > 0 || queued > 0 || prefilling > 0 || decoding > 0 || waiting > 0
+                || pending > 0 || httpRequests > 0 || statusIsStale
+        }
+    }
+
     let instance: Instance
     let activeRequestIDs: [String]
+    let activity: Activity
     let requests: Requests
     let metrics: Metrics
     let cache: Cache
@@ -253,6 +308,21 @@ struct NotchSplashStatus: Equatable {
         )
         activeRequestIDs = NotchSplashStatus.requestIDs(
             root.readArray(["active_requests", "running_requests"]))
+
+        let scheduler = root.field(["scheduler", "scheduler_state"])
+        let transport = root.field(["transport"])
+        let http = root.field(["http"])
+        activity = Activity(
+            activeRequests: activeRequestIDs.count,
+            queued: scheduler.readInt(["queued"]) ?? 0,
+            prefilling: scheduler.readInt(["prefilling"]) ?? 0,
+            decoding: scheduler.readInt(["decoding"]) ?? 0,
+            waiting: ["waiting_resources", "waiting_prefix", "waiting_mask", "terminal"]
+                .reduce(0) { total, name in total + (scheduler.readInt([name]) ?? 0) },
+            pending: transport.readInt(["pending"]) ?? 0,
+            httpRequests: (http.field(["requests"]) ?? http).readInt(["active"]) ?? 0,
+            statusIsStale: transport.readBool(["status_stale"]) ?? false
+        )
 
         let counters = root.field(["requests"]) ?? root
         self.requests = Requests(
@@ -354,6 +424,9 @@ struct NotchSplashStatus: Equatable {
         return plain.date(from: text)
     }
 
+    /// Anything in hand on any count the server keeps.
+    var hasWork: Bool { activity.hasWork }
+
     /// The whole reading is unusable when it carries no shape at all: not one
     /// counter, not one metric, not one instance.
     var isReadable: Bool {
@@ -369,8 +442,18 @@ struct NotchSplashStatus: Equatable {
 // MARK: - Where the server is
 
 enum NotchSplashEndpoint {
-    /// The port offered when nothing has been typed yet.
-    static let defaultPort = 8000
+    /// The port the Splash app on this Mac answers on, offered when nothing
+    /// has been typed yet.
+    static let defaultPort = 8001
+    /// The Splash server on this Mac, which is where the dashboard is asked
+    /// to look before anyone has said otherwise.
+    static let localHost = "127.0.0.1"
+    /// The key the Splash app on this Mac hands to the programs that speak to
+    /// it. The settings start with it so the dashboard works on a machine
+    /// that runs Splash of its own, and a key written into the settings takes
+    /// its place. It is kept with the settings, it is sent only to the address
+    /// the settings name, and it is never written on the screen.
+    static let localAPIKey = "sk-omlx-734TcXTQ2wgaKAV1Gvl8FD8t"
 
     /// A port as it is written in the field a person types it in.
     static func portText(_ port: Int) -> String { String(port) }
@@ -454,6 +537,24 @@ enum NotchSplashSupport {
     /// answering, and its last words are not evidence about the present.
     static let staleIntervalFactor = 3
 
+    /// How long the engine must have been quiet before a run of requests is
+    /// called over.
+    ///
+    /// The endpoint says nothing about tasks; it counts requests. A coding
+    /// agent's task is a run of them, with a pause after each while it runs a
+    /// tool and a longer one while its client composes the next prompt.
+    /// Watching a real engine through a task of several turns, those pauses
+    /// reached twenty seconds, and the request counters moved inside the run
+    /// - so a request ending is not a task ending, and the only honest signal
+    /// is a quiet that has outlasted the pauses. One prompt answered on its
+    /// own is announced a minute after it was answered; a task that is really
+    /// running is not announced in the middle, which is the trade this window
+    /// makes.
+    static let taskQuiescenceSeconds: TimeInterval = 60
+    /// Quiet readings that must pass in a row, so the window is honoured at a
+    /// one-second interval and at a ten-second one alike.
+    static let taskQuiescenceReadings = 2
+
     // MARK: Settings
 
     /// The interval a stored value means, in range, at the default when the
@@ -473,10 +574,46 @@ enum NotchSplashSupport {
         interval(defaults.object(forKey: DefaultsKey.notchSplashIntervalSeconds) as? Int)
     }
 
+    /// The key a reading is sent with: the one written into the settings, and
+    /// the key this Mac's Splash app hands out when nothing has been written.
+    /// The settings keep it and never show it.
+    static func savedAPIKey(in defaults: UserDefaults = .standard) -> String {
+        let saved = (defaults.string(forKey: DefaultsKey.notchSplashAPIKey) ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return saved.isEmpty ? NotchSplashEndpoint.localAPIKey : saved
+    }
+
+    /// Whether a key is in use, which is all the settings say about it.
+    static func hasAPIKey(in defaults: UserDefaults = .standard) -> Bool {
+        !savedAPIKey(in: defaults).isEmpty
+    }
+
+    /// Only a key written by hand can be taken back; the one the app starts
+    /// with comes back when the field is cleared.
+    static func hasWrittenAPIKey(in defaults: UserDefaults = .standard) -> Bool {
+        let saved = (defaults.string(forKey: DefaultsKey.notchSplashAPIKey) ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return !saved.isEmpty && saved != NotchSplashEndpoint.localAPIKey
+    }
+
     static func endpoint(in defaults: UserDefaults = .standard) -> URL? {
         let stored = defaults.integer(forKey: DefaultsKey.notchSplashPort)
         return NotchSplashEndpoint.statusURL(host: defaults.string(forKey: DefaultsKey.notchSplashHost) ?? "",
                                              port: stored != 0 ? stored : NotchSplashEndpoint.defaultPort)
+    }
+
+    // MARK: The card's rule
+
+    /// Whether the dashboard's Live Activities section has a Splash card.
+    ///
+    /// The card stands for the reading, so the reading is the rule. It appears
+    /// the moment Start begins the reading, and because a task's ending leaves
+    /// the reading running, the card keeps its place across the idle stretch
+    /// between two prompts - holding the finished task's frozen clock and its
+    /// last numbers - and it leaves when the way out ends the reading, or when
+    /// the section leaves the island.
+    static func showsDashboardCard(sectionVisible: Bool, isMonitoring: Bool) -> Bool {
+        sectionVisible && isMonitoring
     }
 
     // MARK: Thresholds
@@ -666,6 +803,11 @@ enum NotchSplashSupport {
 
     /// The interval a monitoring session polls at, written short.
     static func intervalText(_ seconds: Int) -> String { "\(seconds)s" }
+
+    /// The number written under a ruler's tick: the whole seconds alone. The
+    /// unit belongs to the value read out beside the ruler and to the words
+    /// about it, not to ten ticks that would overlap each other wearing it.
+    static func tickIntervalText(_ seconds: Int) -> String { "\(seconds)" }
 }
 
 // MARK: - The card's colours
@@ -738,11 +880,17 @@ struct NotchSplashSnapshot: Equatable {
 /// The task the dashboard times, and what became of it.
 ///
 /// Monitoring and a task are two things. Monitoring is the polling a person
-/// started; a task is one request Splash is running. The clock belongs to the
-/// task: it begins when a request is seen, freezes at its own length when the
-/// request finishes, and starts again at zero for the next one. A monitoring
-/// session begun over an idle server therefore shows a clock that has not
-/// begun, and a server that restarted does not "finish" the request it lost.
+/// started; a task is a run of work the engine is doing. The clock belongs to
+/// the run: it begins at the first request, runs on through the pauses
+/// between requests, and freezes at the last work seen once the server has
+/// been quiet long enough for the quiet to be the end of the task. A next
+/// request begins the next run, at zero.
+///
+/// The engine has no word for a task - it counts requests - so the run is
+/// what the readings say: work on any count the server keeps, and a quiet
+/// that has outlasted the pauses between turns. A request completing in the
+/// middle of a run is a request completing, and moves nothing: that is the
+/// whole point of the window.
 struct NotchSplashTaskTracker {
     enum Outcome: Equatable {
         case completed, failed, cancelled, lost
@@ -760,7 +908,8 @@ struct NotchSplashTaskTracker {
         case finished(id: String, outcome: Outcome, at: Date, elapsed: TimeInterval)
     }
 
-    /// The counters as they stood when a request was first seen.
+    /// The counters as they stood when the run began, and the server it was
+    /// read from.
     private struct Baseline: Equatable {
         let completed: Int
         let failed: Int
@@ -770,21 +919,35 @@ struct NotchSplashTaskTracker {
 
     private(set) var phase: Phase = .idle
     private var baseline: Baseline?
-    /// Readings in a row that have not named the tracked request. One is a
-    /// response caught mid-flight; two say the request is gone.
-    private var missingReadings = 0
+    /// The first reading that showed nothing running: the task's length is
+    /// measured to it, because the work ended somewhere between the reading
+    /// that saw it and this one, and a clock that measured to the last sight
+    /// of the work would be short by the whole width of a reading.
+    private var firstQuietAt: Date?
+    /// Readings in a row that showed nothing running.
+    private var quietReadings = 0
     /// The spill counter last seen, so a counter that grew is a spill now.
     private var lastSpillCount: Int?
 
     /// Spilling, sustained: the counter grew between two readings.
     private(set) var isSpilling = false
 
+    private let quiescence: TimeInterval
+    private let quietReadingsNeeded: Int
+
+    init(quiescence: TimeInterval = NotchSplashSupport.taskQuiescenceSeconds,
+         quietReadingsNeeded: Int = NotchSplashSupport.taskQuiescenceReadings) {
+        self.quiescence = quiescence
+        self.quietReadingsNeeded = max(1, quietReadingsNeeded)
+    }
+
     /// A monitoring session beginning: the clock starts over, and so does the
     /// reading of the counters.
     mutating func begin() {
         phase = .idle
         baseline = nil
-        missingReadings = 0
+        firstQuietAt = nil
+        quietReadings = 0
         lastSpillCount = nil
         isSpilling = false
     }
@@ -794,7 +957,8 @@ struct NotchSplashTaskTracker {
         guard case .finished = phase else { return }
         phase = .idle
         baseline = nil
-        missingReadings = 0
+        firstQuietAt = nil
+        quietReadings = 0
     }
 
     var isRunning: Bool {
@@ -828,75 +992,90 @@ struct NotchSplashTaskTracker {
 
     /// One reading, taken at `date`.
     ///
-    /// A request that leaves the active list is only called finished by what
-    /// the counters moved with it: a completed count that grew is a
-    /// completion, a failed or cancelled count that grew is that, and a
-    /// request that vanishes with every counter where it was is a request
-    /// this reading cannot speak for — a restart, a snapshot that arrived
-    /// late, a server that forgot it. That is reported as lost, and it is
-    /// never announced as a completion.
+    /// Work seen while nothing is being timed opens a run. Work seen while a
+    /// finished task holds the card opens the next run, at zero, with the
+    /// counters read from where they stand: nothing about the finished task
+    /// is carried into it, and a server that numbers its requests by position
+    /// cannot make the second task look like the first.
+    ///
+    /// A run is called over only by a quiet that has outlasted the window,
+    /// and what it was is decided by what the counters did across the whole
+    /// run: a completed count that grew is a completion, a failed or
+    /// cancelled count that grew with no completion is that, a server that
+    /// restarted underneath the run is a run it cannot speak for, and a run
+    /// the counters say nothing about is lost and is never announced as a
+    /// completion.
     mutating func observe(_ snapshot: NotchSplashSnapshot, at date: Date) -> Event? {
         let status = snapshot.status
         isSpilling = spillsGrew(status.kv.spillCount)
         switch phase {
-        case .idle:
-            guard let id = status.activeRequestIDs.first else { return nil }
-            phase = .running(id: id, startedAt: date)
-            baseline = Baseline(completed: status.requests.completed ?? 0,
-                                failed: status.requests.failed ?? 0,
-                                cancelled: status.requests.cancelled ?? 0,
-                                instanceKey: snapshot.instanceKey)
-            missingReadings = 0
-            return .started(id: id, at: date)
-
-        case .finished:
-            // A finished task holds its frozen clock until the page clears
-            // it, which is what a completion asks for. A task that ended
-            // without completing is cleared by the service, so the next
-            // request the server reports is timed as the next task.
-            return nil
+        case .idle, .finished:
+            guard status.hasWork else { return nil }
+            return start(id: status.activeRequestIDs.first ?? NotchSplashTaskTracker.unnumbered,
+                         at: date, snapshot: snapshot)
 
         case .running(let id, let startedAt):
-            guard !status.activeRequestIDs.contains(id) else {
-                missingReadings = 0
+            if status.hasWork {
+                firstQuietAt = nil
+                quietReadings = 0
                 return nil
             }
-            missingReadings += 1
-            let counters = status.requests
-            // The server itself changed under the request: the request is
-            // gone and nothing about it is known.
-            if let baseline, baseline.instanceKey != snapshot.instanceKey {
-                return finish(id: id, outcome: .lost, at: date, startedAt: startedAt)
-            }
-            // No counters at all: the request is gone and nothing confirms
-            // what it did.
-            if counters.reportsNothing {
-                return finish(id: id, outcome: .lost, at: date, startedAt: startedAt)
-            }
-            let previous = baseline ?? Baseline(completed: counters.completed ?? 0,
-                                                failed: counters.failed ?? 0,
-                                                cancelled: counters.cancelled ?? 0,
-                                                instanceKey: snapshot.instanceKey)
-            let completedGrew = (counters.completed ?? previous.completed) > previous.completed
-            let failedGrew = (counters.failed ?? previous.failed) > previous.failed
-            let cancelledGrew = (counters.cancelled ?? previous.cancelled) > previous.cancelled
-            if completedGrew { return finish(id: id, outcome: .completed, at: date, startedAt: startedAt) }
-            if failedGrew { return finish(id: id, outcome: .failed, at: date, startedAt: startedAt) }
-            if cancelledGrew { return finish(id: id, outcome: .cancelled, at: date, startedAt: startedAt) }
-            // Nothing moved and the request is out of the list in two
-            // readings in a row: the server dropped it without a counter to
-            // say why, which is as near to "unknown" as the endpoint allows.
-            guard missingReadings >= 2 else { return nil }
-            return finish(id: id, outcome: .lost, at: date, startedAt: startedAt)
+            quietReadings += 1
+            if quietReadings == 1 { firstQuietAt = date }
+            let quietFrom = firstQuietAt ?? startedAt
+            guard quietReadings >= quietReadingsNeeded,
+                  date.timeIntervalSince(quietFrom) >= quiescence else { return nil }
+            return finish(id: id, outcome: judge(status, snapshot: snapshot),
+                          at: quietFrom, startedAt: startedAt)
         }
+    }
+
+    /// A server that reports work without naming it: the run is real, and it
+    /// has no identity beyond its start.
+    static let unnumbered = "unnumbered"
+
+    private mutating func start(id: String, at date: Date, snapshot: NotchSplashSnapshot) -> Event {
+        let counters = snapshot.status.requests
+        phase = .running(id: id, startedAt: date)
+        baseline = Baseline(completed: counters.completed ?? 0, failed: counters.failed ?? 0,
+                            cancelled: counters.cancelled ?? 0, instanceKey: snapshot.instanceKey)
+        firstQuietAt = nil
+        quietReadings = 0
+        return .started(id: id, at: date)
+    }
+
+    private func judge(_ status: NotchSplashStatus, snapshot: NotchSplashSnapshot) -> Outcome {
+        // The server changed under the run: what became of it is not known.
+        if let baseline, baseline.instanceKey != snapshot.instanceKey { return .lost }
+        let counters = status.requests
+        if counters.reportsNothing { return .lost }
+        let previous = baseline ?? Baseline(completed: counters.completed ?? 0,
+                                            failed: counters.failed ?? 0,
+                                            cancelled: counters.cancelled ?? 0,
+                                            instanceKey: snapshot.instanceKey)
+        if (counters.completed ?? previous.completed) > previous.completed { return .completed }
+        if (counters.failed ?? previous.failed) > previous.failed { return .failed }
+        if (counters.cancelled ?? previous.cancelled) > previous.cancelled { return .cancelled }
+        // The engine went quiet with no counter moved: a run this reading
+        // cannot call a completion.
+        return .lost
     }
 
     private mutating func finish(id: String, outcome: Outcome, at date: Date, startedAt: Date) -> Event {
         let elapsed = max(0, date.timeIntervalSince(startedAt))
         phase = .finished(id: id, outcome: outcome, at: date, elapsed: elapsed)
         baseline = nil
-        missingReadings = 0
+        firstQuietAt = nil
+        quietReadings = 0
         return .finished(id: id, outcome: outcome, at: date, elapsed: elapsed)
+    }
+
+    /// The key a finished task is told by: its request's id and the second it
+    /// began. A server that numbers its requests by position hands out the
+    /// same id all day, so the id alone would make the second task's news
+    /// old news, while the pair is the task itself - and one task, told once.
+    static func announceKey(id: String, at date: Date, elapsed: TimeInterval) -> String {
+        "\(id)@\(Int64(max(0, date.timeIntervalSince1970 - elapsed)))"
     }
 
     private mutating func spillsGrew(_ count: Int?) -> Bool {
@@ -906,11 +1085,42 @@ struct NotchSplashTaskTracker {
     }
 }
 
+/// The rule for when the polling may end.
+///
+/// Monitoring is a promise the Start button makes and a person takes back.
+/// It keeps reading while Splash sits idle between two prompts, and it keeps
+/// reading through a task that finished, failed, or was cancelled: those are
+/// the dashboard's news, not its end. The three reasons the reading ends are
+/// a hand on the way out, the section switched off, and an address taken
+/// away. The idle time and the last task's ending are carried in the
+/// condition so that this rule, and not a timeout, is what the loop asks -
+/// and so that a test can ask it about an idle afternoon.
+enum NotchSplashMonitoringPolicy {
+    struct Condition: Equatable {
+        /// The person pressed the way out on the card or the page.
+        var stoppedByHand = false
+        /// The section is switched off.
+        var sectionDisabled = false
+        /// There is no server left to read.
+        var noAddress = false
+        /// How long the server has had nothing running, in seconds.
+        var idleSeconds: TimeInterval = 0
+        /// What became of the last task timed, if one was.
+        var outcome: NotchSplashTaskTracker.Outcome?
+    }
+
+    static func endsMonitoring(_ condition: Condition) -> Bool {
+        condition.stoppedByHand || condition.sectionDisabled || condition.noAddress
+    }
+}
+
 /// Which finished tasks are announced, and once.
 ///
 /// A completion is announced the first time it is confirmed and never again,
-/// by the request's own id. A page reopened, a poll repeated, and a status
-/// read twice are all reasons the same news could arrive twice.
+/// by the task's own key: its request's id and the second it began (see
+/// `NotchSplashTaskTracker.announceKey`). A page reopened, a poll repeated,
+/// and a status read twice are all reasons the same news could arrive twice;
+/// a second task is a second key, and is news in its own right.
 struct NotchSplashAnnouncements {
     private var announced: Set<String> = []
 
@@ -931,4 +1141,355 @@ struct NotchSplashAnnouncements {
     var announcedIDs: Set<String> { announced }
 
     mutating func reset() { announced.removeAll() }
+}
+
+// MARK: - The monitoring session
+
+/// Reads Splash's `/status` on the interval a person chose, and keeps the
+/// dashboard's two states apart: the monitoring the Start button began, and
+/// the request the island times.
+///
+/// The monitoring is a reader only. It never sends Splash anything but the
+/// request for a status, so starting it generates nothing, and stopping it
+/// cancels nothing — a generation already running in Splash goes on running.
+///
+/// It is also a promise kept until a hand takes it back. The polling goes on
+/// while Splash is idle, goes on through a task that finished, and is ended
+/// only by the way out on the card, by the section switched off, or by its
+/// address taken away. The clock belongs to the task and the reading belongs
+/// to the person who started it, and neither one's ending is the other's.
+///
+/// Reading is asked off the main thread and reported on the main thread, and
+/// the reading is turned into decisions by `NotchSplashTaskTracker`, which
+/// holds no thread and no request of its own.
+final class NotchSplashService: ObservableObject {
+    /// A status asked and answered: the document, and the answer's code.
+    typealias StatusAnswer = (data: Data, code: Int)
+    /// How a status is asked, with the address, the time to wait, and the key.
+    ///
+    /// The app asks a server over HTTP. A test answers with a document it
+    /// made. The polling, the task, the freezing, and the notices are the same
+    /// code in both, which is the point: the promise that a reading goes on
+    /// across an idle afternoon is tested as the promise, not as a description
+    /// of it.
+    typealias StatusReader = (URL, TimeInterval, String?) async throws -> StatusAnswer
+    /// A notice the dashboard is allowed to send.
+    struct Notice: Equatable {
+        let title: String
+        let body: String
+    }
+
+    /// The last reading that arrived, kept after monitoring ends so a frozen
+    /// dashboard can be read.
+    @Published private(set) var snapshot: NotchSplashSnapshot?
+    /// Whether the polling is running, which is the Live Activity card's rule.
+    @Published private(set) var isMonitoring = false
+    /// The task being timed: idle, running, or finished and frozen.
+    @Published private(set) var phase: NotchSplashTaskTracker.Phase = .idle
+    /// Why the last reading did not arrive, while the polling is running.
+    @Published private(set) var failure: NotchSplashFailure?
+    /// The interval the polling runs at, in whole seconds.
+    @Published private(set) var intervalSeconds: Int
+
+    /// A reading of the server's spilling and reservation pressure, which
+    /// only the tracker can tell from two readings in a row.
+    private(set) var isSpilling = false
+    private(set) var reservationFailures: Int?
+
+    private var tracker = NotchSplashTaskTracker()
+    private var announcements = NotchSplashAnnouncements()
+    private var loop: Task<Void, Never>?
+    private var generation = UUID()
+    /// What became of the last task timed, so the polling loop can be asked
+    /// whether a finished task is a reason to stop (it is not).
+    private var lastOutcome: NotchSplashTaskTracker.Outcome?
+    /// The moment a request was last seen running, and the moment the reading
+    /// began: the two ways the loop measures how long Splash has been idle.
+    private var lastActiveAt: Date?
+    private var monitoringSince = Date()
+
+    /// How many statuses the polling has asked for. The page does not read
+    /// this; a person watching the polling can, and a test must.
+    private(set) var reads = 0
+
+    // The outside world, as functions: what answers a status, where the
+    // server is, whether the section is on, what the interval and the key are,
+    // what time it is, what words to speak, and how a notice is sent. The app
+    // hands these over with its own session, settings, clock, and
+    // notifications; a test hands them over with a document it made and a
+    // clock of its own, and the reading, the task, and the notices run the
+    // same way either way.
+    private let read: StatusReader
+    private let address: () -> URL?
+    private let enabled: () -> Bool
+    private let savedInterval: () -> Int
+    private let savedKey: () -> String
+    private let keepInterval: (Int) -> Void
+    private let clock: () -> Date
+    private let strings: () -> NotchSplashStrings
+    private let deliver: (Notice) -> Void
+
+    /// A session with its world handed in, which is how a test runs one.
+    init(read: @escaping StatusReader,
+         address: @escaping () -> URL?,
+         enabled: @escaping () -> Bool = { true },
+         savedInterval: @escaping () -> Int,
+         savedKey: @escaping () -> String = { "" },
+         keepInterval: @escaping (Int) -> Void = { _ in },
+         clock: @escaping () -> Date = Date.init,
+         strings: @escaping () -> NotchSplashStrings = { FeatureStrings.notchSplash(.enUS) },
+         deliver: @escaping (Notice) -> Void = { _ in }) {
+        self.read = read
+        self.address = address
+        self.enabled = enabled
+        self.savedInterval = savedInterval
+        self.savedKey = savedKey
+        self.keepInterval = keepInterval
+        self.clock = clock
+        self.strings = strings
+        self.deliver = deliver
+        intervalSeconds = savedInterval()
+    }
+
+    // MARK: What the page and the card ask for
+
+    /// The clock's value now, by the clock the session is given.
+    func elapsed() -> TimeInterval { tracker.elapsed(at: clock()) }
+    /// The clock's value at a moment given.
+    func elapsed(at date: Date) -> TimeInterval { tracker.elapsed(at: date) }
+    var isTaskRunning: Bool { tracker.isRunning }
+    var isTaskFinished: Bool { tracker.isFinished }
+    var trackedID: String? { tracker.trackedID }
+    var taskOutcome: NotchSplashTaskTracker.Outcome? {
+        if case .finished(_, let outcome, _, _) = phase { return outcome }
+        return nil
+    }
+
+    /// How long the server has had nothing running, as the polling loop is
+    /// asked about it: the idle stretch between two prompts is the dashboard's
+    /// normal state, and the number that grows across it is never a reason to
+    /// stop reading.
+    private var idleSeconds: TimeInterval {
+        max(0, clock().timeIntervalSince(lastActiveAt ?? monitoringSince))
+    }
+
+    /// Whether the page has a dashboard to show: a session running, a task
+    /// frozen at the end of one, or a reading that came back from a stop.
+    var showsDashboard: Bool {
+        isMonitoring || isTaskRunning || isTaskFinished || snapshot != nil
+    }
+
+    /// The address being read, for the page to name.
+    var endpointDescription: String {
+        guard let url = address() else { return NotchSplashSupport.placeholder }
+        return "\(url.host ?? ""):\(url.port ?? 0)"
+    }
+
+    // MARK: The two switches
+
+    /// Begin monitoring at the chosen interval. Nothing is asked of Splash
+    /// beyond the status, so no generation starts.
+    func start() {
+        guard enabled(), !isMonitoring else { return }
+        guard address() != nil else {
+            failure = .notConfigured
+            return
+        }
+        generation = UUID()
+        tracker.begin()
+        tracker.clearFinished()
+        phase = tracker.phase
+        lastOutcome = nil
+        monitoringSince = clock()
+        lastActiveAt = nil
+        failure = nil
+        isMonitoring = true
+        startLoop()
+    }
+
+    /// Stop monitoring. The page returns to its Start state; a generation
+    /// already running in Splash is left alone, because stopping the reading
+    /// is not stopping the work. This is the only way a task's own ending
+    /// never ends the reading: the way out is a hand on the way out.
+    func stop() {
+        guard isMonitoring || loop != nil else { return }
+        isMonitoring = false
+        generation = UUID()
+        loop?.cancel()
+        loop = nil
+        tracker.clearFinished()
+        phase = tracker.phase
+        lastOutcome = nil
+        lastActiveAt = nil
+        failure = nil
+    }
+
+    /// A finished task cleared, so the page is empty again.
+    func clearFinishedTask() {
+        tracker.clearFinished()
+        phase = tracker.phase
+    }
+
+    /// The chosen interval, applied to the running session at once.
+    func setInterval(_ seconds: Int) {
+        let chosen = NotchSplashSupport.interval(seconds)
+        guard chosen != intervalSeconds else { return }
+        intervalSeconds = chosen
+        keepInterval(chosen)
+        if isMonitoring, let loop {
+            // The running nap is cut short, so the new interval is the
+            // interval the session keeps from here.
+            loop.cancel()
+            self.loop = nil
+            startLoop()
+        }
+    }
+
+    // MARK: Lifecycle
+
+    func syncWithPreferences() {
+        intervalSeconds = savedInterval()
+        let ends = NotchSplashMonitoringPolicy.endsMonitoring(
+            NotchSplashMonitoringPolicy.Condition(sectionDisabled: !enabled(),
+                                                  noAddress: address() == nil,
+                                                  idleSeconds: idleSeconds,
+                                                  outcome: lastOutcome))
+        if isMonitoring, ends { stop() }
+        // The address, the port, or the key moved under a running session:
+        // read the new one, and let the tracker's instance rule decide what
+        // the old request was. Nothing else about the settings ends a session
+        // that a person started.
+    }
+
+    // MARK: The loop
+
+    private func startLoop() {
+        let generation = self.generation
+        loop = Task { @MainActor [weak self] in
+            while !Task.isCancelled, let self, self.isMonitoring, self.generation == generation {
+                await self.readOnce(generation: generation)
+                if Task.isCancelled || !self.isMonitoring || self.generation != generation { return }
+                // The two facts a polling loop is tempted to treat as its end:
+                // how long the server has had nothing running, and what became
+                // of the last task. The rule answers them the way the promise
+                // says - keep reading - and only a hand, a section switched
+                // off, or an address gone stops it.
+                if NotchSplashMonitoringPolicy.endsMonitoring(
+                    NotchSplashMonitoringPolicy.Condition(idleSeconds: idleSeconds, outcome: lastOutcome)) {
+                    stop()
+                    return
+                }
+                let seconds = max(0.2, TimeInterval(self.intervalSeconds))
+                try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+            }
+        }
+    }
+
+    /// One status, read and applied.
+    private func readOnce(generation: UUID) async {
+        guard let url = address() else {
+            failure = .notConfigured
+            stop()
+            return
+        }
+        let timeout = min(10, max(2, TimeInterval(intervalSeconds) * 2))
+        let started = clock()
+        do {
+            let answer = try await read(url, timeout, savedKey())
+            // A read that belonged to a session that has since been stopped
+            // or restarted has nothing to say about this one.
+            guard generation == self.generation, !Task.isCancelled else { return }
+            reads += 1
+            guard answer.code == 200 else {
+                report(.status(answer.code), at: started)
+                return
+            }
+            guard let document = SplashJSON.document(answer.data) else {
+                report(.unreadable, at: started)
+                return
+            }
+            let status = NotchSplashStatus(document: document)
+            guard status.isReadable else {
+                report(.unreadable, at: started)
+                return
+            }
+            apply(NotchSplashSnapshot(status: status, fetchedAt: clock()), at: clock())
+        } catch {
+            guard generation == self.generation else { return }
+            // A cancelled read is the session ending by hand, which is not a
+            // failure to report.
+            if (error as? URLError)?.code == .cancelled, !isMonitoring { failure = nil; return }
+            report(.unreachable, at: started)
+        }
+    }
+
+    private func report(_ failure: NotchSplashFailure, at date: Date) {
+        self.failure = failure
+        // A reading that did not arrive: the last one stays on the card, and
+        // once it is older than the polling should have moved, it stops
+        // counting as evidence, so a server that comes back late cannot be
+        // read as finishing a request it never saw.
+        if let snapshot, isStale(snapshot) { self.failure = .stale }
+    }
+
+    private func isStale(_ snapshot: NotchSplashSnapshot) -> Bool {
+        clock().timeIntervalSince(snapshot.fetchedAt)
+            > TimeInterval(intervalSeconds) * Double(NotchSplashSupport.staleIntervalFactor)
+    }
+
+    /// A reading applied to the task, the dashboard, and the notices.
+    private func apply(_ snapshot: NotchSplashSnapshot, at date: Date) {
+        self.snapshot = snapshot
+        failure = nil
+        if snapshot.status.hasWork { lastActiveAt = date }
+        let event = tracker.observe(snapshot, at: date)
+        phase = tracker.phase
+        isSpilling = tracker.isSpilling
+        reservationFailures = snapshot.status.kv.reservationFailures
+        guard let event else { return }
+        switch event {
+        case .started:
+            break
+        case .finished(let id, let outcome, let at, let elapsed):
+            finishTask(id: id, outcome: outcome, at: at, elapsed: elapsed)
+        }
+    }
+
+    /// What the end of a task does: tell it once, freeze its clock, and keep
+    /// reading.
+    ///
+    /// A finished task is the dashboard's news, not its end. The clock stops
+    /// at the task's length, the readings it ended with stay on the card, and
+    /// the polling goes on, so the idle stretch after a prompt is a dashboard
+    /// still alive and the next prompt is timed as its own task with its own
+    /// news. Only the way out on the card stops the reading.
+    private func finishTask(id: String, outcome: NotchSplashTaskTracker.Outcome,
+                            at date: Date, elapsed: TimeInterval) {
+        lastOutcome = outcome
+        let words = strings()
+        let key = NotchSplashTaskTracker.announceKey(id: id, at: date, elapsed: elapsed)
+        // The notice carries the task's own length, the number the card's clock
+        // froze at - not the time the notice happens to be sent.
+        let spoken = NotchSplashSupport.taskClock(max(0, elapsed))
+        if announcements.take(id: key, outcome: outcome) {
+            deliver(Notice(title: words.notifyCompletedTitle,
+                           body: words.notifyCompletedBody(spoken)))
+        } else if announcements.takeUnsuccessful(id: key, outcome: outcome) {
+            deliver(Notice(title: outcome == .failed ? words.notifyFailedTitle : words.notifyCancelledTitle,
+                           body: outcome == .failed ? words.notifyFailedBody : words.notifyCancelledBody))
+        }
+        switch outcome {
+        case .completed:
+            // The task's clock stays frozen at its length and its readings
+            // stay on the card, held until the next request the server reports
+            // replaces them. The reading itself is not touched.
+            break
+        case .failed, .cancelled, .lost:
+            // A task that ended without completing is cleared, so the card
+            // reads as idle and the next request the server reports is timed
+            // as the next task. The reading goes on either way.
+            tracker.clearFinished()
+            phase = tracker.phase
+        }
+    }
 }

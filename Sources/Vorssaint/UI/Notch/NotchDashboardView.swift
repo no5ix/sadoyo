@@ -29,11 +29,6 @@ struct NotchDashboardView: View {
     @AppStorage(DefaultsKey.networkSpeedUnit) private var networkSpeedUnit = NetworkSpeedUnit.bytes
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    /// The players this page shows: the one the system names as playing, and
-    /// every other player whose own dictionary says it is playing. Each is a
-    /// card; none of them is the other's owner. The island measures the page
-    /// from the same list, so it comes from the service.
-    private var players: [Int] { service.dashboardPlayerIDs }
     /// The system's own session, the one with the cover, the queue and the
     /// lyrics. Its process is the id its card is known by.
     private var primaryPlayerID: Int? {
@@ -43,10 +38,15 @@ struct NotchDashboardView: View {
 
 
     /// The cards of the middle section, decided apart from one another: the
-    /// players first, then the timer.
+    /// players first, then the timer, then a Splash session being read. The
+    /// service decides the list, because the page measures itself by the same
+    /// list and a card the page draws without measuring, or measures without
+    /// drawing, is a page of the wrong height. The page watches the splash
+    /// service as it watches the players and the timer, so a session begun on
+    /// its own page appears here at once, and its readings keep arriving here
+    /// while it stands.
     private var activities: [NotchDashboardActivity] {
-        NotchDashboardSupport.activities(players: players,
-                                         timer: timer.session.hasSession && service.modules.contains(.timer))
+        service.dashboardActivities
     }
 
     /// The same readings the System page draws, all of them. The page asks the
@@ -267,32 +267,17 @@ struct NotchDashboardView: View {
             .accessibilityIdentifier("notch.dashboard.player.\(Int(source.pid)).\(command.dashboardName)")
     }
 
-    /// The mark of the app that plays, as the way to that app: a process that
-    /// runs is brought forward, and an app the adapter names is opened. The
-    /// card's body and its controls are untouched by this.
+    /// The mark of the app that plays, as the way to that app: the app comes
+    /// to the front, running or not. The card's body and its controls are
+    /// untouched by this.
     private func openAppButton(pid: Int, bundleIdentifier: String, identifier: String,
                                label: some View) -> some View {
-        Button { openApplication(pid: pid, bundleIdentifier: bundleIdentifier) } label: {
+        Button { NotchDashboardSupport.openApplication(pid: pid, bundleIdentifier: bundleIdentifier) } label: {
             label
         }
         .buttonStyle(NotchButtonStyle(cornerRadius: NotchDashboardLayout.appMarkCorner, lifts: false))
         .accessibilityLabel(text.open)
         .accessibilityIdentifier(identifier)
-    }
-
-    private func openApplication(pid: Int, bundleIdentifier: String) {
-        switch NotchDashboardSupport.appOpening(pid: pid,
-                                                isRunning: NSRunningApplication(processIdentifier: pid_t(pid)) != nil,
-                                                bundleIdentifier: bundleIdentifier) {
-        case .activate(let pid):
-            NSRunningApplication(processIdentifier: pid_t(pid))?.activate()
-        case .open(let identifier):
-            guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: identifier) else { return }
-            NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration(),
-                                               completionHandler: nil)
-        case .none:
-            break
-        }
     }
 
     /// The app's own mark, from the process that reports the track.
@@ -361,10 +346,11 @@ struct NotchDashboardView: View {
                 .accessibilityIdentifier("notch.dashboard.timer.pause")
                 // The card's own way out: it ends the session, and asks nothing
                 // of the players, whose cards stay as they are. The same circle,
-                // the same size, the same highlight under the pointer.
+                // the same size, the same lit plate under the pointer as the
+                // marks beside it and the controls in the Explorer wear.
                 NotchCircularIconButton(symbol: "xmark",
                                         title: timer.session.completed ? l10n.s.supportIntroDoneButton : l10n.s.mediaCancel,
-                                        side: NotchDashboardLayout.timerControlSide, filled: false) {
+                                        side: NotchDashboardLayout.timerControlSide, filled: true, tint: .orange) {
                     timer.cancel()
                 }
                 .accessibilityIdentifier("notch.dashboard.timer.close")

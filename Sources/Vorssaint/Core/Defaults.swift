@@ -1525,9 +1525,9 @@ enum Defaults {
         DefaultsKey.notchWatchCondition: NotchWatchCondition.changes.rawValue,
         // The dashboard ships off: it reads a server only a person runs.
         DefaultsKey.notchSplashEnabled: false,
-        DefaultsKey.notchSplashHost: "",
+        DefaultsKey.notchSplashHost: NotchSplashEndpoint.localHost,
         DefaultsKey.notchSplashPort: NotchSplashEndpoint.defaultPort,
-        DefaultsKey.notchSplashAPIKey: "",
+        DefaultsKey.notchSplashAPIKey: NotchSplashEndpoint.localAPIKey,
         DefaultsKey.notchSplashIntervalSeconds: NotchSplashSupport.defaultInterval,
         DefaultsKey.notchEnabled: false,
         DefaultsKey.notchDisplay: NotchDisplay.automatic.rawValue,
