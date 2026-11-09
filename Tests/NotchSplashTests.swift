@@ -965,28 +965,47 @@ enum NotchSplashTests {
         suite.expect(NotchDashboardSupport.activities(players: [7, 9], timer: true).last != .splash,
                      "a session that ended takes its card away, and the cards before it stay")
         suite.expect(NotchDashboardActivity.splash.id == "splash", "the card has a stable identity")
-        suite.expect(NotchDashboardLayout.activityHeight(.splash) == NotchSplashLayout.cardHeight,
-                     "the island measures the card as the card measures itself")
+        suite.expect(NotchDashboardLayout.activityHeight(.splash) == NotchSplashLayout.cardHeight(compact: true),
+                     "the island measures the card as the card measures itself, at the card the section draws")
         suite.expect(NotchDashboardLayout.liveActivitiesHeight([.timer, .splash])
-                         == NotchDashboardLayout.timerCardHeight + NotchSplashLayout.cardHeight
+                         == NotchDashboardLayout.timerCardHeight + NotchSplashLayout.cardHeight(compact: true)
                             + NotchDashboardLayout.cardSpacing,
                      "two cards are their heights and the gap between them")
-        suite.expect(NotchSplashLayout.cardHeight
+        // The card the page draws and the card the dashboard's section draws are
+        // two measures of one view: the page has the thirty days, the glance in
+        // Live Activities does not. A section measured with a chart it does not
+        // draw is a page of the wrong height.
+        suite.expect(NotchSplashLayout.cardHeight(compact: false) > NotchSplashLayout.cardHeight(compact: true)
+                         && NotchSplashLayout.cardHeight(compact: false)
+                             - NotchSplashLayout.cardHeight(compact: true)
+                             == NotchSplashLayout.sectionSpacing + NotchSplashLayout.trendCardHeight,
+                     "the trend's card is the page's own, and the section's card is measured without it")
+        suite.expect(NotchSplashLayout.cardHeight(compact: false)
                          == NotchSplashLayout.padding * 2 + NotchSplashLayout.headerHeight
                             + NotchSplashLayout.headerSpacing + NotchSplashLayout.metricCardHeight
                             + NotchSplashLayout.sectionSpacing + NotchSplashLayout.memoryCardHeight
                             + NotchSplashLayout.sectionSpacing + NotchSplashLayout.trendCardHeight,
                      "the card is its header, the four charts, the memory, and the trend, with the gaps between: "
                      + "the measure names every part the reference draws, in the reference's order")
+        suite.expect(NotchSplashLayout.cardHeight(compact: true)
+                         == NotchSplashLayout.padding * 2 + NotchSplashLayout.headerHeight
+                            + NotchSplashLayout.headerSpacing + NotchSplashLayout.metricCardHeight
+                            + NotchSplashLayout.sectionSpacing + NotchSplashLayout.memoryCardHeight,
+                     "the section's card is its header, its charts and its memory, and the gap between")
         suite.expect(NotchSplashLayout.metricCardHeight > NotchSplashLayout.valueSize
                          + NotchSplashLayout.sparklineHeight + NotchSplashLayout.labelSize,
                      "a chart's card is tall enough for its name, its figure, and its line")
+        // The memory's card is one line of name and three readings, and the
+        // governor's bar under them: it is a glance, and it is measured to one
+        // line and a bar, which is shorter than the two rows it replaced.
         suite.expect(NotchSplashLayout.memoryCardHeight > NotchSplashLayout.memoryValueSize
-                         + NotchSplashLayout.utilizationBarHeight,
-                     "the memory's card is tall enough for its three numbers and the governor's bar")
+                         + NotchSplashLayout.memoryLabelSize + NotchSplashLayout.utilizationBarHeight,
+                     "the memory's card is tall enough for its name, its three numbers and the governor's bar")
+        suite.expect(NotchSplashLayout.memoryCardHeight < 92,
+                     "the memory's card is compact, and not the two-row card it was: \(NotchSplashLayout.memoryCardHeight)")
         suite.expect(NotchSplashLayout.trendCardHeight > NotchSplashLayout.trendBarsHeight,
                      "the trend's card is tall enough for its bars, its dates, and the two colours named")
-        suite.expect(NotchSplashLayout.pageHeight >= NotchSplashLayout.cardHeight
+        suite.expect(NotchSplashLayout.pageHeight >= NotchSplashLayout.cardHeight(compact: false)
                          && NotchSplashLayout.pageMinimumHeight < NotchSplashLayout.pageHeight,
                      "the page is as tall as the card it carries, with a floor beneath it")
         // The page's height is what the page has to show: a session's page is

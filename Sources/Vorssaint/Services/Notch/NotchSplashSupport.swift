@@ -32,9 +32,11 @@ enum NotchSplashLayout {
     static let metricCardHeight: CGFloat = 86
     /// The line a metric's measurements draw, in the height of a thumb.
     static let sparklineHeight: CGFloat = 22
-    /// The memory's card: its name, three numbers in three columns, and the
-    /// governor's bar under them.
-    static let memoryCardHeight: CGFloat = 92
+    /// The memory's card: its name and the three readings in one row, and the
+    /// governor's bar under them. The name and the numbers share a line, so the
+    /// card is a glance and not a page, and it is shorter than the two rows it
+    /// replaces were.
+    static let memoryCardHeight: CGFloat = 74
     /// The trend's card: its name, the caption of the period, thirty bars,
     /// the dates, and the two names of the two colours.
     static let trendCardHeight: CGFloat = 124
@@ -57,16 +59,24 @@ enum NotchSplashLayout {
     /// The utilization bar, and the number beside it.
     static let utilizationBarHeight: CGFloat = 8
     /// The card as the page and the section measure it: the header's line, the
-    /// four readings, the memory, the trend, and the gaps between them.
-    static var cardHeight: CGFloat {
-        padding * 2 + headerHeight + headerSpacing + metricCardHeight
+    /// four readings, the memory, and - on the page, where a month of bars has
+    /// room to be pointed at - the trend.
+    ///
+    /// The compact card of the dashboard's Live Activities section is measured
+    /// without the trend, because it draws none: a card measured with a chart it
+    /// does not draw is a page of the wrong height, in the same way a card
+    /// drawn and not measured is.
+    static func cardHeight(compact: Bool = false) -> CGFloat {
+        let core = padding * 2 + headerHeight + headerSpacing + metricCardHeight
             + sectionSpacing + memoryCardHeight
-            + sectionSpacing + trendCardHeight
+        return compact ? core : core + sectionSpacing + trendCardHeight
     }
 
-    /// The page: the ruler's row, the card under it, and the gap between.
+    /// The page: the ruler's row, the card under it, and the gap between. The
+    /// page's card is the whole card, trend and all - the compact card belongs
+    /// to the dashboard, not to a page.
     static var pageHeight: CGFloat {
-        NotchLayout.timerRulerHeight + NotchLayout.rowSpacing + cardHeight
+        NotchLayout.timerRulerHeight + NotchLayout.rowSpacing + cardHeight(compact: false)
     }
 
     /// The page before a session: the ruler's row, the mark and the words of

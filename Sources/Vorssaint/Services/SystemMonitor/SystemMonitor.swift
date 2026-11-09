@@ -43,6 +43,10 @@ struct SystemSnapshot {
     var cpuUsageReadAt: TimeInterval?
     var cpuCoreUsage: [Double?] = [] // 0...1 per logical core, only while the menu panel shows the CPU row
     var gpuUsage: Double?          // 0...1
+    /// When `gpuUsage` was last really read, on the system uptime clock. The
+    /// value is carried over failed reads, and anything judging how long the
+    /// GPU has been busy has to tell those repeats apart from fresh readings.
+    var gpuUsageReadAt: TimeInterval?
     var memoryUsed: UInt64?
     var memoryAppUsed: UInt64?
     var memoryTotal: UInt64?
@@ -195,6 +199,7 @@ final class SystemMonitor: ObservableObject {
     private var lastCPUUsageReadAt: TimeInterval?
     private var missedCPUUsageSamples = 0
     private var lastGPUUsage: Double?
+    private var lastGPUUsageReadAt: TimeInterval?
     private var missedGPUUsageSamples = 0
     private var memoryCache: CachedMemoryReading?
     private var cpuTemperatureCache: CachedSensorReading?
@@ -879,15 +884,18 @@ final class SystemMonitor: ObservableObject {
                     if let rawGPU = Self.readGPUUsage() {
                         self.lastGPUUsage = MetricFormat.stabilizedGPUUsage(previous: self.lastGPUUsage,
                                                                             current: rawGPU)
+                        self.lastGPUUsageReadAt = now
                         self.missedGPUUsageSamples = 0
                         if let gpu = self.lastGPUUsage { self.gpuHistory.push(gpu) }
                     } else if self.missedGPUUsageSamples < 3 {
                         self.missedGPUUsageSamples += 1
                     } else {
                         self.lastGPUUsage = nil
+                        self.lastGPUUsageReadAt = nil
                     }
                 }
                 next.gpuUsage = self.lastGPUUsage
+                next.gpuUsageReadAt = self.lastGPUUsageReadAt
             }
             // The anti-glitch bridge must span a couple of sampling gaps or it
             // is useless on the slow background cadence (15 s): one bad SMC

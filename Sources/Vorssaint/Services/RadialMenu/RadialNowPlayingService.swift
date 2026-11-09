@@ -237,21 +237,23 @@ enum RadialNowPlayingApplication {
     private static var icons: [String: NSImage] = [:]
     private static var missingIcons = Set<String>()
 
+    /// The application a track's card speaks for, as the media session's rule
+    /// finds it. A web page's audio is played by a WebKit service whose bundle
+    /// sits inside the browser's, and the session names that service; the rule
+    /// walks out of it to the browser, so the card names, draws and raises the
+    /// app the person launched, and never the service.
     static func runningApplication(for snapshot: RadialNowPlayingSnapshot) -> NSRunningApplication? {
-        if let bundleIdentifier = snapshot.appBundleIdentifier,
-           let application = NSRunningApplication.runningApplications(
-            withBundleIdentifier: bundleIdentifier).first(where: { !$0.isTerminated }) {
-            return application
-        }
-        if let pid = snapshot.appPID {
-            return NSRunningApplication(processIdentifier: pid_t(pid))
-        }
-        return nil
+        MediaApplicationOpener.application(pid: snapshot.appPID.map { Int($0) },
+                                           bundleIdentifier: snapshot.appBundleIdentifier)?.running
     }
 
     static func name(for snapshot: RadialNowPlayingSnapshot) -> String? {
-        if let name = runningApplication(for: snapshot)?.localizedName, !name.isEmpty { return name }
-        guard let identifier = snapshot.appBundleIdentifier else { return nil }
+        let application = MediaApplicationOpener.application(pid: snapshot.appPID.map { Int($0) },
+                                                              bundleIdentifier: snapshot.appBundleIdentifier)
+        if let name = application?.running?.localizedName, !name.isEmpty { return name }
+        if let application { return MediaApplication.bundleName(of: application.url) }
+        guard let identifier = snapshot.appBundleIdentifier,
+              !MediaApplicationIdentity.isHelperIdentifier(identifier) else { return nil }
         return identifier.split(separator: ".").last.map(String.init)
     }
 
@@ -259,10 +261,15 @@ enum RadialNowPlayingApplication {
         let key = snapshot.appBundleIdentifier ?? snapshot.appPID.map { "pid:\($0)" } ?? ""
         if let icon = icons[key] { return icon }
         if missingIcons.contains(key) { return nil }
+        let application = MediaApplicationOpener.application(pid: snapshot.appPID.map { Int($0) },
+                                                             bundleIdentifier: snapshot.appBundleIdentifier)
         let icon: NSImage?
-        if let runningIcon = runningApplication(for: snapshot)?.icon {
+        if let runningIcon = application?.running?.icon {
             icon = runningIcon
+        } else if let application {
+            icon = NSWorkspace.shared.icon(forFile: application.url.path)
         } else if let identifier = snapshot.appBundleIdentifier,
+                  !MediaApplicationIdentity.isHelperIdentifier(identifier),
                   let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: identifier) {
             icon = NSWorkspace.shared.icon(forFile: url.path)
         } else {
@@ -293,7 +300,8 @@ enum RadialNowPlayingApplication {
             // Like a Dock click, a player that keeps playing with its window
             // closed shows one again, the way the App Switcher reopens a
             // windowless app. Activation alone would leave nothing to see.
-            if showsNoWindow, let url = application.bundleURL {
+            if showsNoWindow, let url = application.bundleURL,
+               MediaApplicationIdentity.isApplicationBundlePath(url.standardizedFileURL.path) {
                 let configuration = NSWorkspace.OpenConfiguration()
                 configuration.activates = false
                 configuration.addsToRecentItems = false
@@ -302,8 +310,14 @@ enum RadialNowPlayingApplication {
             }
             return
         }
+        // Nothing running may be raised, so the app is opened by its bundle -
+        // and only when the session's identifier names an application. A
+        // WebKit service's bundle lives inside the browser's, and opening it is
+        // what made macOS answer the click with an error dialog.
         guard let identifier = snapshot.appBundleIdentifier,
-              let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: identifier) else { return }
+              !MediaApplicationIdentity.isHelperIdentifier(identifier),
+              let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: identifier),
+              MediaApplicationIdentity.isApplicationBundlePath(url.standardizedFileURL.path) else { return }
         NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
     }
 

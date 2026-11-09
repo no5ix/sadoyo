@@ -731,6 +731,40 @@ private final class NotchTranslucentView: NSVisualEffectView {
     }
 }
 
+/// The mark a section wears, in one view, at the size the surface asks for.
+///
+/// Most sections wear the SF Symbol the section has always carried. Splash
+/// wears the Codex mark the AI page draws — the mark that app shows in the
+/// Mac's menu bar, or its icon where the app is not installed, and a symbol
+/// where neither is to be had — because the section reads that machine's
+/// engine, and the reference draws it with that knot. The same view is used by
+/// the card, the gallery's tile and the page's empty state, so the size,
+/// colour and alignment of one section are one answer everywhere.
+struct NotchSectionMark: View {
+    let module: NotchModule
+    /// The size of the mark, which the surface names: a card's title line, a
+    /// gallery's tile, a page's empty state.
+    var size: CGFloat
+    /// The colour, where the surface has one of its own. `nil` leaves the mark
+    /// the colour of the thing it stands for - the Codex knot its blue, a
+    /// symbol the tint the gallery's tiles wear.
+    var tint: Color? = nil
+
+    var body: some View {
+        Group {
+            if module == .splash {
+                NotchAgentMark(provider: .codex, size: size, tint: tint)
+                    .frame(width: size, height: size)
+            } else {
+                Image(systemName: module.symbol)
+                    .font(.system(size: size, weight: .medium))
+                    .foregroundStyle(tint ?? module.dashboardTint)
+            }
+        }
+        .accessibilityHidden(true)
+    }
+}
+
 /// Controls on the glass shell use quiet translucent fills, leaving the
 /// refraction to the island rather than stacking separate glass lenses.
 struct NotchControlSurface: ViewModifier {

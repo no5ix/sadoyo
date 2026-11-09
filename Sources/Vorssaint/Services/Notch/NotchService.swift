@@ -935,7 +935,6 @@ final class NotchService: ObservableObject {
                                            metrics: NotchSupport.systemCardCount(
                                             hasBattery: PowerSampler.hasInternalBattery,
                                             fans: SystemMonitor.shared.snapshot.fanSpeeds.count),
-                                           exploreCount: filteredSections.count,
                                            width: dashboardContentWidth,
                                            primaryPlayerID: dashboardPrimaryPlayerID)
     }

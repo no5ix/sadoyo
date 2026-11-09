@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Vorssaint
 
 import Foundation
+import AppKit
 import EventKit
 
 struct NotchCalendarColor: Equatable, Sendable {
@@ -359,6 +360,26 @@ enum NotchCalendarSupport {
             path += formatter.string(from: event.start) + "/"
         }
         return URL(string: path + identifier + "?method=show&options=more")
+    }
+
+    /// Calendar's own bundle. The page, the dashboard's card and every
+    /// appointment card ask for the app the same way, from one place: the link
+    /// goes to Calendar by its bundle and not by a scheme, because another app
+    /// that claims `ical` would not know EventKit's identifiers.
+    static let applicationBundleIdentifier = "com.apple.iCal"
+
+    /// The application the calendar surfaces lead to: Calendar, shown at one
+    /// appointment when there is one to show. Where Calendar is not installed,
+    /// nothing is asked of the system.
+    static func openApplication(showing event: NotchCalendarEvent? = nil) {
+        guard let application = NSWorkspace.shared
+            .urlForApplication(withBundleIdentifier: applicationBundleIdentifier) else { return }
+        let configuration = NSWorkspace.OpenConfiguration()
+        if let url = event.flatMap({ eventURL($0) }) {
+            NSWorkspace.shared.open([url], withApplicationAt: application, configuration: configuration)
+        } else {
+            NSWorkspace.shared.openApplication(at: application, configuration: configuration)
+        }
     }
 
     static func nextRefresh(_ events: [NotchCalendarEvent], now: Date,

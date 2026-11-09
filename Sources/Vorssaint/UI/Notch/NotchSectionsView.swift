@@ -103,9 +103,10 @@ struct NotchSectionsView: View {
         let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
         return Button { service.select(module) } label: {
             VStack(spacing: 6) {
-                Image(systemName: module.symbol)
-                    .font(.system(size: 22, weight: .medium))
-                    .foregroundStyle(module.dashboardTint)
+                // The section's own mark, at the tile's size: the Codex knot
+                // for the section that reads that engine, the section's symbol
+                // for every other, and the same view the section's card wears.
+                NotchSectionMark(module: module, size: 22)
                     .frame(width: 25, height: 25)
                 Text(module.title(l10n.language))
                     .font(.system(size: 11, weight: .medium))

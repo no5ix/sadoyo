@@ -4,32 +4,33 @@
 import AppKit
 import CoreGraphics
 import Foundation
+import SwiftUI
 
 /// One part of the island's one-page dashboard.
 ///
 /// The open island shows these parts together instead of one page at a time:
-/// the levels, the players and the timer that are running, the monitoring
-/// grid, and the way to the sections. A part is a section of one surface, not
-/// a destination, so a song starting does not replace the dashboard any more
-/// than a slider moving does. The order is fixed by `allCases` and the view
-/// draws it in the same order, so a test can read the composition without
-/// drawing it.
+/// the levels, the month, the readings, and the things that are running. A part
+/// is a section of one surface, not a destination, so a song starting does not
+/// replace the dashboard any more than a slider moving does.
+///
+/// The order is the page's, and it is fixed: the month first, the readings
+/// under it, and every running activity below them both. The month and the
+/// readings keep their places when an activity starts or stops, and
+/// `allCases` and `sections` say so without the page being drawn.
 ///
 /// The page draws no headings. Each section is known by the shape it is made
-/// of — the sliders, the cards, the grid, the circles — and a section's name
-/// is spoken, not printed: it is the accessibility label of its content.
+/// of — the sliders, the grid of days, the tiles, the cards — and a section's
+/// name is spoken, not printed: it is the accessibility label of its content.
 enum NotchDashboardSection: String, CaseIterable, Identifiable {
     case quickControls
     case calendar
-    case liveActivities
     case systemMonitoring
-    case explore
+    case liveActivities
 
     var id: String { rawValue }
 
     /// The name of the section, used to label its content for the screen
-    /// reader. Explore reuses the sections page's own title, so the label of
-    /// the tiles and the page they open say the same thing.
+    /// reader.
     func title(_ language: AppLanguage) -> String {
         let strings = FeatureStrings.notch(language)
         switch self {
@@ -37,9 +38,8 @@ enum NotchDashboardSection: String, CaseIterable, Identifiable {
         // The calendar's name is the section page's own, so the card on the
         // page and the page it opens answer to one word.
         case .calendar: return NotchModule.calendar.title(language)
-        case .liveActivities: return strings.liveActivitiesTitle
         case .systemMonitoring: return strings.systemMonitoringTitle
-        case .explore: return strings.sectionsTitle
+        case .liveActivities: return strings.liveActivitiesTitle
         }
     }
 }
@@ -152,6 +152,18 @@ enum NotchDashboardLayout {
     static let calendarColumnSpacing: CGFloat = 14
     static let calendarHeaderHeight: CGFloat = 16
     static let calendarHeaderGap: CGFloat = 4
+    /// The mark before the month's name, at the size the Calendar page's header
+    /// wears a mark, so the card's month and the page's month lead alike.
+    static let calendarMarkSize: CGFloat = 10.5
+    /// Room kept at both edges of the month's name for the marks that ride the
+    /// header's trailing edge: three of them, at the mark's own width and one
+    /// gap. The name is centred, so the room is kept on both sides, and the
+    /// month never sits under the marks.
+    static var calendarHeaderTitleInset: CGFloat { calendarOpenMarkSide * 3 + 2 * 2 }
+    /// The mark that opens Calendar itself, in the card's corner: a button's
+    /// own box, so the click that opens the app is not the click that picks a
+    /// day, and the mark is big enough to be aimed at.
+    static let calendarOpenMarkSide: CGFloat = 18
     /// The card's edge to its content, the same on every side: the month's grid
     /// and the day's appointments sit the same distance from the card's outline.
     static let calendarCardPadding: CGFloat = 8
@@ -179,6 +191,19 @@ enum NotchDashboardLayout {
     static let activityCardPadding: CGFloat = 10
     /// A card that carries one line of its own, with the edge on every side.
     static var timerCardHeight: CGFloat { activityCardPadding * 2 + activityArtwork - 12 }
+    /// How a card of this section comes and goes. The travel is the short way
+    /// and the spring has no bounce: a card leaving is a card being taken away,
+    /// not a shape thrown at the page, and the cards under it slide to their
+    /// new places in the same breath, so the page does not jump.
+    static let cardTransitionOffset: CGFloat = -6
+    static var cardMotion: Animation { .spring(duration: 0.32, bounce: 0) }
+
+    /// The transition of one activity card. With motion reduced it is the
+    /// fade, and nothing else.
+    static func cardTransition(reduceMotion: Bool) -> AnyTransition {
+        reduceMotion ? .opacity
+            : .offset(y: cardTransitionOffset).combined(with: .opacity)
+    }
     /// The timer card's two controls are one control: the same box, the same
     /// circle, the same place in the row. The pause is filled with the timer's
     /// colour because it holds the session; the close is quiet and lights that
@@ -220,14 +245,6 @@ enum NotchDashboardLayout {
     static let metricSpacing: CGFloat = 8
     /// The tile's edge to its reading, the same on every side.
     static let metricTilePadding: CGFloat = 10
-
-    // MARK: Explore
-
-    /// The sections as circles. Seven in a row puts every section on the page
-    /// at once, in two rows for the sections a Mac usually has.
-    static let exploreColumns: Int = 7
-    static let exploreButton: CGFloat = 40
-    static let exploreSpacing: CGFloat = 10
 
     /// The gap between the page's sections is the page's own; the cards inside
     /// a section sit closer, so a section reads as one group.
@@ -282,7 +299,11 @@ enum NotchDashboardLayout {
         switch activity {
         case .player(let id): return id == primaryPlayerID ? activityCardHeight : playerCardHeight
         case .timer: return timerCardHeight
-        case .splash: return NotchSplashLayout.cardHeight
+        // The page's card of a reading is the compact one: the header, the four
+        // readings and the memory, and no thirty days of bars. A glance at what
+        // is running now is not a chart of the month, and the page is measured
+        // to the card it draws.
+        case .splash: return NotchSplashLayout.cardHeight(compact: true)
         }
     }
 
@@ -331,39 +352,23 @@ enum NotchDashboardLayout {
     /// is never between a reading and its page.
     static func showsMetricDetail(metricSelected: Bool, appPanel: Bool) -> Bool { metricSelected }
 
-    /// The Explore circles at their columns, which is seven whenever the page
-    /// is as wide as it wants to be.
-    static func exploreColumns(width: CGFloat) -> Int {
-        min(exploreColumns, max(1, Int(((width + exploreSpacing) / (exploreButton + exploreSpacing)).rounded(.down))))
-    }
-
-    static func exploreRows(count: Int, width: CGFloat) -> Int {
-        guard count > 0 else { return 0 }
-        let columns = exploreColumns(width: width)
-        return (count + columns - 1) / columns
-    }
-
-    static func exploreHeight(count: Int, width: CGFloat) -> CGFloat {
-        gridHeight(rows: exploreRows(count: count, width: width),
-                   tileHeight: exploreButton, spacing: exploreSpacing)
-    }
-
     /// The whole dashboard: every section it shows, its content height, the
     /// gaps between them. The island sizes itself to this, so the page never
     /// scrolls for content that fits the display.
     /// The page's own sections, in the order it draws them, at their heights.
     /// The levels are not among them: they are the island's top row, which the
-    /// island's own geometry measures, so the page is as tall as the cards,
-    /// the grid and the circles it holds, and no more.
+    /// island's own geometry measures, so the page is as tall as the month, the
+    /// readings and the cards it holds, and no more. The month and the readings
+    /// are measured first and stand first: an activity's card is appended below
+    /// them, and moves nothing.
     static func sectionHeights(activities: [NotchDashboardActivity], calendar: Bool,
-                               metrics: Int, exploreCount: Int, width: CGFloat,
+                               metrics: Int, width: CGFloat,
                                primaryPlayerID: Int? = nil) -> [CGFloat] {
         var heights: [CGFloat] = []
         if calendar { heights.append(calendarCardHeight) }
+        heights.append(metricsHeight(tiles: metrics, columns: metricColumns))
         let live = liveActivitiesHeight(activities, primaryPlayerID: primaryPlayerID)
         if live > 0 { heights.append(live) }
-        heights.append(metricsHeight(tiles: metrics, columns: metricColumns))
-        heights.append(exploreHeight(count: exploreCount, width: width))
         return heights
     }
 
@@ -377,10 +382,9 @@ enum NotchDashboardLayout {
     }
 
     static func contentHeight(activities: [NotchDashboardActivity], calendar: Bool, metrics: Int,
-                              exploreCount: Int, width: CGFloat, primaryPlayerID: Int? = nil) -> CGFloat {
+                              width: CGFloat, primaryPlayerID: Int? = nil) -> CGFloat {
         let sections = sectionHeights(activities: activities, calendar: calendar, metrics: metrics,
-                                      exploreCount: exploreCount, width: width,
-                                      primaryPlayerID: primaryPlayerID)
+                                      width: width, primaryPlayerID: primaryPlayerID)
         guard !sections.isEmpty else { return 0 }
         return sections.reduce(0, +) + sectionSpacing * CGFloat(sections.count - 1)
     }
@@ -442,83 +446,27 @@ enum NotchDashboardSupport {
         return .send(pid: Int32(sourcePID), bundleIdentifier: bundleIdentifier, action: action)
     }
 
-    /// How a card's mark opens the app that plays: a process that is running
-    /// and answers to the app the cover names is brought forward, and anything
-    /// else is opened by the bundle the adapter named for it. A card with
-    /// neither is asked nothing.
-    enum AppOpening: Equatable {
-        case activate(pid: Int)
-        case open(bundleIdentifier: String)
-        case none
-    }
-
-    static func appOpening(pid: Int, isRunning: Bool, bundleIdentifier: String?,
-                           runningBundleIdentifier: String? = nil) -> AppOpening {
-        if pid > 0, isRunning {
-            // A process id is handed out again when an app quits, so a process
-            // is only the player when it answers to the bundle the player
-            // names. Otherwise the click would raise a stranger - and the app
-            // the song belongs to, which is what a cover is for, would never
-            // come up, which is what a click that does nothing looks like.
-            guard let wanted = bundleIdentifier, !wanted.isEmpty else { return .activate(pid: pid) }
-            if let runningBundleIdentifier,
-               runningBundleIdentifier.caseInsensitiveCompare(wanted) == .orderedSame {
-                return .activate(pid: pid)
-            }
-            return .open(bundleIdentifier: wanted)
-        }
-        if let bundleIdentifier, !bundleIdentifier.isEmpty { return .open(bundleIdentifier: bundleIdentifier) }
-        return .none
-    }
-
-    /// The click's work, done: the app that owns the song comes to the front.
-    ///
-    /// The island is a panel that never becomes the active app, and a running
-    /// app is not reliably raised by asking it directly from the background -
-    /// the request is honoured when the system feels like it, which is the
-    /// click that works on Tuesday and not on Wednesday. Opening the app's own
-    /// bundle through the workspace is the way that works from the background,
-    /// and it raises an app already running and starts one that is not, in one
-    /// ask. A process asked to come forward by its id, and unhidden, is the way
-    /// left for a player that is not an app bundle at all. Where the system
-    /// knows nothing about the app, nothing is asked of it: the click is quiet
-    /// and the song keeps playing.
+    /// How a card's mark opens the app that plays: the rule lives with the
+    /// media session's identity, in `MediaApplicationIdentity`, because the
+    /// same question is asked by the radial card, the player's page and every
+    /// card of the dashboard. Only an application bundle is opened - a helper
+    /// service named by a session is refused - and a process number is
+    /// believed only when the process answers to the app the player names.
     static func openApplication(pid: Int, bundleIdentifier: String) {
-        let wanted = bundleIdentifier.trimmingCharacters(in: .whitespacesAndNewlines)
-        let running = pid > 0 ? NSRunningApplication(processIdentifier: pid_t(pid)) : nil
-        switch appOpening(pid: pid, isRunning: running != nil,
-                          bundleIdentifier: wanted.isEmpty ? nil : wanted,
-                          runningBundleIdentifier: running?.bundleIdentifier) {
-        case .activate(let pid):
-            bringForward(NSRunningApplication(processIdentifier: pid_t(pid)))
-        case .open(let identifier):
-            if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: identifier) {
-                launch(url)
-            } else if let running {
-                // No bundle to open, and a process to ask: a player that is
-                // not an app bundle is raised the only way it can be.
-                bringForward(running)
-            }
-        case .none:
-            break
-        }
+        MediaApplicationOpener.open(pid: pid, bundleIdentifier: bundleIdentifier)
     }
 
-    private static func bringForward(_ application: NSRunningApplication?) {
-        guard let application else { return }
-        application.unhide()
-        if let url = application.bundleURL {
-            launch(url)
-        } else {
-            application.activate()
-        }
-    }
-
-    private static func launch(_ url: URL) {
-        let configuration = NSWorkspace.OpenConfiguration()
-        configuration.activates = true
-        configuration.createsNewApplicationInstance = false
-        NSWorkspace.shared.openApplication(at: url, configuration: configuration, completionHandler: nil)
+    /// The application a player's card speaks for: the running app, its
+    /// bundle, and the name and icon drawn from them. A card that names a
+    /// WebKit service as the player names the app that plays instead.
+    static func playerApplication(pid: Int?, bundleIdentifier: String?) -> MediaApplication? {
+        guard let resolved = MediaApplicationOpener.application(pid: pid, bundleIdentifier: bundleIdentifier)
+        else { return nil }
+        return MediaApplication(url: resolved.url,
+                                running: resolved.running,
+                                name: resolved.running?.localizedName.flatMap { $0.isEmpty ? nil : $0 }
+                                    ?? MediaApplication.bundleName(of: resolved.url),
+                                icon: resolved.running?.icon ?? NSWorkspace.shared.icon(forFile: resolved.url.path))
     }
 
     /// The activity cards, in order: every player that is playing, in the
@@ -539,16 +487,17 @@ enum NotchDashboardSupport {
         return visible
     }
 
-    /// The sections in the order the page draws them. The levels, the calendar,
-    /// the grid and the way to the sections are the page's own; the activity
-    /// section is only there when something runs, so an idle island is four
-    /// sections and not an empty card.
+    /// The sections in the order the page draws them, and the order is fixed:
+    /// the levels, the month, the grid, and the things that are running. The
+    /// month and the grid are the page's fixed sections, so the activity
+    /// section is only there when something runs - an idle island is three
+    /// sections and not an empty card - and nothing an activity does moves the
+    /// two sections above it.
     static func sections(activities: [NotchDashboardActivity], calendar: Bool) -> [NotchDashboardSection] {
         var sections: [NotchDashboardSection] = [.quickControls]
         if calendar { sections.append(.calendar) }
-        if !activities.isEmpty { sections.append(.liveActivities) }
         sections.append(.systemMonitoring)
-        sections.append(.explore)
+        if !activities.isEmpty { sections.append(.liveActivities) }
         return sections
     }
 

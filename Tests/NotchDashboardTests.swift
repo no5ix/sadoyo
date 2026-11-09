@@ -16,25 +16,28 @@ enum NotchDashboardTests {
     static func run(_ suite: TestSuite) {
         suite.run("dashboard sections stay and keep their order") {
             let idle = NotchDashboardSupport.sections(activities: [], calendar: false)
-            expect(suite, idle, [.quickControls, .systemMonitoring, .explore],
-                   "an island with nothing running shows the levels, the grid and the sections")
+            expect(suite, idle, [.quickControls, .systemMonitoring],
+                   "an island with nothing running shows the levels and the grid, and nothing else")
             let busy = NotchDashboardSupport.sections(activities: [.player(id: 7), .timer], calendar: true)
-            expect(suite, busy, [.quickControls, .calendar, .liveActivities, .systemMonitoring, .explore],
-                   "the month, then a player and a timer, go between the levels and the grid")
-            // The order is the reference's: levels, calendar, activities, grid,
-            // sections. Nothing runs between the levels and the calendar.
+            expect(suite, busy, [.quickControls, .calendar, .systemMonitoring, .liveActivities],
+                   "the month and the grid come between the levels, and the cards last")
+            // The order is the page's, and it is fixed: levels, month, grid,
+            // cards. The two fixed sections never move, and a card is appended
+            // below them, so nothing that starts or stops shifts a section.
             suite.expect(busy.first == .quickControls && busy[1] == .calendar
-                             && busy[2] == .liveActivities && busy[3] == .systemMonitoring
-                             && busy.last == .explore,
-                         "the calendar sits under the levels and above the activities")
+                             && busy[2] == .systemMonitoring && busy.last == .liveActivities,
+                         "the calendar sits under the levels and the grid sits above the cards")
+            suite.expect(NotchDashboardSection.allCases == [.quickControls, .calendar, .systemMonitoring, .liveActivities],
+                         "the page has four sections and no way to the sections")
             for activities in [[NotchDashboardActivity](), [.player(id: 7)], [.timer],
                                [.player(id: 7), .player(id: 9), .timer]] {
                 let sections = NotchDashboardSupport.sections(activities: activities, calendar: true)
                 suite.expect(sections.first == .quickControls
                                  && sections.contains(.calendar)
                                  && sections.contains(.systemMonitoring)
-                                 && sections.last == .explore,
-                             "the levels, the calendar, the grid and the sections stay whatever runs: \(activities.count) cards")
+                                 && sections.filter({ $0 == .calendar || $0 == .systemMonitoring })
+                                     == [.calendar, .systemMonitoring],
+                             "the levels, the month and the grid keep their places whatever runs: \(activities.count) cards")
             }
         }
 
@@ -55,12 +58,25 @@ enum NotchDashboardTests {
             suite.expect(NotchDashboardLayout.calendarGridHeight
                              >= NotchDashboardLayout.calendarMonthMinimumHeight,
                          "the grid keeps a row for every week of the month")
+            // The month's name is in the middle of the left pane, and the three
+            // marks - back, today, forward - ride the header's trailing edge, so
+            // the name keeps room at both edges for the marks beside it. The word
+            // "Today" is not drawn: the circle is the day, and the marks are the
+            // way to it.
+            suite.expect(NotchDashboardLayout.calendarHeaderTitleInset
+                             == 3 * NotchDashboardLayout.calendarOpenMarkSide + 2 * 2,
+                         "the month's name keeps the room its marks need at the header's edge")
+            suite.expect(NotchDashboardLayout.calendarOpenMarkSide >= 16
+                             && NotchDashboardLayout.calendarOpenMarkSide <= 24,
+                         "the mark that opens Calendar is a box a pointer aims at: \(NotchDashboardLayout.calendarOpenMarkSide)pt")
+            suite.expect(NotchDashboardLayout.calendarMarkSize >= 9,
+                         "the mark before the month's name is read at the card's size")
             // The page the reference draws - two players, a timer, eight
-            // readings, fourteen marks and the month - is read at once, at the
-            // island's tallest preset, so the sections do not need a screen each.
+            // readings and the month - is read at once, at the island's tallest
+            // preset, so the sections do not need a screen each.
             let drawn = NotchDashboardLayout.contentHeight(
                 activities: [.player(id: 7), .player(id: 9), .timer],
-                calendar: true, metrics: 8, exploreCount: 14,
+                calendar: true, metrics: 8,
                 width: NotchDashboardLayout.naturalContentWidth)
             suite.expect(drawn <= 700,
                          "the page the reference draws fits a small display's island: \(Int(drawn))pt")
@@ -68,7 +84,7 @@ enum NotchDashboardTests {
             // taller, and the page scrolls in the island instead of hiding a card.
             let crowded = NotchDashboardLayout.contentHeight(
                 activities: [.player(id: 7), .player(id: 9), .player(id: 11), .player(id: 13), .timer],
-                calendar: true, metrics: 8, exploreCount: 14,
+                calendar: true, metrics: 8,
                 width: NotchDashboardLayout.naturalContentWidth)
             suite.expect(crowded > drawn, "each player that starts adds its own card to the page")
             // A page narrower than a week of days beside the day's appointments
@@ -84,15 +100,25 @@ enum NotchDashboardTests {
             // The card belongs between the levels and the activities, so the
             // page's height counts it in that place.
             let withCard = NotchDashboardLayout.sectionHeights(activities: [.player(id: 7)], calendar: true,
-                                                               metrics: 8, exploreCount: 7,
+                                                               metrics: 8,
                                                                width: NotchDashboardLayout.naturalContentWidth)
             let without = NotchDashboardLayout.sectionHeights(activities: [.player(id: 7)], calendar: false,
-                                                              metrics: 8, exploreCount: 7,
+                                                              metrics: 8,
                                                               width: NotchDashboardLayout.naturalContentWidth)
             suite.expect(withCard.count == without.count + 1
                              && withCard.first == NotchDashboardLayout.calendarCardHeight
-                             && without.count == 3,
+                             && without.count == 2,
                          "the calendar leads the page's sections, under the row of levels")
+            // The cards are measured last, so the month and the grid keep their
+            // heights when a card is added: an activity's card is appended, and
+            // it moves no section above it.
+            let bare = NotchDashboardLayout.sectionHeights(activities: [], calendar: true, metrics: 8,
+                                                           width: NotchDashboardLayout.naturalContentWidth)
+            let added = NotchDashboardLayout.sectionHeights(activities: [.player(id: 7), .timer], calendar: true,
+                                                            metrics: 8,
+                                                            width: NotchDashboardLayout.naturalContentWidth)
+            suite.expect(Array(added.prefix(bare.count)) == bare && added.count == bare.count + 1,
+                         "a card starting appends its height and moves no section's own")
         }
 
         suite.run("every player playing gets a card, and the timer has its own") {
@@ -256,7 +282,7 @@ enum NotchDashboardTests {
                 var activities: [NotchDashboardActivity] = (0..<players).map { .player(id: 7 + $0) }
                 if timer { activities.append(.timer) }
                 return NotchDashboardLayout.contentHeight(activities: activities, calendar: true,
-                                                           metrics: tiles, exploreCount: 7, width: width,
+                                                           metrics: tiles, width: width,
                                                            primaryPlayerID: players > 0 ? 7 : nil)
             }
             let bare = height(0, timer: false)
@@ -282,14 +308,13 @@ enum NotchDashboardTests {
                                                                 spacing: NotchDashboardLayout.metricSpacing),
                          "eight readings are two rows of four, whatever the players are")
             suite.expect(height(3, timer: true) >= bare
-                             + NotchDashboardLayout.metricsHeight(tiles: tiles)
-                             + NotchDashboardLayout.exploreHeight(count: 7, width: width),
-                         "the page holds the grid and the sections on top of the players")
+                             + NotchDashboardLayout.metricsHeight(tiles: tiles),
+                         "the page holds the grid on top of the players, and trims nothing for a card")
             // A built-in display holds the fullest page, so nothing of it is
             // left under a scroll.
             suite.expect(three <= NotchDashboardLayout.maxPageHeight(screenHeight: 1084)
                              && height(3, timer: true) <= NotchDashboardLayout.maxPageHeight(screenHeight: 1084),
-                         "the month, three players, the timer, the grid and the sections fit a built-in display: \(height(3, timer: true))")
+                         "the month, three players, the timer and the grid fit a built-in display: \(height(3, timer: true))")
         }
 
         suite.run("the island's dashboard height follows the page, not the preset") {
@@ -446,42 +471,111 @@ enum NotchDashboardTests {
                          "with no reading named, the panel is the panel")
         }
 
-        suite.run("a card's mark opens the app that plays") {
-            // A process that runs and answers to the app the cover names is
-            // brought forward, so no second copy of the app is started; an app
-            // that is not running, or a process that belongs to a different
-            // app, is opened by the bundle the adapter named.
-            suite.expect(NotchDashboardSupport.appOpening(pid: 7, isRunning: true,
-                                                          bundleIdentifier: "com.spotify.client",
-                                                          runningBundleIdentifier: "com.spotify.client")
-                             == .activate(pid: 7),
-                         "a running player is activated, not launched again")
-            suite.expect(NotchDashboardSupport.appOpening(pid: 7, isRunning: true,
-                                                          bundleIdentifier: "com.spotify.client",
-                                                          runningBundleIdentifier: "com.apple.Music")
-                             == .open(bundleIdentifier: "com.spotify.client"),
-                         "a process id handed out again to another app is not the player, and is not raised")
-            suite.expect(NotchDashboardSupport.appOpening(pid: 7, isRunning: true,
-                                                          bundleIdentifier: "com.NETEASE.163music",
-                                                          runningBundleIdentifier: "com.netease.163music")
-                             == .activate(pid: 7),
+        suite.run("a card opens the application that plays, and never a helper") {
+            // The rule, at the level it is written: a running process that
+            // answers to the app the session names is opened - which raises it
+            // and shows it - and a bundle identifier is believed only when the
+            // running process answers to it. Safari plays its audio in WebKit's
+            // services, and the system hands the session to one of them: the
+            // card must open Safari, which is the process that owns the helper,
+            // and never the `.xpc` inside it, which is what made macOS answer a
+            // click with an error dialog.
+            func process(_ pid: Int32, _ bundle: String?, _ path: String?,
+                         switchable: Bool = true) -> ApplicationProcess {
+                ApplicationProcess(pid: pid, bundleIdentifier: bundle, bundlePath: path,
+                                   executablePath: path.map { $0 + "/Contents/MacOS/thing" },
+                                   isSwitchable: switchable)
+            }
+            let safariApp = "/Applications/Safari.app"
+            let webKitGPU = safariApp + "/Contents/XPCServices/com.apple.WebKit.GPU.xpc"
+            let spotifyApp = "/Applications/Spotify.app"
+            let noBundle: (String) -> ApplicationBundle? = { _ in nil }
+
+            // A process that runs and answers to the app the cover names.
+            suite.expect(MediaApplicationIdentity.resolve(sessionPID: 7, reportedBundleIdentifier: "com.spotify.client",
+                                                          processes: [process(7, "com.spotify.client", spotifyApp)],
+                                                          installed: noBundle)
+                             == .open(path: spotifyApp, pid: 7),
+                         "a running player is raised by its bundle, and no second copy is started")
+            // A bundle name written in another case is the same app, and the
+            // same click.
+            suite.expect(MediaApplicationIdentity.resolve(sessionPID: 7, reportedBundleIdentifier: "com.NETEASE.163music",
+                                                          processes: [process(7, "com.netease.163music",
+                                                                              "/Applications/163 Music.app")],
+                                                          installed: noBundle)
+                             == .open(path: "/Applications/163 Music.app", pid: 7),
                          "a bundle name written in another case is the same app")
-            suite.expect(NotchDashboardSupport.appOpening(pid: 7, isRunning: true,
-                                                          bundleIdentifier: nil,
-                                                          runningBundleIdentifier: nil) == .activate(pid: 7),
-                         "a player that is a process and not an app bundle is raised by its process")
-            suite.expect(NotchDashboardSupport.appOpening(pid: 7, isRunning: false,
-                                                          bundleIdentifier: "com.netease.163music")
-                             == .open(bundleIdentifier: "com.netease.163music"),
+            // The process number was handed out again, to a stranger: raising
+            // it would raise the stranger and leave the player behind, so the
+            // click asks for the app by its bundle instead, and asks for nothing
+            // when the bundle is not to be had.
+            suite.expect(MediaApplicationIdentity.resolve(sessionPID: 7, reportedBundleIdentifier: "com.spotify.client",
+                                                          processes: [process(7, "com.apple.Music", "/System/Applications/Music.app")],
+                                                          installed: noBundle) == .nothing,
+                         "a process id handed out again to another app is not the player, and is not raised")
+            suite.expect(MediaApplicationIdentity.resolve(sessionPID: 7, reportedBundleIdentifier: "com.spotify.client",
+                                                          processes: [process(7, "com.apple.Music", "/System/Applications/Music.app")],
+                                                          installed: { id in
+                                                            id == "com.spotify.client"
+                                                              ? ApplicationBundle(path: spotifyApp, bundleIdentifier: id, isLaunchable: true)
+                                                              : nil
+                                                          })
+                             == .open(path: spotifyApp, pid: nil),
                          "a player whose process went is opened by the bundle the adapter named")
-            suite.expect(NotchDashboardSupport.appOpening(pid: -1, isRunning: false, bundleIdentifier: nil) == .none,
-                         "a card that names no app asks for nothing")
-            suite.expect(NotchDashboardSupport.appOpening(pid: 7, isRunning: false, bundleIdentifier: "") == .none,
-                         "an empty bundle name is not a way to an app")
-            suite.expect(NotchDashboardSupport.appOpening(pid: -1, isRunning: false,
-                                                          bundleIdentifier: "com.apple.Music")
-                             == .open(bundleIdentifier: "com.apple.Music"),
-                         "a track whose app is not running at all is asked of the system, and a click that can find nothing does nothing")
+            // Safari, the case that started this: the session belongs to
+            // WebKit's GPU service, whose bundle is an `.xpc` inside Safari.
+            suite.expect(MediaApplicationIdentity.resolve(sessionPID: 21,
+                                                          reportedBundleIdentifier: "com.apple.WebKit.GPU",
+                                                          processes: [
+                                                            process(21, "com.apple.WebKit.GPU", webKitGPU, switchable: false),
+                                                            process(12, "com.apple.Safari", safariApp),
+                                                          ],
+                                                          installed: noBundle)
+                             == .open(path: safariApp, pid: 12),
+                         "a web page's card opens the browser that owns the service, not the service")
+            suite.expect(MediaApplicationIdentity.resolve(sessionPID: 21,
+                                                          reportedBundleIdentifier: "com.apple.WebKit.GPU",
+                                                          processes: [process(21, "com.apple.WebKit.GPU", webKitGPU, switchable: false)],
+                                                          installed: noBundle) == .nothing,
+                         "a helper with no application above it is never launched, and the click asks for nothing")
+            suite.expect(MediaApplicationIdentity.resolve(sessionPID: 21,
+                                                          reportedBundleIdentifier: "com.apple.WebKit.Networking",
+                                                          processes: [],
+                                                          installed: { _ in ApplicationBundle(path: webKitGPU,
+                                                                                             bundleIdentifier: "com.apple.WebKit.Networking",
+                                                                                             isLaunchable: true) })
+                             == .nothing,
+                         "a helper identifier is never handed to LaunchServices, even when it resolves")
+            // The paths, by themselves: a bundle inside a helper folder is not
+            // an application, and the walk out of an `.xpc` finds the `.app`.
+            suite.expect(!MediaApplicationIdentity.isApplicationBundlePath(webKitGPU)
+                             && MediaApplicationIdentity.isHelperPath(webKitGPU)
+                             && MediaApplicationIdentity.isHelperIdentifier("com.apple.WebKit.GPU"),
+                         "WebKit's service is known as a helper by its path and by its identifier")
+            suite.expect(MediaApplicationIdentity.applicationBundlePath(from: webKitGPU) == safariApp
+                             && MediaApplicationIdentity.applicationBundlePath(from: spotifyApp + "/Contents/Helpers/Spotify Helper.app")
+                                 == spotifyApp,
+                         "the deepest bundle a click may open is the application that carries the helper")
+            suite.expect(MediaApplicationIdentity.applicationBundlePath(from: "/usr/bin/ffplay") == nil
+                             && !MediaApplicationIdentity.isApplicationBundlePath("/usr/bin/ffplay"),
+                         "a bare executable is not a bundle to launch")
+            suite.expect(MediaApplicationIdentity.isApplicationBundlePath("/Applications/Plugins.app"),
+                         "an application named for a helper folder is an application")
+            // A player that is a process and not an application at all is
+            // raised by its process, and a card that names nothing asks for
+            // nothing.
+            suite.expect(MediaApplicationIdentity.resolve(sessionPID: 7, reportedBundleIdentifier: nil,
+                                                          processes: [process(7, nil, "/usr/local/bin/mpd")],
+                                                          installed: noBundle) == .activate(pid: 7),
+                         "a player that is a process and not an app bundle is raised by its process")
+            suite.expect(MediaApplicationIdentity.resolve(sessionPID: -1, reportedBundleIdentifier: nil,
+                                                          processes: [], installed: noBundle) == .nothing
+                             && MediaApplicationIdentity.resolve(sessionPID: 7, reportedBundleIdentifier: "",
+                                                                 processes: [], installed: noBundle) == .nothing,
+                         "a card that names no app, and a card whose bundle name is empty, ask for nothing")
+            suite.expect(MediaApplicationIdentity.resolve(sessionPID: 7, reportedBundleIdentifier: "not.a.bundle",
+                                                          processes: [], installed: noBundle) == .nothing,
+                         "an identifier the machine cannot resolve is not invented into a launch")
         }
 
         suite.run("the timer's pause and close are one control") {
@@ -506,6 +600,81 @@ enum NotchDashboardTests {
                          "the controls sit inside the card's own edge")
         }
 
+        suite.run("a card is for playing, and for nothing else") {
+            // A card is a thing happening now. A session that is paused,
+            // stopped, interrupted, changed, disclosed, or of no known state is
+            // not happening, and gets no card; a session that is playing with
+            // nothing to play has nothing to draw. These are the states the
+            // adapter reports, and the page asks the adapter's own question.
+            func source(_ pid: Int32, _ bundle: String, playing: Bool, track: Bool,
+                        name: String? = nil) -> NotchPlaybackSource {
+                NotchPlaybackSource(pid: pid, bundleIdentifier: bundle, isMusicApp: true,
+                                    isPlaying: playing, hasTrack: track, displayName: name)
+            }
+            let playing = source(21, "com.apple.Safari", playing: true, track: true, name: "Safari")
+            let paused = source(31, "com.spotify.client", playing: false, track: true, name: "Spotify")
+            let noTrack = source(41, "com.apple.Music", playing: true, track: false, name: "Music")
+            suite.expect(playing.isActivelyPlaying && !paused.isActivelyPlaying && !noTrack.isActivelyPlaying,
+                         "a playing session with a recording is the only session that is live")
+            suite.expect(NotchDashboardLayout.playerIDs(sources: [paused], inEffectPID: 31) == [],
+                         "a paused song keeps no card on the page")
+            suite.expect(NotchDashboardLayout.playerIDs(sources: [noTrack], inEffectPID: 41) == [],
+                         "a player that says it is playing with nothing to play has no card")
+            suite.expect(NotchDashboardLayout.playerIDs(sources: [paused, playing], inEffectPID: 31) == [21],
+                         "a paused app that leads the page does not lead it: the playing app's card is the page")
+            suite.expect(NotchDashboardLayout.playerIDs(sources: [paused, playing], inEffectPID: nil) == [21],
+                         "with no app in effect, only the playing app is on the page")
+            suite.expect(NotchDashboardLayout.playerIDs(sources: [paused, noTrack], inEffectPID: 31).isEmpty,
+                         "nothing playing leaves no card, and the section asks for no height")
+            // More than one app playing: the one in effect leads, the rest keep
+            // the order they were reported in, and the answer is the same every
+            // time the same players are reported - never the order of a
+            // dictionary, and never the position of a card in an array.
+            let first = source(11, "a.first", playing: true, track: true)
+            let second = source(12, "b.second", playing: true, track: true)
+            let third = source(13, "c.third", playing: true, track: true)
+            let players = [first, second, third]
+            suite.expect(NotchDashboardLayout.playerIDs(sources: players, inEffectPID: 13) == [13, 11, 12],
+                         "the app in effect leads, and the others keep the adapter's order")
+            suite.expect(NotchDashboardLayout.playerIDs(sources: players, inEffectPID: 11) == [11, 12, 13]
+                             && NotchDashboardLayout.playerIDs(sources: players, inEffectPID: 12) == [12, 11, 13],
+                         "the same players and a different app in effect give the same order every time")
+            suite.expect(NotchDashboardLayout.playerIDs(sources: players, inEffectPID: 99) == [11, 12, 13],
+                         "an app in effect the adapter does not report leads nothing, and is not a card")
+            // A card is never listed twice, and the count of cards is the count
+            // of playing apps: a control on the second card is a command to that
+            // player, and the cards stay where they were.
+            suite.expect(Set(NotchDashboardLayout.playerIDs(sources: players, inEffectPID: 13)).count == 3,
+                         "three playing apps are three cards, and none of them is twice a card")
+        }
+
+        suite.run("a card comes and goes without moving the page") {
+            // The transition is the short way, with no bounce, and the same
+            // motion carries the cards below to their new places. Reduced motion
+            // is the fade alone.
+            suite.expect(abs(NotchDashboardLayout.cardTransitionOffset) <= 12
+                             && NotchDashboardLayout.cardTransitionOffset != 0,
+                         "a card travels a short way, and not none: \(NotchDashboardLayout.cardTransitionOffset)pt")
+            // The identity of a card is its own - a process, the timer, a
+            // reading - so a card that stays is not rebuilt when a neighbour
+            // starts, and a card that goes leaves the others alone.
+            suite.expect(NotchDashboardActivity.player(id: 7).id == "player.7"
+                             && NotchDashboardActivity.player(id: 9).id == "player.9"
+                             && NotchDashboardActivity.timer.id == "timer"
+                             && NotchDashboardActivity.splash.id == "splash",
+                         "every card answers to a stable identity, and not to its place in the list")
+            let before = NotchDashboardSupport.activities(players: [7, 9], timer: true)
+            let after = NotchDashboardSupport.activities(players: [7], timer: true)
+            suite.expect(after == [.player(id: 7), .timer] && before.first == after.first,
+                         "a card leaving takes its own card away, and the cards before it keep their places")
+            let started = NotchDashboardSupport.activities(players: [7, 9, 11], timer: true)
+            suite.expect(started.filter { if case .player = $0 { return true }; return false }
+                             == [.player(id: 7), .player(id: 9), .player(id: 11)]
+                             && started.last == .timer
+                             && started.first == before.first,
+                         "a player that starts joins the players at their end, and moves no card above it")
+        }
+
         suite.run("the countdown's card offers its restart, the other modes do not") {
             // The marks are one decision, read in row order: a countdown is
             // started again, held and ended, and the restart is the first of
@@ -525,31 +694,31 @@ enum NotchDashboardTests {
                          "the three marks, at their gap and edges, leave the clock its room")
         }
 
-        suite.run("the page keeps its readings and its sections whatever runs") {
+        suite.run("the page keeps its readings and its order whatever runs") {
             let width = NotchDashboardLayout.naturalContentWidth
             let grid = NotchDashboardLayout.metricsHeight(tiles: 8)
-            let sections = NotchDashboardLayout.exploreHeight(count: 7, width: width)
             func rows(_ activities: [NotchDashboardActivity]) -> [CGFloat] {
                 NotchDashboardLayout.sectionHeights(activities: activities, calendar: true, metrics: 8,
-                                                    exploreCount: 7, width: width, primaryPlayerID: 7)
+                                                    width: width, primaryPlayerID: 7)
             }
             let none = rows([])
             let one = rows([.player(id: 7)])
             let many = rows([.player(id: 7), .player(id: 9), .player(id: 11), .timer])
             for (name, heights) in [("nothing running", none), ("one player", one), ("three players", many)] {
-                suite.expect(heights.contains(grid), "the whole grid of readings is on the page: \(name)")
-                suite.expect(heights.contains(sections), "the way to the sections is on the page: \(name)")
                 suite.expect(heights.first == NotchDashboardLayout.calendarCardHeight,
                              "the month leads the page: \(name)")
-                suite.expect(heights.last == sections, "the page ends at the sections, at every size: \(name)")
+                // The grid is the page's second section, at the same height, at
+                // every count: the cards are appended after it, and nothing an
+                // activity does moves it or trims it.
+                suite.expect(heights.count >= 2 && heights[1] == grid,
+                             "the whole grid of readings keeps its place and its height: \(name)")
             }
-            // The players add their own section; the month, the grid and the way
-            // to the sections are the page at every size.
-            suite.expect(many.count == none.count + 1
-                             && one.count == none.count + 1,
-                         "the players add one section between the month and the grid, at every count")
-            suite.expect(many.first == none.first && many.last == none.last,
-                         "the month leads and the sections close the page, with three players as with none")
+            // The players add their own section at the end; the month and the
+            // grid are the page at every size, in the same places.
+            suite.expect(many.count == none.count + 1 && one.count == none.count + 1,
+                         "the players add one section, below the month and the grid, at every count")
+            suite.expect(Array(many.prefix(none.count)) == none && Array(one.prefix(none.count)) == none,
+                         "the month and the grid keep their heights and their order, with three players as with none")
         }
 
         suite.run("the page's players are the players the system reports") {
@@ -658,29 +827,28 @@ enum NotchDashboardTests {
             let width = NotchDashboardLayout.naturalContentWidth
             let cards: [NotchDashboardActivity] = [.player(id: 7), .player(id: 9), .timer]
             let idle = NotchDashboardLayout.sectionHeights(activities: [], calendar: false, metrics: 8,
-                                                            exploreCount: 7, width: width)
+                                                            width: width)
             let busy = NotchDashboardLayout.sectionHeights(activities: cards, calendar: false, metrics: 8,
-                                                            exploreCount: 7, width: width)
-            suite.expect(idle.count == 2 && busy.count == 3,
+                                                            width: width)
+            suite.expect(idle.count == 1 && busy.count == 2,
                          "one height per section, the activity cards measured only when something runs")
             // A section is its content and nothing else: no label line, no
             // card insets of its own. That is what keeps the island exactly as
             // tall as the page it holds, with no empty space at its bottom.
             suite.expect(idle[0] == NotchDashboardLayout.metricsHeight(tiles: 8),
-                         "the grid is measured at its rows, and leads the page when nothing runs")
-            suite.expect(idle[1] == NotchDashboardLayout.exploreHeight(count: 7, width: width),
-                         "the sections' marks are measured at their rows")
-            suite.expect(busy[0] == NotchDashboardLayout.liveActivitiesHeight(cards),
-                         "the activity section is measured at its three cards")
+                         "the grid is the page when nothing runs")
+            suite.expect(busy[0] == NotchDashboardLayout.metricsHeight(tiles: 8)
+                             && busy[1] == NotchDashboardLayout.liveActivitiesHeight(cards),
+                         "the cards are measured at their three cards, below the grid")
             // The levels are not among the page's heights: they are the island's
             // top row, which the island's geometry measures with its insets.
             suite.expect(!NotchDashboardLayout.sectionHeights(activities: cards, calendar: true, metrics: 8,
-                                                              exploreCount: 7, width: width)
+                                                              width: width)
                              .contains(NotchDashboardLayout.quickControlsHeight),
                          "the page measures no row of levels, so the island adds no row of empty space")
             suite.expect(NotchDashboardLayout.contentHeight(activities: cards, calendar: false, metrics: 8,
-                                                             exploreCount: 7, width: width)
-                             == busy.reduce(0, +) + NotchDashboardLayout.sectionSpacing * 2,
+                                                             width: width)
+                             == busy.reduce(0, +) + NotchDashboardLayout.sectionSpacing,
                          "the page is its sections and the gaps between them")
             // Each card, player or timer, adds exactly its own height.
             suite.expect(NotchDashboardLayout.liveActivitiesHeight([.player(id: 7)], primaryPlayerID: 7)
@@ -709,11 +877,16 @@ enum NotchDashboardTests {
                 let en = drawn.map { $0.title(.enUS) }
                 suite.expect(Set(en).count == en.count, "no two sections answer to the same name")
             }
-            // Explore's label is the title of the page the marks open.
+            // The page has no way to the sections: what it shows is the page,
+            // and its four sections are named in every language.
+            suite.expect(NotchDashboardSection.allCases.count == 4
+                             && NotchDashboardSection.allCases.map(\.rawValue)
+                                 == ["quickControls", "calendar", "systemMonitoring", "liveActivities"],
+                         "the page's sections are the levels, the month, the grid and the cards, and no way to the sections")
             for language in AppLanguage.allCases {
-                suite.expect(NotchDashboardSection.explore.title(language)
-                                 == FeatureStrings.notch(language).sectionsTitle,
-                             "\(language.rawValue): the Explore label is the sections page's own title")
+                let titles = NotchDashboardSection.allCases.map { $0.title(language) }
+                suite.expect(titles.allSatisfy { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty },
+                             "\(language.rawValue): every section has a name")
             }
         }
 
@@ -743,7 +916,7 @@ enum NotchDashboardTests {
             // the page by default and not under a scroll the person has to find.
             let crowded: [NotchDashboardActivity] = [.player(id: 7), .player(id: 9), .player(id: 11), .timer]
             let page = NotchDashboardLayout.contentHeight(activities: crowded, calendar: true, metrics: 8,
-                                                          exploreCount: 7, width: width, primaryPlayerID: 7)
+                                                          width: width, primaryPlayerID: 7)
             suite.expect(page <= NotchDashboardLayout.maxPageHeight(screenHeight: 1084),
                          "the month, three players, the timer, the readings and the sections fit the island: \(page)")
             suite.expect(NotchDashboardLayout.liveActivitiesHeight(crowded, primaryPlayerID: 7)
@@ -759,23 +932,8 @@ enum NotchDashboardTests {
                                                                 tileHeight: NotchDashboardLayout.metricTileHeight,
                                                                 spacing: NotchDashboardLayout.metricSpacing),
                          "the grid's height is its two rows")
-            // Explore: round marks, seven in a row, so the sections sit on the
-            // page in two rows and none of them is cut off.
-            suite.expect(NotchDashboardLayout.exploreColumns(width: width) == 7,
-                         "seven marks in a row at the page's width")
-            suite.expect(NotchDashboardLayout.exploreButton >= 36,
-                         "a mark is a circle a pointer aims at, not a dot")
-            suite.expect(NotchDashboardLayout.exploreRows(count: 14, width: width) == 2,
-                         "fourteen sections fill the row and one more")
-            suite.expect(NotchDashboardLayout.exploreHeight(count: 14, width: width)
-                             == NotchDashboardLayout.exploreHeight(count: 7, width: width)
-                             + NotchDashboardLayout.exploreSpacing + NotchDashboardLayout.exploreButton,
-                         "marks past the row add a row, so none is cut off")
-            suite.expect(NotchDashboardSupport.rows(count: 0, columns: 7).isEmpty
-                             && NotchDashboardSupport.rows(count: 5, columns: 4) == [0..<4, 4..<5],
-                         "rows cover every mark exactly once")
-            // The page keeps the reference's width, where four columns of tiles,
-            // two levels and seven marks all fit.
+            // The page keeps the reference's width, where four columns of tiles
+            // and two levels fit.
             suite.expect(width >= 520 && width <= 620, "the page keeps the reference's width: \(width)")
             // Shapes, not headings, separate the sections: filled, rounded and
             // gapped, on the island's black.

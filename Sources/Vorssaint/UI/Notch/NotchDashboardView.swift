@@ -4,17 +4,19 @@
 import AppKit
 import SwiftUI
 
-/// The open island's one page: the levels, the players and the timer that are
-/// running, the monitoring grid, and the way to the sections, all at once.
+/// The open island's one page: the month, the readings, and the running
+/// things, all at once.
 ///
-/// The island is a dashboard, not a stack of destinations. Each section keeps
-/// its place, so a song starting adds a card to the middle of the page and
-/// takes nothing away, and a timer ending leaves the levels, the grid and the
-/// sections exactly where they were. A tile of the grid opens its detail, which
+/// The island is a dashboard, not a stack of destinations. The page has a
+/// fixed order - the month first, the readings under it, and every running
+/// activity below them both - so a song starting adds a card to the bottom of
+/// the page and takes nothing away, a timer ending leaves the month, the
+/// readings and every other card where they were, and no activity can push a
+/// fixed section out of its place. A tile of the grid opens its detail, which
 /// is a page of its own over the dashboard — the drill-down, not a rebuild of
 /// the page.
 ///
-/// The page draws no headings: the sliders, the cards, the grid and the circles
+/// The page draws no headings: the month, the cards, the grid and the meters
 /// say what they are. Every measurement here comes from `NotchDashboardLayout`,
 /// which the island's own size is measured from too, so the page and the shape
 /// around it agree before either is drawn.
@@ -25,6 +27,7 @@ struct NotchDashboardView: View {
     @ObservedObject private var timer = NotchTimerService.shared
     @ObservedObject private var splash = NotchSplashService.shared
     @ObservedObject private var monitor = SystemMonitor.shared
+    @ObservedObject private var sustain = NotchMetricSustain.shared
     @Environment(\.notchBand) private var band
     @AppStorage(DefaultsKey.networkSpeedUnit) private var networkSpeedUnit = NetworkSpeedUnit.bytes
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -52,25 +55,30 @@ struct NotchDashboardView: View {
     /// The same readings the System page draws, all of them. The page asks the
     /// island for the height they need; the grid is never trimmed to make a page
     /// fit, and an empty grid is a Mac with no sensors, which the page says.
+    /// The loads are read through the gate that keeps a second's spike off the
+    /// page, so the tiles and the menu bar agree about what is busy.
     private var tiles: [NotchSystemCard] {
         NotchSystemCards.cards(snapshot: monitor.snapshot, language: l10n.language,
-                               networkSpeedInBits: networkSpeedUnit == .bits)
+                               networkSpeedInBits: networkSpeedUnit == .bits,
+                               sustained: sustain.tones)
     }
 
-    private var sections: [NotchModule] { service.filteredSections }
     private var text: NotchStrings { FeatureStrings.notch(l10n.language) }
     private var activityText: NotchActivityStrings { FeatureStrings.notchActivities(l10n.language) }
 
     var body: some View {
+        // The page's order is fixed and does not depend on what is running:
+        // the month, then the readings, then every activity. A card starting or
+        // ending appends and removes in the last section alone, so the month and
+        // the grid never move.
         VStack(alignment: .leading, spacing: NotchDashboardLayout.sectionSpacing) {
             if service.showsDashboardCalendar {
                 calendar
             }
+            systemMonitoring
             if !activities.isEmpty {
                 liveActivities
             }
-            systemMonitoring
-            explore
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
         // The levels are handed to the island's top row, which draws them
@@ -110,53 +118,87 @@ struct NotchDashboardView: View {
 
     // MARK: - Live Activities
 
-    /// The running activities, one card each, in order. Every card has its own
+    /// The running activities, one card each, in the order they were decided,
+    /// appended under the month and the readings. Every card has its own
     /// background and its own boundary, so two players at once read as two
     /// controls, and the timer's card is neither of theirs.
+    ///
+    /// A card's coming and going is one movement: it fades and slides the short
+    /// way while the section's height eases, so a song ending leaves the page
+    /// without a jump. The list of cards is what the animation is keyed to, so
+    /// one card leaving is one animation whatever number of readings changed on
+    /// the way, and a card that stays keeps its own identity - its process, its
+    /// timer, its reading - and is not rebuilt.
     private var liveActivities: some View {
         VStack(alignment: .leading, spacing: NotchDashboardLayout.cardSpacing) {
             ForEach(activities) { activity in
-                switch activity {
-                case .player(let id):
-                    if id == primaryPlayerID, let playback = music.playback {
-                        nowPlayingCard(playback)
-                    } else if let source = playerSource(id) {
-                        playerCard(source)
-                    }
-                case .timer:
-                    timerCard
-                case .splash:
-                    splashCard
-                }
+                activityCard(activity)
+                    .transition(NotchDashboardLayout.cardTransition(reduceMotion: reduceMotion))
             }
         }
+        .animation(reduceMotion ? nil : NotchDashboardLayout.cardMotion, value: activities)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(NotchDashboardSection.liveActivities.title(l10n.language))
         .accessibilityIdentifier("notch.dashboard.activities")
     }
 
+    /// The card of one activity, chosen by the activity alone: a player's card
+    /// is read from that player's own report, and never from another's.
+    @ViewBuilder private func activityCard(_ activity: NotchDashboardActivity) -> some View {
+        switch activity {
+        case .player(let id):
+            if id == primaryPlayerID, let playback = music.playback {
+                nowPlayingCard(playback)
+            } else if let source = playerSource(id) {
+                playerCard(source)
+            }
+        case .timer:
+            timerCard
+        case .splash:
+            splashCard
+        }
+    }
+
     /// The system's player as a card: its cover, the song beside it with its
-    /// position and the two times, and the transport at the card's end. The
-    /// card is driven where it is - the cover, the words and the times are read,
-    /// not pressed - and the player's page is reached from the page's own mark.
+    /// position and the two times, and the transport at the card's end.
+    ///
+    /// The card is the way to the app that plays: a click on its cover, its
+    /// words, its edges or its empty end brings that app forward. The transport
+    /// and the timeline are the card's own work and keep every click they are
+    /// given, because they sit in front of the card's action and not under it:
+    /// a press on play is a press on play, and a drag on the bar is a seek.
     private func nowPlayingCard(_ playback: NotchPlayback) -> some View {
-        NotchDashboardCard {
+        NotchDashboardCard(open: { NotchDashboardSupport.openApplication(
+                                    pid: Int(playback.track.appPID ?? -1),
+                                    bundleIdentifier: playback.track.appBundleIdentifier ?? "") },
+                           openLabel: text.open) {
             HStack(spacing: 8) {
-                // The cover is the way to the app that plays it, and nothing
-                // else: the card's body stays unpressed, and the transport
-                // beside it keeps its own clicks.
-                openAppButton(pid: Int(playback.track.appPID ?? -1), bundleIdentifier: playback.track.appBundleIdentifier ?? "",
+                // The cover is the way to the app that plays, and it wears no
+                // highlight of its own: the card is the region that lights.
+                openAppButton(pid: Int(playback.track.appPID ?? -1),
+                              bundleIdentifier: playback.track.appBundleIdentifier ?? "",
                               identifier: "notch.dashboard.nowPlaying.open",
                               label: NotchArtwork(image: music.artwork, size: NotchDashboardLayout.activityArtwork,
                                                   source: playback.track))
                 VStack(alignment: .leading, spacing: 0) {
-                    Text(playback.track.title ?? "")
-                        .font(.system(size: 11, weight: .semibold))
-                        .lineLimit(1).truncationMode(.middle)
-                    Text(playback.track.artist ?? "")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1).truncationMode(.middle)
+                    // The words are the way to the app as the cover is: a
+                    // control, so the click that arrives with a pointer new to
+                    // the island is given to it, and no highlight of its own,
+                    // because the card is the thing that lights. The bar under
+                    // them is not: it is the card's own work, and a drag on it
+                    // is a seek.
+                    openAppButton(pid: Int(playback.track.appPID ?? -1),
+                                  bundleIdentifier: playback.track.appBundleIdentifier ?? "",
+                                  identifier: "notch.dashboard.nowPlaying.words",
+                                  label: VStack(alignment: .leading, spacing: 0) {
+                        Text(playback.track.title ?? "")
+                            .font(.system(size: 11, weight: .semibold))
+                            .lineLimit(1).truncationMode(.middle)
+                        Text(playback.track.artist ?? "")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1).truncationMode(.middle)
+                    })
                     NotchMusicTimeline(playback: playback, service: music,
                                        tint: music.artworkTint?.color ?? .white, timesBeside: true)
                 }
@@ -177,27 +219,37 @@ struct NotchDashboardView: View {
     /// above. Where the player reports no cover its app's icon stands in; where
     /// it reports no recording the card says so; where it reports no position no
     /// timeline is drawn, and a player that reports no song to skip is not given
-    /// marks that would do nothing.
+    /// marks that would do nothing. The card's own body is the way to the app
+    /// that plays it, and its marks stay its marks.
     private func playerCard(_ source: NotchPlaybackSource) -> some View {
         let reading = music.sourcePlayback(source)
-        return NotchDashboardCard(height: NotchDashboardLayout.playerCardHeight) {
+        return NotchDashboardCard(height: NotchDashboardLayout.playerCardHeight,
+                                  open: { NotchDashboardSupport.openApplication(
+                                    pid: Int(source.pid), bundleIdentifier: source.bundleIdentifier) },
+                                  openLabel: text.open) {
             HStack(spacing: 8) {
-                // The cover is the way to the app that plays it, and nothing
-                // else: the card's body stays unpressed, and the transport
-                // beside it keeps its own clicks.
+                // The cover is the way to the app that plays it, and it wears
+                // no highlight of its own.
                 openAppButton(pid: Int(source.pid), bundleIdentifier: source.bundleIdentifier,
                               identifier: "notch.dashboard.player.\(Int(source.pid)).open",
                               label: NotchArtwork(image: music.sourceArtwork(source),
                                                   size: NotchDashboardLayout.activityArtwork,
                                                   source: reading?.track ?? sourceTrack(source)))
                 VStack(alignment: .leading, spacing: 0) {
-                    Text(reading?.track.title ?? playerName(source))
-                        .font(.system(size: 11, weight: .semibold))
-                        .lineLimit(1).truncationMode(.middle)
-                    Text(reading?.track.artist ?? playerDetail(source))
-                        .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1).truncationMode(.middle)
+                    // The words are the way to the app that plays them, as the
+                    // cover is, and the bar under them is the player's own
+                    // position and asks nothing of the click.
+                    openAppButton(pid: Int(source.pid), bundleIdentifier: source.bundleIdentifier,
+                                  identifier: "notch.dashboard.player.\(Int(source.pid)).words",
+                                  label: VStack(alignment: .leading, spacing: 0) {
+                        Text(reading?.track.title ?? playerName(source))
+                            .font(.system(size: 11, weight: .semibold))
+                            .lineLimit(1).truncationMode(.middle)
+                        Text(reading?.track.artist ?? playerDetail(source))
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1).truncationMode(.middle)
+                    })
                     // The bar is the player's own position, read-only: seeking
                     // belongs to the player the page follows.
                     if let reading, reading.duration > 0, reading.hasPosition {
@@ -269,30 +321,17 @@ struct NotchDashboardView: View {
 
     /// The mark of the app that plays, as the way to that app: the app comes
     /// to the front, running or not. The card's body and its controls are
-    /// untouched by this.
+    /// untouched by this, and the mark keeps its normal look under the pointer:
+    /// the card is the region that lights, and the cover is not a plate.
     private func openAppButton(pid: Int, bundleIdentifier: String, identifier: String,
                                label: some View) -> some View {
         Button { NotchDashboardSupport.openApplication(pid: pid, bundleIdentifier: bundleIdentifier) } label: {
             label
         }
-        .buttonStyle(NotchButtonStyle(cornerRadius: NotchDashboardLayout.appMarkCorner, lifts: false))
+        .buttonStyle(NotchButtonStyle(cornerRadius: NotchDashboardLayout.appMarkCorner,
+                                      lifts: false, highlights: false))
         .accessibilityLabel(text.open)
         .accessibilityIdentifier(identifier)
-    }
-
-    /// The app's own mark, from the process that reports the track.
-    private func appMark(pid: Int) -> some View {
-        Group {
-            if let icon = NSRunningApplication(processIdentifier: pid_t(pid))?.icon {
-                Image(nsImage: icon)
-            } else {
-                Image(systemName: "music.note")
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .font(.system(size: 15, weight: .medium))
-        .frame(width: 26, height: 26)
-        .accessibilityHidden(true)
     }
 
     private func playerSource(_ id: Int) -> NotchPlaybackSource? {
@@ -466,12 +505,17 @@ struct NotchDashboardView: View {
 
     private func metricTile(_ tile: NotchSystemCard) -> some View {
         let selected = service.selectedMetric == tile.metric.detailKind
+        // One tone, three places: the figure, the meter and the mark are drawn
+        // from the same verdict, so a tile never says "fine" in its number and
+        // "low" in its bar. The plate stays the page's own, and the words stay
+        // secondary: a page of coloured cards would shout at every glance.
+        let color = NotchMetricHealth.color(tile.tone, metric: tile.metric)
         return Button { service.showMetric(tile.metric.detailKind) } label: {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 4) {
                     Image(systemName: tile.symbol)
                         .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(tile.wantsAttention ? .orange : .white.opacity(0.6))
+                        .foregroundStyle(tile.wantsAttention ? color : .white.opacity(0.6))
                         .frame(width: 12)
                     Text(tile.title)
                         .font(.system(size: 8.5, weight: .medium))
@@ -483,11 +527,12 @@ struct NotchDashboardView: View {
                     .font(.system(size: 13, weight: .semibold, design: .rounded))
                     .monospacedDigit()
                     .contentTransition(.numericText())
+                    .foregroundStyle(tile.wantsAttention ? color : .white)
                     .lineLimit(1).minimumScaleFactor(0.65)
                     .animation(reduceMotion ? nil : .smooth(duration: 0.25), value: tile.value)
                 Spacer(minLength: 0)
                 if let level = tile.level {
-                    NotchMeter(value: level, height: 3, tint: tile.wantsAttention ? .orange : .white)
+                    NotchMeter(value: level, height: 3, tint: color)
                 } else {
                     NotchMeter(value: 0, height: 3)
                 }
@@ -505,54 +550,6 @@ struct NotchDashboardView: View {
         .accessibilityAddTraits(selected ? .isSelected : [])
         .accessibilityIdentifier("notch.dashboard.metric.\(tile.metric.rawValue)")
         .help(tile.title)
-    }
-
-    // MARK: - Explore
-
-    /// The sections as round marks, seven in a row. No words, no shortcut
-    /// hints and no border: the marks are the ones the gallery's tiles carry,
-    /// and a mark goes to the page it has always gone to.
-    private var explore: some View {
-        let columns = NotchDashboardLayout.exploreColumns(width: pageWidth)
-        let rows = NotchDashboardSupport.rows(count: sections.count, columns: columns)
-        return VStack(spacing: NotchDashboardLayout.exploreSpacing) {
-            ForEach(rows, id: \.lowerBound) { row in
-                HStack(spacing: NotchDashboardLayout.exploreSpacing) {
-                    ForEach(Array(sections[row])) { module in
-                        exploreButton(module)
-                            .frame(maxWidth: .infinity)
-                    }
-                    // A short row keeps its marks at the width of a full one.
-                    ForEach(0..<(rows.first?.count ?? columns) - sections[row].count, id: \.self) { _ in
-                        Color.clear.frame(maxWidth: .infinity)
-                    }
-                }
-            }
-        }
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel(NotchDashboardSection.explore.title(l10n.language))
-        .accessibilityIdentifier("notch.dashboard.explore")
-    }
-
-    /// The width the page has, which the island measures the same way.
-    private var pageWidth: CGFloat { service.dashboardContentWidth }
-
-
-    private func exploreButton(_ module: NotchModule) -> some View {
-        let current = service.selected == module
-        return Button { service.select(module) } label: {
-            Image(systemName: module.symbol)
-                .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(module.dashboardTint)
-                .frame(width: NotchDashboardLayout.exploreButton, height: NotchDashboardLayout.exploreButton)
-                .background(.white.opacity(current ? 0.18 : 0.08), in: Circle())
-                .contentShape(Circle())
-        }
-        .buttonStyle(NotchButtonStyle(cornerRadius: NotchDashboardLayout.exploreButton / 2, lifts: false))
-        .accessibilityLabel(module.title(l10n.language))
-        .accessibilityAddTraits(current ? .isSelected : [])
-        .accessibilityIdentifier("notch.dashboard.section.\(module.rawValue)")
-        .help(module.title(l10n.language))
     }
 }
 
@@ -604,36 +601,66 @@ private extension NotchPlaybackCommand {
 /// so lighting one card cannot light its neighbours. The controls placed inside
 /// keep their own clicks: the highlight is the card's background, drawn under
 /// them, and the shape that catches the pointer is the card's own outline.
+///
+/// A card given an `open` action is the way to the thing it speaks for, and not
+/// only where its words are: a clear button is laid under the content, so every
+/// part of the card that is not a control of its own - the cover, the title,
+/// the artist, the padding, the empty end of the row - takes the card's action.
+/// The controls sit in front of it and are given every click first, so the
+/// transport is the transport and the timeline is the timeline, and one press
+/// is never answered twice.
 private struct NotchDashboardCard<Content: View>: View {
-    @ViewBuilder var content: () -> Content
     /// The card's height, or `nil` for a card as tall as what it holds. A card
     /// with a height of its own centres its content in it; a card measured to
     /// its content keeps the edge the same on every side, which is what a card
     /// of one line of text needs.
     var height: CGFloat? = NotchDashboardLayout.activityCardHeight
+    /// What a click on the card asks of the app, when the card leads somewhere.
+    var open: (() -> Void)? = nil
+    /// The words the card's own controls use for that action, so the card's
+    /// hidden way and the mark in front of it are named the same.
+    var openLabel: String? = nil
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var hover = false
+    @ViewBuilder var content: () -> Content
 
     var body: some View {
-        Group {
-            if let height {
-                content()
-                    .padding(NotchDashboardLayout.activityCardPadding)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .frame(maxHeight: .infinity)
-                    .frame(height: height)
-            } else {
-                content()
-                    .padding(NotchDashboardLayout.activityCardPadding)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .fixedSize(horizontal: false, vertical: true)
+        ZStack(alignment: .topLeading) {
+            if let open {
+                // Under the content, and answered where the content leaves the
+                // click: the card's empty end, its edges, and the ground between
+                // its words and its marks. It is a control and not a tap
+                // gesture, because the island's panel is not the key window, and
+                // a panel that is not key gives the first click of a pointer that
+                // has just arrived to a control and to nothing else. The
+                // transport and the timeline are in front of it, so a press on
+                // play is a press on play and a drag on the bar is a seek.
+                Button(action: open) { Color.clear.contentShape(Rectangle()) }
+                    .buttonStyle(.plain)
+                    .accessibilityHidden(true)
             }
+            contentBody
         }
-            .modifier(NotchControlSurface(cornerRadius: NotchDashboardLayout.cornerRadius,
-                                          selected: hover, fillOpacity: NotchDashboardLayout.fillOpacity))
-            .contentShape(RoundedRectangle(cornerRadius: NotchDashboardLayout.cornerRadius, style: .continuous))
-            .onHover { hover = $0 }
-            .animation(reduceMotion ? nil : .smooth(duration: 0.2), value: hover)
+        .modifier(NotchControlSurface(cornerRadius: NotchDashboardLayout.cornerRadius,
+                                      selected: hover, fillOpacity: NotchDashboardLayout.fillOpacity))
+        .contentShape(RoundedRectangle(cornerRadius: NotchDashboardLayout.cornerRadius, style: .continuous))
+        .onHover { hover = $0 }
+        .animation(reduceMotion ? nil : .smooth(duration: 0.2), value: hover)
+    }
+
+    @ViewBuilder private var contentBody: some View {
+        if let height {
+            content()
+                .padding(NotchDashboardLayout.activityCardPadding)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(maxHeight: .infinity)
+                .frame(height: height)
+        } else {
+            content()
+                .padding(NotchDashboardLayout.activityCardPadding)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 }
 
@@ -661,14 +688,15 @@ private struct NotchDashboardCalendarCard: View {
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            // The card is the way to the page. Everything in front of this
-            // button keeps its own click: a day picks a day, a chevron moves a
-            // month, an appointment opens the page at that appointment.
-            Button(action: open) {
-                Color.clear.contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityHidden(true)
+            // The card is the way to the page, and the way is a control: the
+            // island's panel is not the key window, and a panel that is not key
+            // gives the first click of a pointer that has just arrived to a
+            // control. Everything in front of it keeps its own click: a day picks
+            // a day, a chevron moves a month, the corner mark opens Calendar
+            // itself, and an appointment opens the page at that appointment.
+            Button(action: open) { Color.clear.contentShape(Rectangle()) }
+                .buttonStyle(.plain)
+                .accessibilityHidden(true)
             Group {
                 if permissions.calendarAccess == .fullAccess {
                     content
@@ -685,11 +713,36 @@ private struct NotchDashboardCalendarCard: View {
         .contentShape(RoundedRectangle(cornerRadius: NotchDashboardLayout.cornerRadius, style: .continuous))
         .onHover { hover = $0 }
         .animation(reduceMotion ? nil : .smooth(duration: 0.2), value: hover)
+        // Calendar itself, in the card's own corner: the mark is there whatever
+        // month is read and whatever day is picked, and its click is its own -
+        // it opens the app, and asks nothing of the grid behind it.
+        .overlay(alignment: .topTrailing) {
+            openCalendarButton
+                .padding(.top, 5)
+                .padding(.trailing, 6)
+        }
         // Day, month and clock follow the app's language and the user's region,
         // as the Calendar page does.
         .environment(\.locale, l10n.language.formattingLocale())
         .accessibilityElement(children: .contain)
         .accessibilityLabel(NotchDashboardSection.calendar.title(l10n.language))
+    }
+
+    /// The way to Calendar, the app: the same ask the page's row makes, the
+    /// same mark the page's row wears, and the same bundle behind it.
+    private var openCalendarButton: some View {
+        Button { NotchCalendarSupport.openApplication() } label: {
+            Image(systemName: "arrow.up.forward.app")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.7))
+                .frame(width: NotchDashboardLayout.calendarOpenMarkSide,
+                       height: NotchDashboardLayout.calendarOpenMarkSide)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(NotchButtonStyle(cornerRadius: 5, lifts: false))
+        .accessibilityLabel(text.openCalendar)
+        .accessibilityIdentifier("notch.dashboard.calendar.openApp")
+        .help(text.openCalendar)
     }
 
     private var content: some View {
@@ -711,6 +764,9 @@ private struct NotchDashboardCalendarCard: View {
                     .font(.system(size: 9.5, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.7))
                     .lineLimit(1)
+                    // The card's corner is the way to Calendar, and it is drawn
+                    // there in every month: the day's name stands clear of it.
+                    .padding(.trailing, NotchDashboardLayout.calendarOpenMarkSide + 2)
                 events
                 Spacer(minLength: 0)
             }
@@ -718,44 +774,63 @@ private struct NotchDashboardCalendarCard: View {
         }
     }
 
-    /// The month's name and the way through it, and the way back to today when
-    /// the grid has wandered off. The row is a header, not a heading: it moves
-    /// the grid the Calendar page's grid moves.
+    /// The month's name and the way through it, as the Calendar page's own row
+    /// draws them: the month centred in the pane the grid is built in, and the
+    /// arrows and the way back to today at that pane's far edge. The name is
+    /// centred in the calendar's half of the card and not in the whole card,
+    /// because it names the grid under it, and it keeps room at both edges for
+    /// the marks, so a long month's name is scaled before it is overlapped.
+    ///
+    /// The way back to today is the page's round mark, and no word: the card is
+    /// a narrow thing, and the circle is the shape the page taught.
     private var header: some View {
-        HStack(spacing: 3) {
-            // The month's name leads with the section's own mark, as the
-            // section's tile wears it, so the card in the Live Activities says
-            // what it is before it is read.
-            Image(systemName: NotchModule.calendar.symbol)
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.7))
-                .accessibilityHidden(true)
-            Text(focus, format: .dateTime.month(.wide).year())
-                .font(.system(size: 10.5, weight: .semibold))
-                .lineLimit(1)
-                .layoutPriority(1)
-            monthButton("chevron.left", text.previousMonth, -1)
-            monthButton("chevron.right", text.nextMonth, 1)
-            if !Calendar.current.isDate(focus, equalTo: now, toGranularity: .month) {
-                Button(text.today) { focus = now; selectedDay = nil }
-                    .buttonStyle(.borderless)
-                    .font(.system(size: 9, weight: .medium))
+        ZStack {
+            HStack(spacing: 4) {
+                // The month's name leads with the section's own mark, as the
+                // gallery's tile wears it, at the size the page's header wears
+                // a mark, so the card says what it is before it is read.
+                Image(systemName: NotchModule.calendar.symbol)
+                    .font(.system(size: NotchDashboardLayout.calendarMarkSize, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.7))
+                    .accessibilityHidden(true)
+                Text(focus, format: .dateTime.month(.wide).year())
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
             }
-            Spacer(minLength: 0)
+            // Room at both edges for the marks, and the name centred between
+            // them, which is the middle of the pane the grid stands in.
+            .padding(.horizontal, NotchDashboardLayout.calendarHeaderTitleInset)
+            .layoutPriority(1)
+            HStack(spacing: 2) {
+                Spacer(minLength: 0)
+                monthButton("chevron.left", text.previousMonth, -1)
+                monthButton("circle.circle", text.today, 0)
+                monthButton("chevron.right", text.nextMonth, 1)
+            }
         }
         .frame(height: NotchDashboardLayout.calendarHeaderHeight)
     }
 
     private func monthButton(_ symbol: String, _ title: String, _ offset: Int) -> some View {
-        Button { moveMonth(offset) } label: {
+        Button { offset == 0 ? today() : moveMonth(offset) } label: {
             Image(systemName: symbol)
-                .font(.system(size: 9, weight: .semibold))
+                .font(.system(size: offset == 0 ? 10 : 9, weight: .semibold))
                 .frame(width: 16, height: 14)
                 .contentShape(Rectangle())
         }
         .buttonStyle(NotchButtonStyle(cornerRadius: 5, lifts: false))
         .accessibilityLabel(title)
+        .accessibilityIdentifier(offset == 0
+                                 ? "notch.dashboard.calendar.today"
+                                 : "notch.dashboard.calendar.\(offset < 0 ? "previous" : "next")")
         .help(title)
+    }
+
+    /// Back to the month the day is in, and to the day itself.
+    private func today() {
+        focus = now
+        selectedDay = nil
     }
 
     private func moveMonth(_ offset: Int) {

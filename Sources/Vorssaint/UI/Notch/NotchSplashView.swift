@@ -177,18 +177,35 @@ struct NotchSplashDashboardCard: View {
     @ObservedObject private var notch = NotchService.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var hovered = false
+    /// The day of the trend the pointer rests on, which the card's caption
+    /// names with its two counts. The agents' chart's own rule: the day is a
+    /// value and not a view, so leaving the bars clears the line again.
+    @State private var hoveredDay: Date?
     private var text: NotchSplashStrings { FeatureStrings.notchSplash(l10n.language) }
     private var status: NotchSplashStatus? { snapshot?.status }
     private var metrics: NotchSplashStatus.Metrics? { status?.metrics }
     private var series: [NotchSplashSample] { history.series(endingAt: now) }
     private var days: [NotchSplashDay] { history.trend(now: now) }
 
+    /// The card's own rule, asked once: the page shows the thirty days, and the
+    /// compact card of the dashboard's Live Activities section does not. The
+    /// section's height is measured by `NotchSplashLayout.cardHeight`, which
+    /// answers the same question the same way, so the card the page measures is
+    /// the card the page draws.
+    private var showsTrend: Bool { !compact }
+
     var body: some View {
         VStack(alignment: .leading, spacing: NotchSplashLayout.sectionSpacing) {
             header
             charts
             memoryCard
-            trendCard
+            // Thirty days of tokens, and the hovering that reads one of them:
+            // the card is the page's own reading, with room to be pointed at.
+            // The dashboard's Live Activities card is a glance at what is
+            // running now, and a chart of a month does not belong in a glance.
+            if showsTrend {
+                trendCard
+            }
         }
         .padding(NotchSplashLayout.padding)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -209,21 +226,18 @@ struct NotchSplashDashboardCard: View {
     /// tokens the engine has moved, the task's clock, and the lit circle that
     /// ends the reading.
     ///
-    /// The mark before the name is the one the agents' Resets button wears, as
-    /// the reference draws it. The words the reference does not draw are not
-    /// drawn here either: the old line of compact resource values lives in the
-    /// memory card now, where there is room for all three of them, their units
-    /// and their bar.
+    /// The mark before the name is the Codex mark the AI page draws - the same
+    /// mark the gallery's tile wears and the same view of it, at the size of
+    /// this line - so the section is known by one shape wherever it shows. The
+    /// words the reference does not draw are not drawn here either: the old line
+    /// of compact resource values lives in the memory card now, where there is
+    /// room for all three of them, their units and their bar.
     private var header: some View {
         let clock = NotchSplashSupport.taskClock(elapsed)
         return HStack(spacing: 6) {
             HStack(spacing: 4) {
-                Image(systemName: NotchAgentCard.resets.symbol)
-                    .font(.system(size: compact ? NotchSplashLayout.titleIconSize - 1
-                                                : NotchSplashLayout.titleIconSize,
-                                  weight: .semibold))
-                    .foregroundStyle(NotchSplashPalette.beige.opacity(0.85))
-                    .accessibilityHidden(true)
+                NotchSectionMark(module: .splash, size: compact ? NotchSplashLayout.titleIconSize - 1
+                                                                : NotchSplashLayout.titleIconSize)
                 Text(text.title)
                     .font(.system(size: compact ? NotchSplashLayout.headerSize - 1 : NotchSplashLayout.headerSize,
                                   weight: .bold))
@@ -406,8 +420,15 @@ struct NotchSplashDashboardCard: View {
 
     // MARK: The memory, and the governor's bar
 
-    /// Three numbers and a bar: the cache's own, the memory the governor
-    /// charges, the governor's limit, and the charge over the limit.
+    /// Three numbers and a bar, in one row under the card's name: the cache's
+    /// own, the memory the governor charges, the governor's limit, and the
+    /// charge over the limit.
+    ///
+    /// The name and the three readings are one line, because the card is a
+    /// glance and not a page: the name says what the numbers are, and the
+    /// numbers stand under nothing, in the room the width of the page gives
+    /// them. The bar is under them, full width, because a bar is read at the
+    /// length it is drawn at.
     ///
     /// The bar and the memory's colour are the same rule, so the number, the
     /// bar and the colour of a card cannot tell three stories. No limit, and a
@@ -417,12 +438,17 @@ struct NotchSplashDashboardCard: View {
         let utilization = NotchSplashSupport.governorUtilization(
             chargedBytes: status?.governor.chargedBytes, limitBytes: status?.governor.limitBytes)
         return VStack(alignment: .leading, spacing: 7) {
-            Text(text.memoryAndKVCache)
-                .font(.system(size: NotchSplashLayout.sectionTitleSize, weight: .semibold))
-                .foregroundStyle(NotchSplashPalette.beige.opacity(0.75))
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)
-            HStack(spacing: NotchSplashLayout.metricSpacing) {
+            HStack(alignment: .firstTextBaseline, spacing: NotchSplashLayout.metricSpacing) {
+                Text(text.memoryAndKVCache)
+                    .font(.system(size: NotchSplashLayout.sectionTitleSize, weight: .semibold))
+                    .foregroundStyle(NotchSplashPalette.beige.opacity(0.75))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+                    .fixedSize()
+                Spacer(minLength: 6)
+                // The three readings, named, at the same size and in one row:
+                // the name of each is under its figure, so the line stays one
+                // line at every width the page draws this card at.
                 memoryColumn(title: text.kvCache,
                              parts: NotchSplashSupport.bytesText(status?.kv.activeBytes),
                              tone: NotchSplashPalette.tone(kvTone, reference: NotchSplashPalette.purple),
@@ -449,14 +475,13 @@ struct NotchSplashDashboardCard: View {
         .accessibilityLabel(text.memoryAndKVCache)
     }
 
+    /// One reading of the memory's three: its figure and its unit, and its
+    /// name under them. The name goes under the figure because the three
+    /// readings share the card's one line with the card's own name: a name over
+    /// a figure would make two lines of a line, and the card is measured to one.
     private func memoryColumn(title: String, parts: (value: String, unit: String)?,
                               tone: Color, note: String?) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(title)
-                .font(.system(size: NotchSplashLayout.memoryLabelSize))
-                .foregroundStyle(.white.opacity(0.55))
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
+        VStack(alignment: .leading, spacing: 2) {
             HStack(alignment: .firstTextBaseline, spacing: 3) {
                 Text(parts?.value ?? NotchSplashSupport.placeholder)
                     .font(.system(size: NotchSplashLayout.memoryValueSize, weight: .semibold, design: .rounded))
@@ -469,13 +494,14 @@ struct NotchSplashDashboardCard: View {
                     .foregroundStyle(.white.opacity(0.6))
                     .fixedSize()
             }
-            if let note {
-                Text(note)
-                    .font(.system(size: NotchSplashLayout.captionSize - 0.5))
-                    .foregroundStyle(NotchSplashPalette.amber)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
-            }
+            // The name, and the shortage when there is one: the colour is the
+            // glance, these are the explanation.
+            Text(note ?? title)
+                .font(.system(size: note == nil ? NotchSplashLayout.memoryLabelSize
+                                                : NotchSplashLayout.captionSize - 0.5))
+                .foregroundStyle(note == nil ? Color.white.opacity(0.55) : NotchSplashPalette.amber)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)
@@ -556,34 +582,51 @@ struct NotchSplashDashboardCard: View {
     /// in a bar a day, the period's total above the bars, the dates under
     /// them, and the two colours named below.
     ///
+    /// The bars are pointed at, as the agents' chart is pointed at: resting on
+    /// a day turns the line above the bars from the period's total into that
+    /// day's own tokens - the date, the tokens in and the tokens out, each named
+    /// and each in the colour of its part of the stack, and counted whole,
+    /// because a day read at a point is a day read exactly. The other bars dim
+    /// the same way, so the two charts answer a pointer alike.
+    ///
     /// A day is the difference of the engine's counters across that day, and
     /// not the total the engine has reached, so a quiet day is a day of
     /// nothing and a restart does not move the engine's whole life into today.
     /// Where nothing has ever been measured the card says so, and draws no
-    /// bars and no dates.
+    /// bars and no dates: a day is never invented, and a day with nothing in it
+    /// is drawn as nothing.
     private var trendCard: some View {
         VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .top) {
+            HStack(alignment: .top, spacing: 6) {
                 Text(text.trend)
                     .font(.system(size: NotchSplashLayout.sectionTitleSize, weight: .semibold))
                     .foregroundStyle(NotchSplashPalette.beige.opacity(0.75))
                     .lineLimit(1)
                     .minimumScaleFactor(0.75)
                 Spacer(minLength: 6)
-                Text(text.daysAndTokens(days.count, NotchSplashSupport.tokensText(history.total(of: days))))
-                    .font(.system(size: NotchSplashLayout.captionSize, weight: .medium))
-                    .monospacedDigit()
-                    .foregroundStyle(.white.opacity(0.6))
-                    .lineLimit(1)
-                    .fixedSize()
+                // The card's one line of words: the period and its tokens at
+                // rest, the pointed-at day and its two counts under the pointer.
+                if let day = hoveredDay, let entry = days.first(where: { $0.start == day }) {
+                    hoveredDayCaption(entry)
+                } else {
+                    Text(text.daysAndTokens(days.count, NotchSplashSupport.tokensText(history.total(of: days))))
+                        .font(.system(size: NotchSplashLayout.captionSize, weight: .medium))
+                        .monospacedDigit()
+                        .foregroundStyle(.white.opacity(0.6))
+                        .lineLimit(1)
+                        .fixedSize()
+                }
             }
             if history.hasTokens {
                 NotchTrendBars(series: [
                     .init(tint: NotchSplashPalette.blue, values: days.map { Double($0.input) }),
                     .init(tint: NotchSplashPalette.green, values: days.map { Double($0.output) }),
-                ], dates: days.map(\.start))
+                ], dates: days.map(\.start), hoverable: true, hovered: hoveredDay) { hovered in
+                    if hoveredDay != hovered { hoveredDay = hovered }
+                }
                 .frame(maxWidth: .infinity)
                 .frame(height: NotchSplashLayout.trendBarsHeight)
+                .animation(reduceMotion ? nil : .smooth(duration: 0.15), value: hoveredDay)
                 dayLabels
             } else {
                 Text(text.noHistoryYet)
@@ -601,6 +644,34 @@ struct NotchSplashDashboardCard: View {
                     in: RoundedRectangle(cornerRadius: NotchSplashLayout.metricCornerRadius, style: .continuous))
         .accessibilityElement(children: .contain)
         .accessibilityLabel(text.trend)
+    }
+
+    /// The day the pointer rests on, counted: its date, the tokens in, the
+    /// tokens out. Whole numbers, because a day named at a point is not
+    /// sketched in thousands, and the two counts in the two colours the bar
+    /// above is stacked in, so the line and the bar are one statement.
+    private func hoveredDayCaption(_ day: NotchSplashDay) -> some View {
+        HStack(spacing: 6) {
+            Text(day.start.formatted(.dateTime.month(.abbreviated).day()))
+                .font(.system(size: NotchSplashLayout.captionSize, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.8))
+                .fixedSize()
+            tokenPair(symbol: "arrow.up", value: exactTokens(day.input),
+                      tint: NotchSplashPalette.blue, name: text.inputSeries)
+            tokenPair(symbol: "arrow.down", value: exactTokens(day.output),
+                      tint: NotchSplashPalette.green, name: text.outputSeries)
+        }
+        .font(.system(size: NotchSplashLayout.captionSize, weight: .medium))
+        .fixedSize()
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(day.start.formatted(.dateTime.month(.abbreviated).day())), "
+            + "\(text.inputSeries) \(exactTokens(day.input)), \(text.outputSeries) \(exactTokens(day.output))")
+    }
+
+    /// A day's count, whole. The header's totals are written short, because
+    /// they are read at a glance; a day the pointer is on is read exactly.
+    private func exactTokens(_ tokens: Int64) -> String {
+        tokens.formatted(.number.locale(l10n.language.formattingLocale()))
     }
 
     /// The first day, a middle one, and the last: dates enough to say what the
@@ -830,9 +901,7 @@ struct NotchSplashView: View {
         VStack(alignment: .leading, spacing: NotchLayout.rowSpacing) {
             intervalRow
             VStack(alignment: .leading, spacing: 8) {
-                Image(systemName: NotchModule.splash.symbol)
-                    .font(.system(size: 30, weight: .light))
-                    .foregroundStyle(.mint.opacity(0.75))
+                NotchSectionMark(module: .splash, size: 30, tint: .mint.opacity(0.75))
                 Text(text.setupHint)
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
@@ -893,25 +962,23 @@ struct NotchSplashView: View {
         .accessibilityIdentifier("notch.splash.start")
     }
 
-    /// The address being read, and any word about why it is not answering.
+    /// Any word about why the reading is not answering, and the last task's
+    /// outcome, and nothing else.
+    ///
+    /// The address and the interval are not written here. Both are settings,
+    /// and the page is a reading: the address is set on the app's Settings
+    /// screen, and the interval is read there and, before anything is read, on
+    /// this page's own ruler. What the engine has just done is the page's
+    /// business, and a completed task asked for no room to be read in.
     @ViewBuilder private var statusLine: some View {
         HStack(spacing: 8) {
-            Text(service.endpointDescription)
-                .font(.system(size: 10))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .truncationMode(.middle)
-            Spacer(minLength: 0)
             if let outcome = service.taskOutcome {
                 Text(outcomeTitle(outcome))
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(outcome == .completed ? NotchSplashPalette.green : NotchSplashPalette.amber)
                     .lineLimit(1)
             }
-            Text(text.intervalLabel(service.intervalSeconds))
-                .font(.system(size: 10))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
+            Spacer(minLength: 0)
         }
     }
 

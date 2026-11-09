@@ -1672,12 +1672,23 @@ enum RepositoryFeatureTests {
             $0.contains("private var header: some View {")
         }) {
             let window = splashCardLines[head...min(head + 24, splashCardLines.count - 1)]
-            let mark = window.firstIndex { $0.contains("Image(systemName: NotchAgentCard.resets.symbol)") }
+            let mark = window.firstIndex { $0.contains("NotchSectionMark(module: .splash") }
             let name = window.firstIndex { $0.contains("Text(text.title)") }
             headerLeadsWithMark = mark != nil && name != nil && mark! < name!
         }
         suite.expect(headerLeadsWithMark,
-               "the dashboard card leads with the mark the reference draws, before its name")
+               "the dashboard card leads with the section's own mark, before its name")
+
+        // The mark the section is known by is the Codex mark the AI page draws,
+        // in one view that the card, the gallery's tile and the page's empty
+        // state all use, so one shape stands for one section everywhere.
+        let markLines = repository.lines(at: "Sources/Vorssaint/UI/Notch/NotchComponents.swift")
+        suite.expect(markLines.contains(where: { $0.contains("struct NotchSectionMark: View") })
+                         && markLines.contains(where: { $0.contains("NotchAgentMark(provider: .codex") }),
+               "the section's mark is the Codex mark the AI page draws, in one shared view")
+        let galleryLines = repository.lines(at: "Sources/Vorssaint/UI/Notch/NotchSectionsView.swift")
+        suite.expect(galleryLines.contains(where: { $0.contains("NotchSectionMark(module: module") }),
+               "the gallery's tile wears the same mark as the section's card")
 
         // The header of the reference has a mark, a name, two token counts, a
         // clock and a way out. The words of the old header - the word for the
@@ -1731,6 +1742,97 @@ enum RepositoryFeatureTests {
         suite.expect(playerLines.contains { $0.contains("source.isActivelyPlaying") }
                          && !playerLines.contains { $0.contains("source.isPlaying || source.hasTrack") },
                "the island lists a player only while it plays, and a paused session is not a card")
+
+        // The card of a player is the way to the application that plays: the
+        // whole card is the region, and the transport and the timeline are drawn
+        // in front of it, so a press on a mark is a press on a mark. The artwork
+        // wears no highlight of its own, because the card is the thing that
+        // lights; and the opening goes through the application's own resolution,
+        // which is the rule that refuses an XPC service.
+        let cardLines = repository.lines(at: "Sources/Vorssaint/UI/Notch/NotchDashboardView.swift")
+        suite.expect(cardLines.contains { $0.contains("NotchDashboardCard(open:") }
+                         && cardLines.contains { $0.contains("highlights: false") }
+                         && cardLines.contains { $0.contains("openAppButton") }
+                         && cardLines.contains { $0.contains(".words\"") },
+               "a player's whole card opens the app - cover, words and the ground between them - and its artwork lights with the card and not on its own")
+        let cardSurface = cardLines.joined(separator: "\n")
+        suite.expect(cardSurface.contains("struct NotchDashboardCard")
+                         && cardSurface.contains("var open: (() -> Void)? = nil"),
+               "the card's own view is where the whole-card action lives")
+        let dashboardSupport = repository.source(at: "Sources/Vorssaint/Services/Notch/NotchDashboardSupport.swift")
+        suite.expect(dashboardSupport.contains("MediaApplicationOpener.open"),
+               "a card's click is resolved by the application rule, which is the rule that refuses a helper")
+
+        // The dashboard is the page, and the page has no way to the sections: no
+        // Explore area, and the sections the page keeps are its own.
+        suite.expect(!cardLines.contains("NotchDashboardSection.explore")
+                         && !cardLines.contains("exploreTile") && !cardLines.contains("exploreMark"),
+               "the complete dashboard draws no Explore area")
+
+        // The month's card: the month is centred in the pane the grid stands in,
+        // the way through the month is three marks at the pane's edge - back, the
+        // round way to today, forward - and the way to Calendar itself is drawn
+        // in the card's corner in every month, with the page's own mark, title
+        // and route. The word "Today" is not printed beside the circle.
+        suite.expect(cardLines.contains { $0.contains("monthButton(\"circle.circle\", text.today, 0)") }
+                         && cardLines.contains { $0.contains("openCalendarButton") }
+                         && cardLines.contains { $0.contains("NotchCalendarSupport.openApplication") },
+               "the month is centred with its three marks, and Calendar is a persistent mark in the corner")
+        suite.expect(!cardLines.contains { $0.contains("Text(text.today)") },
+               "the way back to today is a circle, and not a word")
+
+        // The monitoring tiles are coloured by one rule, asked of the shared
+        // policy, and not by a colour written into each tile.
+        let systemCardLines = repository.lines(at: "Sources/Vorssaint/UI/Notch/NotchSystemCards.swift")
+            + cardLines
+        suite.expect(systemCardLines.contains { $0.contains("NotchMetricHealth.color(") }
+                         && systemCardLines.contains { $0.contains("NotchMetricHealth.tone(") }
+                         && systemCardLines.contains { $0.contains("final class NotchMetricSustain") },
+               "a reading's colour is the shared policy's, and the load's gate is one gate")
+
+        // A card comes and goes with the page's own transition, on a stable
+        // identity, and the fixed sections are drawn before it.
+        suite.expect(cardLines.contains { $0.contains("NotchDashboardLayout.cardTransition(reduceMotion: reduceMotion)") }
+                         && cardLines.contains { $0.contains("value: activities") }
+                         && cardLines.contains { $0.contains("ForEach(activities)") },
+               "an activity's card is animated on its identity, and the fixed sections are not among them")
+        suite.expect(playerLines.contains { $0.contains("reduceMotion ? .opacity") }
+                         && playerLines.contains { $0.contains(".offset(y: cardTransitionOffset).combined(with: .opacity)") },
+               "a card fades with motion reduced, and is carried the short way with no bounce otherwise")
+
+        // The Splash page's last line is the task's outcome, and nothing else:
+        // the server's address and the interval are settings, and the settings
+        // screen is where they are set.
+        // The dashboard page's last line is the task's outcome, and nothing
+        // else: the server's address and the interval are settings, and the
+        // settings screen is where they are set. The address is still spoken
+        // where it explains a failure, which is not a footer.
+        if let foot = splashCardLines.firstIndex(where: { $0.contains("private var statusLine: some View {") }) {
+            let window = splashCardLines[foot..<min(foot + 18, splashCardLines.count)]
+            suite.expect(!window.contains { $0.contains("endpointDescription") }
+                             && !window.contains { $0.contains("intervalLabel(service.intervalSeconds)") },
+                   "the dashboard page prints no address and no interval at its foot")
+        } else {
+            suite.expect(false, "the page's foot is the page's own view")
+        }
+        // The thirty days belong to the page, and not to the glance in the
+        // dashboard's Live Activities; and the bars answer a pointer.
+        suite.expect(splashCardLines.contains { $0.contains("if showsTrend {") }
+                         && splashCardLines.contains { $0.contains("hoverable: true, hovered: hoveredDay") }
+                         && splashCardLines.contains { $0.contains("func hoveredDayCaption") },
+               "the trend is the page's own, and a day is read at the pointer, in its two counts")
+        // The memory's card is one line: its name and the three readings in one
+        // row, and the governor's bar under them.
+        if let memory = splashCardLines.firstIndex(where: { $0.contains("private var memoryCard: some View {") }) {
+            let window = splashCardLines[memory..<min(memory + 40, splashCardLines.count)]
+            suite.expect(window.contains { $0.contains("HStack(alignment: .firstTextBaseline") }
+                             && window.contains { $0.contains("Text(text.memoryAndKVCache)") }
+                             && window.filter { $0.contains("memoryColumn(title:") }.count == 3
+                             && window.contains { $0.contains("utilizationRow(utilization)") },
+                   "the memory's name and its three readings are one row, and the bar is under them")
+        } else {
+            suite.expect(false, "the memory's card is the memory's own view")
+        }
 
         // The recorded past is a file of the app's own container, kept for
         // thirty days, and the tests write their own file and not the app's.

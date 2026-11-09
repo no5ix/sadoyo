@@ -334,16 +334,10 @@ struct NotchCalendarView: View {
         .padding(.horizontal, 12)
     }
 
-    /// Calendar itself gets the link: another app claiming the `ical` scheme
-    /// would not know EventKit's identifiers.
+    /// Calendar itself gets the app, at the appointment when there is one: the
+    /// same way the dashboard's card opens it, from one place.
     private func openCalendar(showing event: NotchCalendarEvent? = nil) {
-        guard let application = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.iCal") else { return }
-        let configuration = NSWorkspace.OpenConfiguration()
-        if let url = event.flatMap({ NotchCalendarSupport.eventURL($0) }) {
-            NSWorkspace.shared.open([url], withApplicationAt: application, configuration: configuration)
-        } else {
-            NSWorkspace.shared.openApplication(at: application, configuration: configuration)
-        }
+        NotchCalendarSupport.openApplication(showing: event)
     }
 }
 
