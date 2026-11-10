@@ -222,6 +222,17 @@ enum NotchDashboardTests {
             suite.expect(!mark.isEmpty && !mark.contains("if service.pinned {") && !mark.contains(".frame(width:")
                              && !mark.contains("Spacer"),
                          "the mark asks for no room of its own: a page that carries no mark keeps no button's space")
+            // The mark is asked for by a menu, and appears in the row: it comes
+            // out of the corner with a transition the row animates, and goes
+            // back the way it came, with Reduce Motion taking the plain fade.
+            suite.expect(mark.contains(".transition(reduceMotion ? .opacity")
+                             && mark.contains(".scale(scale:")
+                             && mark.components(separatedBy: ".transition").count - 1 == 1,
+                         "the kept-open mark has one coming-out transition of its own")
+            let rowForMark = island.components(separatedBy: "private func bandRow(").dropFirst().first
+                .map { $0.components(separatedBy: "private func trailingSections(").first ?? $0 } ?? ""
+            suite.expect(rowForMark.contains("value: service.pinned"),
+                         "the row that carries the mark animates the keeping, so the mark is seen to come out")
             // The row is the row it was: four widths of the same marks, and the
             // mark among them, so no slot is kept for a mark a page does not carry.
             let row = island.components(separatedBy: "private func bandRow(").dropFirst().first

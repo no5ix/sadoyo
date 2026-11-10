@@ -386,6 +386,9 @@ struct NotchView: View {
         }
         // The levels ease aside for the reading and back.
         .animation(reduceMotion ? nil : .smooth(duration: 0.25), value: makesRoom)
+        // The kept-open mark is inserted in this row, so the row is where its
+        // coming out and going back are animated.
+        .animation(reduceMotion ? nil : .spring(duration: 0.32, bounce: 0.24), value: service.pinned)
         .overlay(alignment: side == .leading ? .leading : .trailing) {
             if let feedback {
                 NotchExpandedLevelView(notice: feedback, showsDetail: readingWidth >= NotchLayout.levelReadingDetailWidth)
@@ -415,6 +418,10 @@ struct NotchView: View {
         if NotchDashboardSupport.showsKeptOpenMark(pinned: service.pinned,
                                                    dashboard: service.showsDashboard) {
             NotchIconButton(symbol: "pin.fill", title: text.unpin, selected: true) { service.pinned = false }
+                // The mark comes out of the corner it lands in and goes back the
+                // way it came, so the keeping is seen to arrive and not painted.
+                .transition(reduceMotion ? .opacity
+                            : .scale(scale: 0.4, anchor: .topTrailing).combined(with: .opacity))
         }
     }
 
