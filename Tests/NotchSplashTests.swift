@@ -1169,6 +1169,17 @@ enum NotchSplashTests {
                              == NotchSplashLayout.pageMinimumHeight
                          && NotchSplashLayout.pageMinimumHeight < NotchSplashLayout.pageSetupHeight,
                      "the page measures what it has to show: the card's height with a session, and the ruler and the words before one")
+        // A session that is reading draws its card and no ruler above it, so the
+        // page is measured to the card alone: the island keeps no ground for a
+        // control the page stopped drawing the moment Start was pressed.
+        var reading = NotchPageContent.empty
+        reading.splashDashboard = true
+        reading.splashReading = true
+        suite.expect(NotchSplashLayout.pageReadingHeight == NotchSplashLayout.cardHeight(compact: false)
+                         && NotchNaturalContent.height(module: .splash, items: reading, width: 700)
+                             == NotchSplashLayout.pageReadingHeight
+                         && NotchSplashLayout.pageReadingHeight < NotchSplashLayout.pageHeight,
+                     "the page of a running reading is its card, and keeps no room for the ruler it does not draw")
     }
 
     // MARK: - Every language
@@ -1712,6 +1723,16 @@ enum NotchSplashTests {
                          && page.contains("notchBand(trailing:")
                          && page.contains("intervalRow"),
                      "the page keeps its header, its ruler and its one action")
+        // While a session reads, the row carries no mark of its own: the way
+        // out is the card's corner, and the island's corner keeps its room for
+        // the page's own controls. The ruler is the page's choice before a
+        // reading and after one, and a running page draws the card alone.
+        suite.expect(page.contains("if !service.isMonitoring {\n                startButton")
+                         && !page.contains("NotchIconButton(symbol: \"xmark\"")
+                         && page.contains("if !service.isMonitoring { intervalRow }")
+                         && page.contains("NotchCircularIconButton(symbol: \"xmark\", title: text.stop")
+                         && page.contains("onStop: service.isMonitoring ? { service.stop() } : nil"),
+                     "a running reading draws no row mark and no ruler, and the card keeps the way out")
         // A reading's page is the longer page, and the ruler is the same control
         // on both, so the setup page's shortening moves nothing the person aims at.
         suite.expect(NotchSplashLayout.pageHeight > NotchSplashLayout.pageSetupHeight,

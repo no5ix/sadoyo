@@ -1019,6 +1019,7 @@ final class NotchService: ObservableObject {
                                                          fans: SystemMonitor.shared.snapshot.fanSpeeds.count)
         items.mixerMicrophone = AudioInputDeviceManager.shared.inputVolume != nil
         items.splashDashboard = NotchSplashService.shared.showsDashboard
+        items.splashReading = NotchSplashService.shared.isMonitoring
         let geometry = expandedGeometry
         // The calendar draws the month beside its agenda when the page has the
         // width and the room for the grid: the display's limit decides that, not

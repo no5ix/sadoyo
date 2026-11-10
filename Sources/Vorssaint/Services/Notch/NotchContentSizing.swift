@@ -115,6 +115,9 @@ struct NotchPageContent: Equatable {
     /// frozen at the end of one, or a last reading kept after the way out.
     /// Without one, the page is its ruler and the words of what to do next.
     var splashDashboard = false
+    /// The Splash session is reading now: the page is its card, and the
+    /// interval's ruler is not drawn above it.
+    var splashReading = false
 
     static let empty = NotchPageContent()
 }
@@ -184,10 +187,12 @@ enum NotchNaturalContent {
         case .watch:
             return NotchLayout.watchPageHeight
         case .splash:
-            // The interval's ruler, and the dashboard under it: four charts,
-            // the memory, the trend. Before a session there is nothing of
-            // those to show, so the page is its ruler and the words below it.
-            return items.splashDashboard ? NotchSplashLayout.pageHeight
+            // A session that is reading draws the card and nothing above it.
+            // A reading at rest sets the interval it will read at above the
+            // card, and before any reading there is only the ruler and the
+            // words of what to do next.
+            return items.splashReading ? NotchSplashLayout.pageReadingHeight
+                : items.splashDashboard ? NotchSplashLayout.pageHeight
                 : NotchSplashLayout.pageSetupHeight
         case .scratchpad:
             // A page of text: the editor, its rule and its actions.

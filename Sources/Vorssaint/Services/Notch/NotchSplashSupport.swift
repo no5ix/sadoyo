@@ -75,8 +75,20 @@ enum NotchSplashLayout {
     /// The page: the ruler's row, the card under it, and the gap between. The
     /// page's card is the whole card, trend and all - the compact card belongs
     /// to the dashboard, not to a page.
+    ///
+    /// This is the page of a reading that is not being read: a task frozen at
+    /// its end, or a last reading kept after the way out, still sets its
+    /// interval here, so the ruler is drawn and measured.
     static var pageHeight: CGFloat {
         NotchLayout.timerRulerHeight + NotchLayout.rowSpacing + cardHeight(compact: false)
+    }
+
+    /// The page of a session that is reading: the card, and nothing above it.
+    /// The ruler set the interval before Start, and a running session takes a
+    /// new one at once, so the page keeps no room for a control it does not
+    /// draw - the same rule that left no ground for the words that went before.
+    static var pageReadingHeight: CGFloat {
+        cardHeight(compact: false)
     }
 
     /// The page before a session: the interval's ruler, and the ground under it

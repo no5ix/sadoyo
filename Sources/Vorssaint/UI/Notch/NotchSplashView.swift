@@ -882,22 +882,25 @@ struct NotchSplashView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .tint(.mint)
         // The island's row leads with the way back and the page's name, as
-        // every page's does, and ends with the one action of the moment.
+        // every page's does, and ends with the one action of the moment: Start
+        // before a reading, and nothing while one runs. The way out of a
+        // session is the card's own corner, which is where the reading is read;
+        // the row kept a second mark of the same ending in the island's corner.
         .notchBand(trailing: {
-            if service.isMonitoring {
-                NotchIconButton(symbol: "xmark", title: text.stop) { service.stop() }
-            } else {
+            if !service.isMonitoring {
                 startButton
             }
         })
     }
 
-    /// The reading and the interval it is read at. The interval stays on the
-    /// page while the reading runs: it is the page's own choice, and the
-    /// running session takes a new value at once.
+    /// The reading, with the interval it is read at above it while nothing is
+    /// being read. The ruler is the page's own choice before a session and
+    /// after one, and a running session takes a new value at once, so the page
+    /// of a reading draws its card and keeps no room above it for a control the
+    /// person is not setting.
     private var dashboard: some View {
         VStack(alignment: .leading, spacing: NotchLayout.rowSpacing) {
-            intervalRow
+            if !service.isMonitoring { intervalRow }
             NotchSplashDashboardCard(
                 snapshot: service.snapshot,
                 phase: service.phase,
