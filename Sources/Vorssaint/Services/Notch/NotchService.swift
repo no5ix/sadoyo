@@ -1633,8 +1633,15 @@ final class NotchService: ObservableObject {
     /// Opening without a page shows what the closed island is already
     /// presenting: a mirrored banner, or an activity unless the user turned
     /// that off. Otherwise the reopening preference decides.
-    var reopeningDestination: (module: NotchModule, appPanel: Bool, sections: Bool) {
-        if !expanded {
+    ///
+    /// `overActivity` says whether the strip the closed island is showing may
+    /// choose the page. A click on the island, and a shortcut, take the page of
+    /// what they see. A hover that asks for the whole dashboard does not: what
+    /// the island was showing is its own news - a countdown that has ended, a
+    /// song, a download - and the person reaching in asks for the page, not for
+    /// the last thing that moved.
+    func openingDestination(overActivity: Bool) -> (module: NotchModule, appPanel: Bool, sections: Bool) {
+        if !expanded, overActivity {
             let opensActivity = UserDefaults.standard.object(forKey: DefaultsKey.notchOpensActivity) as? Bool ?? true
             let activity = notice?.notificationID != nil ? NotchModule.notifications
                 : opensActivity ? compactActivity?.module : nil
@@ -1651,6 +1658,10 @@ final class NotchService: ObservableObject {
             }
         }
         return (selected, false, false)
+    }
+
+    var reopeningDestination: (module: NotchModule, appPanel: Bool, sections: Bool) {
+        openingDestination(overActivity: true)
     }
 
     var reopeningModule: NotchModule {
@@ -1676,7 +1687,8 @@ final class NotchService: ObservableObject {
     }
 
     func open(_ module: NotchModule? = nil, pinned: Bool = false, takeFocus: Bool = true,
-              appPanel: Bool = false, metric: MetricDetailKind? = nil, feedback: Bool = true, sections: Bool = false) {
+              appPanel: Bool = false, metric: MetricDetailKind? = nil, feedback: Bool = true, sections: Bool = false,
+              wholeDashboard: Bool = false) {
         guard NotchSupport.isEnabled(), !suspended else { return }
         // The capture controls cover the open page and hold collapsing off, so
         // an island opened now would wait behind them and open by itself once
@@ -1685,8 +1697,8 @@ final class NotchService: ObservableObject {
         if !running || self.panel == nil { syncWithPreferences() }
         else { refreshModules() }
         guard let panel else { return }
-        let reopening = reopeningDestination
-        let useReopeningSurface = module == nil && !expanded && !appPanel && !sections && metric == nil
+        let reopening = openingDestination(overActivity: !wholeDashboard)
+        let useReopeningSurface = !wholeDashboard && module == nil && !expanded && !appPanel && !sections && metric == nil
         let destination = module.flatMap { modules.contains($0) ? $0 : nil } ?? reopening.module
         let appPanel = appPanel || (useReopeningSurface && reopening.appPanel)
         let sections = sections || (useReopeningSurface && reopening.sections)
@@ -1698,8 +1710,9 @@ final class NotchService: ObservableObject {
         }
         let metric = metric.flatMap { metricIsAvailable($0) ? $0 : nil }
         // Hovering, clicking, or toggling the island asks for no destination, so
-        // it opens on the dashboard. A section, a detail, the panel and the
-        // gallery each say where they go.
+        // it opens on the dashboard, and a hover that asks for the whole
+        // dashboard asks for it over the strip it rests on. A section, a detail,
+        // the panel and the gallery each say where they go.
         let dashboard = NotchDashboardSupport.opensDashboard(module: module != nil, metric: metric != nil,
                                                              appPanel: appPanel, sections: sections)
         let closesCommandBar = showingCommandBar
@@ -1876,8 +1889,7 @@ final class NotchService: ObservableObject {
             guard !hoverState.suppressed, hoverOpensThroughNotice || notice == nil || hiddenUntilHover,
                   !expanded, !peeking, !dragPlaceholder,
                   hoverOpeningEnabled else { return }
-            if !hiddenInFullscreen, compactActivity != nil, compactActivityGeometry.compactActivityWingWidth > 0,
-               !UserDefaults.standard.bool(forKey: DefaultsKey.notchHoverExpands) { return }
+            if !hiddenInFullscreen, compactStripAnswersPointer { return }
             let work = DispatchWorkItem { [weak self] in
                 guard let self else { return }
                 self.hoverWork = nil
@@ -1894,7 +1906,12 @@ final class NotchService: ObservableObject {
                 // Following the closed island ends as it opens or peeks.
                 self.removeHoverExitMonitors()
                 if UserDefaults.standard.bool(forKey: DefaultsKey.notchHoverExpands) {
-                    self.open(takeFocus: false)
+                    // The whole dashboard, whatever the closed island was
+                    // showing: the strip under the pointer is the island's own
+                    // news - a countdown that has ended, a song, a download -
+                    // and a pointer reaching in asks for the page, not for the
+                    // last thing that moved.
+                    self.open(takeFocus: false, wholeDashboard: true)
                 } else {
                     self.mutatePresentation(transitionContent: .reveal) { self.peeking = true }
                     self.provideHapticFeedback()
@@ -1979,6 +1996,18 @@ final class NotchService: ObservableObject {
     /// deliberate hover opens its whole card in place; that is its expansion.
     private var hoverOpensThroughNotice: Bool {
         notice?.notificationID == nil
+    }
+
+    /// The closed strip that answers the pointer on its own wings.
+    ///
+    /// The music strip is the one strip whose wings are controls: its cover
+    /// names the song and its bars play or pause, so an opening under a pointer
+    /// that came for them would take them away. Every other strip - a countdown
+    /// that has ended, a download, the next event's clock - keeps no control of
+    /// its own there, so a deliberate hover goes past it to the page, as it
+    /// goes past a resting island, an activity's footer, or a companion.
+    private var compactStripAnswersPointer: Bool {
+        compactActivity == .music && musicStripAnswers(.cover)
     }
 
     /// A mirrored banner the pointer can hold: on screen and not covered.

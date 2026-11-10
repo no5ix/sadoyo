@@ -1349,6 +1349,7 @@ def main():
               "    var showsCompactActivityPicker:",
               "    private func missionControlDidRestore()",
               "    private var hoverOpensThroughNotice:",
+              "    private var compactStripAnswersPointer:",
               "    private var holdsNotification:", "    private func holdNotification(",
               "    private func syncNoticeWithPreferences(",
               "    private func releaseNotification(", "    private func scheduleNoticeDismissal(",
@@ -1593,6 +1594,8 @@ def main():
           + declaration(notch, "    func setPageLayer(")
           + declaration(notch, "    func openAppPanel(")
           + declaration(notch, "    func showMetric(")
+          + declaration(notch, "    func openingDestination(")
+              .replace("UserDefaults.standard", "ReviewDefaults.current!")
           + declaration(notch, "    var reopeningDestination:")
               .replace("UserDefaults.standard", "ReviewDefaults.current!")
           + declaration(notch, "    func openActivity(")

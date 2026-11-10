@@ -720,9 +720,21 @@ enum NotchDestinationContract {
                 service.expanded = false
                 service.compactActivity = activity
                 expect(service.reopeningModule == activity.module, "a visible activity is what a peek names before opening")
+                // A hover asks for the island's whole page over the strip it
+                // rests on: what the island was showing is its own news - an
+                // ended countdown, a song, a download - and the pointer that
+                // reached in asked for the page.
+                service.dashboardRequested = false
+                service.open(takeFocus: false, wholeDashboard: true)
+                expect(service.expanded && service.dashboardRequested && !service.showingAppPanel
+                           && !service.showingSections && service.selectedMetric == nil,
+                       "hovering an island that shows \(activity) opens the dashboard, not the activity's page")
+                service.collapse()
+                service.expanded = false
+                service.compactActivity = activity
                 service.open()
                 expect(service.selected == activity.module,
-                       "hovering or clicking an island that shows \(activity) opens that activity, not the reopening page")
+                       "clicking an island that shows \(activity) opens that activity, not the reopening page")
                 service.open()
                 expect(service.selected == activity.module, "an already open island stays on the activity's page")
                 service.open(.files)

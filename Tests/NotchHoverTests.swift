@@ -157,8 +157,12 @@ enum NotchHoverTests {
         }
         var openings = 0, closures = 0, feedbacks = 0
         var requestedModule: NotchModule?
-        func open(_ module: NotchModule? = nil, takeFocus: Bool) {
+        /// Whether an opening asked for the whole dashboard over the strip the
+        /// pointer rests on, as the production open's `wholeDashboard` says.
+        var askedWholeDashboard = false
+        func open(_ module: NotchModule? = nil, takeFocus: Bool, wholeDashboard: Bool = false) {
             requestedModule = module
+            askedWholeDashboard = wholeDashboard
             openings += 1; expanded = true; openedByHover = !takeFocus
             hoverState.open(); hoverWork?.cancel(); hoverWork = nil
             updateBounds()
@@ -983,8 +987,47 @@ enum NotchHoverTests {
         active.compactActivity = .music
         active.hover(true)
         DispatchQueue.main.advance(0.26)
-        expect(active.openings == 1 && active.requestedModule == nil,
-               "hover opens without naming a page, so the island's own reopening rule decides")
+        expect(active.openings == 1 && active.requestedModule == nil && active.askedWholeDashboard,
+               "hover asks for the whole dashboard and names no page, over the song the island shows")
+        leave(active)
+
+        // A countdown that has ended leaves its mark and its clock on the
+        // closed island. A pointer reaching in there asks for the island's
+        // page - the whole dashboard - and not for the ended countdown's own
+        // page, which is what the island was already showing.
+        for activity in [NotchCompactActivity.timer, .downloads, .calendar, .agents, .keepAwake] {
+            let strip = fixture()
+            strip.compactActivity = activity
+            strip.hover(true)
+            DispatchQueue.main.advance(0.26)
+            expect(strip.openings == 1 && strip.requestedModule == nil && strip.askedWholeDashboard,
+                   "hover over a \(activity) strip opens the whole dashboard, not the activity's page")
+            leave(strip)
+        }
+
+        // A preview, over a strip with wings: the music strip keeps its own
+        // answer - its cover names the song, its bars play it - while every
+        // other strip gives the way to a preview, which is what a preview
+        // opening is for. The complete dashboard is the expand mode's own ask.
+        for activity in [NotchCompactActivity.timer, .downloads, .calendar, .agents, .keepAwake] {
+            let preview = fixture()
+            UserDefaults.standard.expands = false
+            preview.compactActivity = activity
+            preview.hover(true)
+            DispatchQueue.main.advance(0.26)
+            expect(preview.peeking && preview.openings == 0,
+                   "a preview opens over a \(activity) strip with wings, where the strip keeps no control")
+            leave(preview)
+        }
+        let musicPreview = fixture()
+        UserDefaults.standard.expands = false
+        musicPreview.compactActivity = .music
+        musicPreview.hover(true)
+        DispatchQueue.main.advance(0.26)
+        expect(!musicPreview.peeking && musicPreview.openings == 0,
+               "a preview does not open over the music strip's own cover and bars")
+        leave(musicPreview)
+        UserDefaults.standard.expands = true
 
         let returning = fixture()
         returning.hover(true)
