@@ -71,6 +71,7 @@ Status items and AppDelegate coordinate multiple presentation destinations. A me
 ## Change workflow
 
 Before changing a subsystem:
+- Read the object's AOCI Entry for its stated contracts and constraints, then confirm them against the source; the Entries are summaries, not authority.
 - Find its owning service and state model.
 - Find all callers and other UI entry points.
 - Find tests and any source-generation/build inclusion rules.
