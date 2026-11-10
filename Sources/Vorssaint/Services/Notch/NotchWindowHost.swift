@@ -55,6 +55,11 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
     private var restoresKeyAfterRelocation = false
     private var settledActions: [() -> Void] = []
     private(set) var targetSize: CGSize
+    /// The closed island's place inside a surface that has grown over it, as a
+    /// banner of the island's own covers the strip it came from. The pointer
+    /// resting on that strip, and a click there, reach the island: this is what
+    /// keeps the island answering while its own news is on screen.
+    private var hoverArea: CGRect?
     private(set) var resizeCount = 0
     private(set) var concealedFrameChanges = 0
     private(set) var missionControlFrameProbeCount = 0
@@ -613,9 +618,19 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
         // Hover follows the destination bounds, not a transient mask edge.
         // A resize must never turn a stationary pointer into an exit.
         if currentGeometry.contains(screenPoint, in: targetSize) { return true }
+        // The closed island's own place inside a banner of the island's own:
+        // the strip at rest keeps answering while the island's news is on screen.
+        if let area = hoverArea,
+           currentGeometry.contains(screenPoint, in: targetSize, area: area) { return true }
         guard let container = quickAccessContainer else { return false }
         let point = container.convert(panel.convertPoint(fromScreen: screenPoint), from: nil)
         return container.hoverRects.contains { $0.contains(point) }
+    }
+
+    /// The closed island's place, in the island's own space, inside a surface
+    /// that has grown over it. Nil leaves hover to the surface's bounds alone.
+    func setHoverArea(_ area: CGRect?) {
+        hoverArea = area
     }
 
     func whenSettled(_ action: @escaping () -> Void) {

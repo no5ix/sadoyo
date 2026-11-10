@@ -1240,6 +1240,43 @@ final class NotchService: ObservableObject {
         return namedMusicWings.map { ($0.trailing - $0.leading) / 2 } ?? 0
     }
 
+    /// Whether a banner of the island's own is covering the closed island.
+    private var noticeCoversIsland: Bool {
+        NotchSupport.answersPointerUnderNotice(hasNotice: notice != nil,
+                                               mirrored: notice?.notificationID != nil,
+                                               expanded: expanded, peeking: peeking)
+    }
+
+    /// What the closed island rests at: an activity's strip while one is
+    /// showing, the island and its wings otherwise. The hover emphasis is not
+    /// part of it - the place a person aims at is the island at rest.
+    private var closedRestingSize: CGSize {
+        compactActivity == nil ? geometry.collapsed : compactActivityGeometry.compactActivitySize
+    }
+
+    /// The closed island's own place, in the island's space, while a banner of
+    /// the island's own is drawn over it: the strip at rest, centred where the
+    /// island rests. The island answers the pointer there, and a click there
+    /// opens the whole dashboard, because for as long as the banner is on
+    /// screen that strip is the only way in.
+    var islandAreaUnderNotice: CGRect? {
+        guard noticeCoversIsland else { return nil }
+        let area = NotchSupport.islandAreaUnderNotice(resting: closedRestingSize, surface: surfaceSize, geometry: geometry)
+        guard !area.isNull, area.width > 0, area.height > 0 else { return nil }
+        // The window is laid out where the banner reaches; the strip it covers
+        // stays over the camera, so the place is carried back to it.
+        return area.offsetBy(dx: -surfaceShift, dy: 0)
+    }
+
+    /// Whether a screen point is over the island: the surface it is drawing,
+    /// and the closed island's own place under a banner of its own.
+    private func pointerOverIsland(_ point: CGPoint) -> Bool {
+        let size = watchesHiddenHover ? geometry.collapsed : surfaceSize
+        if geometry.contains(point, in: size) { return true }
+        guard let area = islandAreaUnderNotice else { return false }
+        return geometry.contains(point, in: size, area: area)
+    }
+
     /// The open island around the Command Bar: the bar's width within the
     /// island's margins, and its height below the camera, under the same limit
     /// every other page has.
@@ -1902,7 +1939,7 @@ final class NotchService: ObservableObject {
                       (self.notice?.notificationID == nil || self.hiddenUntilHover), !self.dragPlaceholder,
                       self.hoverOpeningEnabled,
                       self.windowHost?.blocksHoverReveal() == false,
-                      self.geometry.contains(NSEvent.mouseLocation, in: self.watchesHiddenHover ? self.geometry.collapsed : self.surfaceSize) else { return }
+                      self.pointerOverIsland(NSEvent.mouseLocation) else { return }
                 // Following the closed island ends as it opens or peeks.
                 self.removeHoverExitMonitors()
                 if UserDefaults.standard.bool(forKey: DefaultsKey.notchHoverExpands) {
@@ -1955,7 +1992,8 @@ final class NotchService: ObservableObject {
         // A timed capture stays attached to the closed island until its timer
         // ends, and each followed move would tell it the pointer left, which
         // restarts its dismissal under a pointer that came back to reopen it.
-        let followsClosedHover = inside && !expanded && !peeking && notice == nil
+        let followsClosedHover = inside && !expanded && !peeking
+            && (notice == nil || noticeCoversIsland)
             && (hoverWork?.isCancelled == false
                 || hoverState.suppressed && hoverOpeningEnabled)
         // The music strip's name, or a song paused from its button, lasts
@@ -3147,6 +3185,14 @@ final class NotchService: ObservableObject {
         let activationRect: CGRect
         if captureControls != nil {
             activationRect = captureControlsCollapsed ? CGRect(origin: .zero, size: size) : .zero
+        } else if let area = islandAreaUnderNotice {
+            // The island's own news covers the strip it came from, and that
+            // strip stays the island's door: a click there opens the page, as
+            // it does the moment the banner is gone. A mirrored notification is
+            // the person's own message and keeps its own click, so it is not
+            // one of these, and the island asks for the whole dashboard here
+            // because the strip a click would otherwise open is not on screen.
+            activationRect = area
         } else if notice != nil || dragPlaceholder {
             activationRect = .zero
         } else {
@@ -3155,6 +3201,9 @@ final class NotchService: ObservableObject {
                 // Over the camera, wherever a strip reaching to one side puts it.
                 .offsetBy(dx: -surfaceShift, dy: 0)
         }
+        // The strip at rest answers the pointer under the island's own banner,
+        // for as long as that banner is on screen.
+        windowHost?.setHoverArea(islandAreaUnderNotice)
         let text = FeatureStrings.notch(L10n.shared.language)
         windowHost?.setActivationArea(activationRect, title: expanded ? text.collapse : text.open,
             willPress: { [weak self] in
@@ -3165,6 +3214,9 @@ final class NotchService: ObservableObject {
             }, activate: { [weak self] in
                 guard let self else { return }
                 if self.captureControls != nil { self.expandCaptureControls() }
+                // Over the island's own banner the strip has nothing of its own
+                // on screen, so the click asks for the page, as a hover does.
+                else if self.islandAreaUnderNotice != nil { self.open(takeFocus: true, wholeDashboard: true) }
                 // The capsule's button covers its music bars too, which play or pause there.
                 else if self.geometry.floats, self.musicStripShowsControl { self.toggleMusicStripSong() }
                 else if !self.expanded, self.compactActivity == .calendar {

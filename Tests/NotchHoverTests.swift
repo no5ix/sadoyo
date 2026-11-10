@@ -49,6 +49,10 @@ enum NotchHoverTests {
     final class Host {
         var visible = true
         var rect = CGRect.zero
+        /// The closed island's place inside a banner that grew over it, as the
+        /// production host keeps it for hover.
+        var hoverArea: CGRect?
+        func setHoverArea(_ area: CGRect?) { hoverArea = area }
         /// The floating controls' hover rects on screen, margin included.
         var controls: [CGRect] = []
         var departsContent = true
@@ -60,8 +64,12 @@ enum NotchHoverTests {
             return isConcealedForMissionControl
         }
         func containsHover(_ point: CGPoint) -> Bool {
-            visible && !isConcealedForMissionControl && (CGRect(origin: .zero, size: rect.size)
-                .contains(CGPoint(x: point.x - rect.minX, y: rect.maxY - point.y)) || controls.contains { $0.contains(point) })
+            guard visible, !isConcealedForMissionControl else { return false }
+            let surface = CGRect(origin: .zero, size: rect.size)
+            let local = CGPoint(x: point.x - rect.minX, y: rect.maxY - point.y)
+            if surface.contains(local) { return true }
+            if let area = hoverArea, area.contains(local) { return true }
+            return controls.contains { $0.contains(point) }
         }
     }
     enum NotchContentTransition { case none, reveal, dismiss, depart, replace }
@@ -155,6 +163,36 @@ enum NotchHoverTests {
             let resting = compactActivity == nil ? geometry.collapsed : compactActivityGeometry.compactActivitySize
             return hoverEmphasized ? NotchHoverEmphasis.size(from: resting, geometry: geometry) : resting
         }
+        /// The island's own news over the closed island, read as production reads it.
+        var noticeCoversIsland: Bool {
+            NotchSupport.answersPointerUnderNotice(hasNotice: notice != nil,
+                                                   mirrored: notice?.notificationID != nil,
+                                                   expanded: expanded, peeking: peeking)
+        }
+        /// The closed island's own place under a banner of the island's own.
+        var islandAreaUnderNotice: CGRect? {
+            guard noticeCoversIsland else { return nil }
+            let strip = compactActivity == nil ? geometry.collapsed : compactActivityGeometry.compactActivitySize
+            return NotchSupport.islandAreaUnderNotice(resting: strip, surface: surfaceSize, geometry: geometry)
+        }
+        /// Out of sight at rest, as production reads it: the island has no window
+        /// for the pointer to enter, so hover follows the pointer over its place.
+        private var restsOutOfSight: Bool {
+            UserDefaults.standard.bool(forKey: DefaultsKey.notchHideUntilHover)
+                || (fullscreenCompact && !geometry.isNotched && !dragPlaceholder && captureControls == nil
+                    && (hiddenInFullscreen
+                        ? UserDefaults.standard.bool(forKey: DefaultsKey.notchHoverInFullscreen)
+                        : UserDefaults.standard.bool(forKey: DefaultsKey.notchOpenOnHover)))
+        }
+        /// Where the island answers: the surface it is drawing - its place at rest
+        /// while it is out of sight - and the closed island's own place under a
+        /// banner of the island's own.
+        func pointerOverIsland(_ point: CGPoint) -> Bool {
+            let size = restsOutOfSight ? geometry.collapsed : surfaceSize
+            if geometry.contains(point, in: size) { return true }
+            guard let area = islandAreaUnderNotice else { return false }
+            return geometry.contains(point, in: size, area: area)
+        }
         var openings = 0, closures = 0, feedbacks = 0
         var requestedModule: NotchModule?
         /// Whether an opening asked for the whole dashboard over the strip the
@@ -184,7 +222,13 @@ enum NotchHoverTests {
         func bridgeMascotHome(from: CGFloat) {}
         func syncMenuSpaceMonitoring() { menuSpaceSyncs += 1 }
         func provideHapticFeedback() { feedbacks += 1 }
-        func updateBounds() { windowHost?.rect = geometry.frame(for: surfaceSize) }
+        func updateBounds() {
+            windowHost?.rect = geometry.frame(for: surfaceSize)
+            // Production hands the closed island's place to the host whenever it
+            // lays the surface out; the banner covering the strip is what makes
+            // it a place the island answers.
+            windowHost?.setHoverArea(islandAreaUnderNotice)
+        }
     }
 
     static func run(_ suite: TestSuite) {
@@ -1003,6 +1047,87 @@ enum NotchHoverTests {
             expect(strip.openings == 1 && strip.requestedModule == nil && strip.askedWholeDashboard,
                    "hover over a \(activity) strip opens the whole dashboard, not the activity's page")
             leave(strip)
+        }
+
+        // A countdown that has ended, a song that changed, a volume that moved:
+        // the island's own news is drawn over the strip it came from, and while
+        // it is on screen that strip is the only place left to reach the island
+        // from. So the strip keeps the island's own answers: a pointer reaching
+        // in over the banner opens the whole dashboard, as it does the moment the
+        // banner is gone, and an island that a pointer closed with the pointer
+        // resting on it stays closed, banner or no banner. A mirrored
+        // notification is the person's own message: it is held under the pointer,
+        // where a deliberate hover opens its card in place, and it leaves the
+        // island's page closed.
+        let completion = NotchNotice(event: .timer, title: "Timer", detail: "Time is up",
+                                     symbol: "alarm.fill")
+        for banner in [volume, completion] {
+            for physical in [false, true] {
+                let strip = fixture(physical: physical).compactActivityGeometry.compactActivitySize
+                let surface = fixture(physical: physical).geometry
+                    .noticeSize(wingWidth: banner.preferredWingWidth)
+                let place = NotchSupport.islandAreaUnderNotice(resting: strip, surface: surface,
+                                                              geometry: fixture(physical: physical).geometry)
+                let frame = fixture(physical: physical).geometry.frame(for: surface)
+                let at = CGPoint(x: frame.minX + place.minX + 1, y: frame.maxY - 6)
+
+                // The pointer on the strip opens the island, and a click on the
+                // island's own place closes it while the pointer stays: the
+                // island is suppressed, and the news arrives under that pointer.
+                let resting = fixture(physical: physical)
+                resting.compactActivity = .timer
+                resting.compactActivities = [.timer]
+                resting.hover(true)
+                DispatchQueue.main.advance(0.26)
+                resting.collapse()
+                expect(resting.openings == 1 && resting.hoverState.suppressed && !resting.expanded,
+                       "a pointer that closed the island stayed on the strip, \(physical)")
+                _ = resting.show(banner)
+                expect(resting.islandAreaUnderNotice != nil,
+                       "the closed island under its own banner keeps a place of its own, \(physical)")
+                expect(resting.geometry.contains(at, in: resting.surfaceSize, area: resting.islandAreaUnderNotice!),
+                       "the strip at rest answers the pointer under the banner, \(physical)")
+                // A pointer that closed the island and never left is a dismissal
+                // the island honours, banner or no banner.
+                DispatchQueue.main.advance(0.26)
+                expect(resting.openings == 1 && !resting.expanded,
+                       "the island's own news does not reopen an island a pointer closed, \(physical)")
+                // The pointer leaves and reaches in again: the strip the banner
+                // covers is the island's own place, and it opens on the whole
+                // dashboard, as it does the moment the banner is gone.
+                leave(resting)
+                NSEvent.mouseLocation = at
+                resting.hover(true)
+                DispatchQueue.main.advance(0.26)
+                expect(resting.openings == 2 && resting.expanded && resting.askedWholeDashboard,
+                       "a pointer reaching the strip a banner covers opens the whole dashboard, \(physical)")
+                leave(resting)
+
+                // A pointer reaching in after the banner is on screen.
+                let reaching = fixture(physical: physical)
+                reaching.compactActivity = .timer
+                _ = reaching.show(banner)
+                NSEvent.mouseLocation = at
+                reaching.hover(true)
+                DispatchQueue.main.advance(0.26)
+                expect(reaching.openings == 1 && reaching.expanded && reaching.askedWholeDashboard,
+                       "a pointer reaching the strip a banner covers opens the whole dashboard, \(physical)")
+                leave(reaching)
+            }
+
+            // The person's own message, mirrored: it is held under the pointer,
+            // which opens the card in place and leaves the island's page closed.
+            let mirrored = fixture(physical: true)
+            mirrored.compactActivity = .timer
+            _ = mirrored.show(message)
+            expect(mirrored.islandAreaUnderNotice == nil,
+                   "a mirrored notification leaves the strip to the message it carries")
+            NSEvent.mouseLocation = CGPoint(x: mirrored.geometry.screen.midX, y: mirrored.geometry.screen.maxY - 6)
+            mirrored.hover(true)
+            DispatchQueue.main.advance(2)
+            expect(!mirrored.expanded && mirrored.openings == 0,
+                   "a pointer resting on a mirrored notification opens no page of the island")
+            leave(mirrored)
         }
 
         // A preview, over a strip with wings: the music strip keeps its own

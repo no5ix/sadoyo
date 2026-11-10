@@ -2081,6 +2081,35 @@ enum NotchSupport {
         peeking || (expanded && openedByHover)
     }
 
+    /// Whether the closed island keeps answering the pointer under a banner.
+    ///
+    /// A banner the island raised itself - a countdown ending, a song changing,
+    /// a volume moving - is drawn over the strip it came from, and for as long
+    /// as it is on screen that strip is the only place left to reach the island
+    /// from. So the strip's place stays the island's: the pointer resting there
+    /// opens the page, and a click there opens it, as they do the moment the
+    /// banner is gone. A mirrored notification is the person's own message and
+    /// is held under the pointer, where a deliberate hover opens its card in
+    /// place; an open island and a preview have their own answers already.
+    static func answersPointerUnderNotice(hasNotice: Bool, mirrored: Bool,
+                                          expanded: Bool, peeking: Bool) -> Bool {
+        hasNotice && !mirrored && !expanded && !peeking
+    }
+
+    /// The closed island's place inside a surface the island's own banner
+    /// covers: the strip at rest, centred where the island rests. A banner
+    /// shifts and grows on the side its words need; the strip it covers stays
+    /// where the island is, so the place is taken as the island at rest is
+    /// placed. Nil when there is no strip left inside the surface.
+    static func islandAreaUnderNotice(resting: CGSize, surface: CGSize,
+                                      geometry: NotchGeometry) -> CGRect {
+        var restingGeometry = geometry
+        restingGeometry.surfaceShift = 0
+        let area = restingGeometry.restingArea(width: resting.width, height: resting.height, in: surface)
+        guard !area.isNull, area.width > 0, area.height > 0 else { return .zero }
+        return area
+    }
+
     /// Another app becoming active closes the open island like a click away.
     /// One opened by hover stays while the pointer rests on it unclicked:
     /// reaching the island can itself make the app beneath it active, such as
@@ -3019,10 +3048,32 @@ struct NotchGeometry: Equatable {
     }
 
     func contains(_ point: CGPoint, in size: CGSize) -> Bool {
-        let frame = self.frame(for: size)
-        // Match the flipped native view: the top edge belongs to the island.
-        return CGRect(origin: .zero, size: size).contains(
-            CGPoint(x: point.x - frame.minX, y: frame.maxY - point.y))
+        CGRect(origin: .zero, size: size).contains(local(point, in: size))
+    }
+
+    /// Whether a screen point falls in one part of the surface, as the closed
+    /// island's own place inside a banner that grew over it.
+    func contains(_ point: CGPoint, in size: CGSize, area: CGRect) -> Bool {
+        area.contains(local(point, in: size))
+    }
+
+    /// A screen point in the surface's own space: the top edge belongs to the
+    /// island, as the flipped native view has it.
+    private func local(_ point: CGPoint, in size: CGSize) -> CGPoint {
+        let frame = frame(for: size)
+        return CGPoint(x: point.x - frame.minX, y: frame.maxY - point.y)
+    }
+
+    /// The closed island's own place in the local space of a surface that has
+    /// grown over it: the strip it rests at, centred where the island rests. A
+    /// banner of the island's own covers the strip it came from, and that place
+    /// stays the island's to answer, so the pointer and a click keep reaching
+    /// the island for as long as the banner is on screen.
+    func restingArea(width: CGFloat, height: CGFloat, in size: CGSize) -> CGRect {
+        let width = min(width, size.width)
+        let height = min(height, size.height)
+        guard width > 0, height > 0 else { return .zero }
+        return CGRect(x: (size.width - width) / 2, y: 0, width: width, height: height)
     }
 }
 

@@ -127,6 +127,11 @@ enum NotchPresentationRefreshContract {
         var activate: (() -> Void)?
         func containsHover(_ point: CGPoint) -> Bool { !concealedForMissionControl && frame.contains(point) }
         func contains(_ point: CGPoint) -> Bool { !concealedForMissionControl && (animatingFrame ?? frame).contains(point) }
+        /// The closed island's place inside a surface that has grown over it, as
+        /// the production host keeps it for hover. This contract lays surfaces
+        /// out, so the place is only recorded here.
+        var hoverArea: CGRect?
+        func setHoverArea(_ area: CGRect?) { hoverArea = area }
         var onPresent: ((CGSize) -> Void)?
         var usesGlass = false
         var revealFromHidden = false
@@ -181,9 +186,12 @@ enum NotchPresentationRefreshContract {
         var captureHover: ((Bool) -> Void)?
         var captureClosesOnCollapse = false
         var routesCaptures = true
-        var openedPages: [(module: NotchModule, takeFocus: Bool)] = []
+        var openedPages: [(module: NotchModule, takeFocus: Bool, wholeDashboard: Bool)] = []
+        func open(_ module: NotchModule? = nil, takeFocus: Bool = true, wholeDashboard: Bool = false) {
+            openedPages.append((module ?? .controls, takeFocus, wholeDashboard))
+        }
         func open(_ module: NotchModule, pinned: Bool, takeFocus: Bool, feedback: Bool) {
-            openedPages.append((module, takeFocus))
+            openedPages.append((module, takeFocus, false))
         }
         var pinned = false
         var showingSections = false
@@ -250,6 +258,16 @@ enum NotchPresentationRefreshContract {
         var homeControls: [NotchControlItem] = []
         var expandedGeometry: NotchGeometry { geometry }
         var compactActivityGeometry: NotchGeometry { geometry.compactTimerGeometry(showsDownloads: false) }
+        /// This contract lays the island's surfaces out. Under the island's own
+        /// banner the closed island keeps the strip at rest as its place, which
+        /// the hover and activation contracts measure; here it is the same place
+        /// by size, so the door a banner leaves can be checked.
+        var islandAreaUnderNotice: CGRect? {
+            guard notice == true else { return nil }
+            let resting = geometry.collapsed
+            return CGRect(x: (surfaceSize.width - min(resting.width, surfaceSize.width)) / 2, y: 0,
+                          width: min(resting.width, surfaceSize.width), height: min(resting.height, surfaceSize.height))
+        }
         var surfaceSize: CGSize {
             if fullscreenCompact { return geometry.restingSize(showsContent: false) }
             if captureControls != nil { return captureControlsCollapsed ? geometry.collapsed : geometry.peek }
@@ -547,6 +565,20 @@ enum NotchPresentationRefreshContract {
         countdown.windowHost?.activate?()
         suite.expect(countdown.countdownOpenings == 1 && !countdown.expanded,
                      "the open island's close button still closes it while an event counts down")
+        // The island's own news - a countdown ending, a song changing - is drawn
+        // over the strip that was the way in, and leaves that strip the island's
+        // door: the activation area is the strip's place, and a click there asks
+        // for the whole dashboard, because the strip a click would otherwise
+        // open is not on screen to be opened.
+        let covered = Service()
+        covered.expanded = false
+        covered.notice = true
+        covered.refreshPresentation(animated: false)
+        suite.expect(covered.windowHost?.activationRect == covered.islandAreaUnderNotice,
+                     "the island's own banner leaves the strip's place the island's door")
+        covered.windowHost?.activate?()
+        suite.expect(covered.openedPages.last?.wholeDashboard == true && covered.openedPages.last?.takeFocus == true,
+                     "a click on the strip under the island's own banner opens the whole dashboard")
         musicStripChecks(suite)
         let fullscreenSimulated = Service()
         fullscreenSimulated.expanded = false
