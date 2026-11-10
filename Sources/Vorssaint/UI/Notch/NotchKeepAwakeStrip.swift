@@ -37,15 +37,30 @@ struct NotchKeepAwakeStrip: View {
         let wing = geometry.compactActivityWingWidth
         let iconSize = NotchTimerSupport.stripIconSize(height: height)
         let textSize = NotchTimerSupport.stripTextSize(height: height)
-        return Button { service.openActivity(NotchCompactActivity.keepAwake.module) } label: {
+        // A session begun before another activity keeps the strip's leading end
+        // as its cup-shaped mark, and the activity begun after it keeps its
+        // reading on the right, so the strip reads in the order they started.
+        let companion = service.compactCompanion
+        return Button {
+            // The mark at the strip's leading end is an activity of its own, and a
+            // click on the strip goes to it, as it does on the timer's strip.
+            if let companion { service.openActivity(companion.module) }
+            else { service.openActivity(NotchCompactActivity.keepAwake.module) }
+        } label: {
             HStack(spacing: 0) {
                 Group {
                     if wing >= 28 {
-                        Image(systemName: NotchKeepAwakeSupport.symbol)
-                            .font(.system(size: iconSize, weight: .medium))
+                        if let companion {
+                            NotchCompanionMark(companion: companion, geometry: geometry)
+                        } else {
+                            Image(systemName: NotchKeepAwakeSupport.symbol)
+                                .font(.system(size: iconSize, weight: .medium))
+                        }
                     }
                 }
-                .padding(.leading, geometry.compactActivityEdgeInset(boxHeight: iconSize, radius: iconSize / 2))
+                .padding(.leading, companion == nil
+                          ? geometry.compactActivityEdgeInset(boxHeight: iconSize, radius: iconSize / 2)
+                          : NotchCompanionMark.inset(companion!, geometry: geometry))
                 .frame(width: wing, height: height, alignment: .leading)
                 Color.clear.frame(width: geometry.compactActivityCameraGap)
                 Group {

@@ -5,16 +5,28 @@ import Foundation
 
 // MARK: - What is kept
 
-/// One metric reading, kept for the four charts.
+/// One metric reading, kept for the charts.
 ///
 /// A sample carries what the server answered for one moment. A metric the
 /// server did not answer is nil, and stays out of the chart's line: a gap is
 /// drawn as a gap, and nothing is filled in.
+///
+/// Each measuring chart draws two lines from one sample, so a sample carries
+/// both of the engine's figures for each: the batch it had in hand at that
+/// moment, and the average over the whole of its running. Nothing is kept
+/// that the engine did not answer, and a thinned sample is the average of its
+/// bucket for every field, so a thinned line is a thinner version of the same
+/// measurement and not a different one.
 struct NotchSplashSample: Equatable {
     let at: Date
+    /// The decode batch in hand, and the engine's average over its running.
+    var decodeCurrent: Double?
     var decode: Double?
+    var prefillCurrent: Double?
     var prefill: Double?
+    /// The first token's time at the two percentiles the engine names.
     var ttftSeconds: Double?
+    var ttftP95Seconds: Double?
     var cachePercent: Double?
 
     /// The same sample with its figures rounded to what a chart can show, so
@@ -24,8 +36,21 @@ struct NotchSplashSample: Equatable {
             guard let value, value.isFinite else { return nil }
             return (value * places).rounded() / places
         }
-        return NotchSplashSample(at: at, decode: round(decode, 100), prefill: round(prefill, 10),
-                                 ttftSeconds: round(ttftSeconds, 1000), cachePercent: round(cachePercent, 100))
+        return NotchSplashSample(at: at,
+                                 decodeCurrent: round(decodeCurrent, 100),
+                                 decode: round(decode, 100),
+                                 prefillCurrent: round(prefillCurrent, 10),
+                                 prefill: round(prefill, 10),
+                                 ttftSeconds: round(ttftSeconds, 1000),
+                                 ttftP95Seconds: round(ttftP95Seconds, 1000),
+                                 cachePercent: round(cachePercent, 100))
+    }
+
+    /// Nothing the server answered for this moment, which is a reading with no
+    /// chart in it: a sample is kept only when at least one field has a figure.
+    var hasFigures: Bool {
+        decodeCurrent != nil || decode != nil || prefillCurrent != nil || prefill != nil
+            || ttftSeconds != nil || ttftP95Seconds != nil || cachePercent != nil
     }
 }
 
@@ -83,14 +108,17 @@ struct NotchSplashHistory: Equatable {
                          calendar: Calendar = .autoupdatingCurrent) {
         let sample = NotchSplashSample(
             at: date,
+            decodeCurrent: status.metrics.currentDecodeBatchTokensPerSecond,
             decode: status.metrics.decodeTokensPerSecond,
+            prefillCurrent: status.metrics.currentPrefillBatchTokensPerSecond,
             prefill: status.metrics.prefillTokensPerSecond,
             ttftSeconds: NotchSplashSupport.ttftSeconds(milliseconds: status.metrics.ttftMilliseconds),
+            ttftP95Seconds: NotchSplashSupport.ttftSeconds(milliseconds: status.metrics.ttftP95Milliseconds),
             cachePercent: NotchSplashSupport.cacheHitPercent(hits: status.cache.hits,
                                                              requests: status.cache.requests,
                                                              reportedRate: status.cache.reportedRate)
         ).rounded()
-        if sample.decode != nil || sample.prefill != nil || sample.ttftSeconds != nil || sample.cachePercent != nil {
+        if sample.hasFigures {
             samples.append(sample)
         }
         addTokens(status: status, instanceKey: instanceKey, at: date, calendar: calendar)
@@ -198,9 +226,12 @@ struct NotchSplashHistory: Equatable {
         let merged = order.compactMap { key -> NotchSplashSample? in
             guard let group = buckets[key], !group.isEmpty else { return nil }
             return NotchSplashSample(at: Date(timeIntervalSince1970: starts[key] ?? group[0].at.timeIntervalSince1970),
+                                     decodeCurrent: Self.average(group.map(\.decodeCurrent)),
                                      decode: Self.average(group.map(\.decode)),
+                                     prefillCurrent: Self.average(group.map(\.prefillCurrent)),
                                      prefill: Self.average(group.map(\.prefill)),
                                      ttftSeconds: Self.average(group.map(\.ttftSeconds)),
+                                     ttftP95Seconds: Self.average(group.map(\.ttftP95Seconds)),
                                      cachePercent: Self.average(group.map(\.cachePercent)))
                 .rounded()
         }
@@ -220,16 +251,17 @@ struct NotchSplashHistory: Equatable {
 
     // MARK: What the cards ask
 
-    /// The samples in the last `minutes`, oldest first, which is the line the
-    /// four cards draw.
-    func series(minutes: Int = NotchSplashSupport.chartWindowMinutes, endingAt now: Date) -> [NotchSplashSample] {
-        let from = now.addingTimeInterval(-Double(minutes) * 60)
+    /// The samples in the charts' window, oldest first, which is the line the
+    /// cards draw: ten minutes of readings, and nothing older.
+    func series(window: TimeInterval = NotchSplashSupport.chartWindowSeconds, endingAt now: Date) -> [NotchSplashSample] {
+        let from = now.addingTimeInterval(-window)
         return samples.filter { $0.at >= from && $0.at <= now }
     }
 
-    func values(_ field: (NotchSplashSample) -> Double?, minutes: Int = NotchSplashSupport.chartWindowMinutes,
+    func values(_ field: (NotchSplashSample) -> Double?,
+                window: TimeInterval = NotchSplashSupport.chartWindowSeconds,
                 endingAt now: Date) -> [Double] {
-        series(minutes: minutes, endingAt: now).compactMap(field)
+        series(window: window, endingAt: now).compactMap(field)
     }
 
     /// The last `count` calendar days, today last, with a day of nothing for
@@ -363,22 +395,31 @@ final class NotchSplashHistoryStore {
 
     struct SampleFile: Codable {
         var t: Int
+        var dc: Double?
         var d: Double?
+        var pc: Double?
         var p: Double?
         var f: Double?
+        var f95: Double?
         var c: Double?
 
         init(sample: NotchSplashSample) {
             t = Int(sample.at.timeIntervalSince1970)
+            dc = sample.decodeCurrent
             d = sample.decode
+            pc = sample.prefillCurrent
             p = sample.prefill
             f = sample.ttftSeconds
+            f95 = sample.ttftP95Seconds
             c = sample.cachePercent
         }
 
         var sample: NotchSplashSample {
-            NotchSplashSample(at: Date(timeIntervalSince1970: Double(t)), decode: d, prefill: p,
-                              ttftSeconds: f, cachePercent: c)
+            NotchSplashSample(at: Date(timeIntervalSince1970: Double(t)),
+                              decodeCurrent: dc, decode: d,
+                              prefillCurrent: pc, prefill: p,
+                              ttftSeconds: f, ttftP95Seconds: f95,
+                              cachePercent: c)
         }
     }
 

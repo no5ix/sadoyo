@@ -53,8 +53,14 @@ enum NotchMusicVisibilityTests {
     class State {
         var activitySelection = NotchActivitySelection()
         var timerCompanions: [NotchCompactActivity] = []
+        /// The pairs the strip can take. A countdown's pairs are set by the test,
+        /// because this contract has no timer services. For every other activity
+        /// the test offers the list in the order the activities began, which is
+        /// what the service's own record hands the strip; the strip takes the
+        /// earliest of them as its leading mark.
+        var companionCandidates: [NotchCompactActivity] = []
         func compactCompanions(of primary: NotchCompactActivity) -> [NotchCompactActivity] {
-            primary == .timer ? timerCompanions : []
+            primary == .timer ? timerCompanions : companionCandidates.filter { $0 != primary }
         }
         var showsCompactActivityPicker = false
         var compactActivityPickerLayout = NotchActivityPickerLayout(
@@ -102,11 +108,13 @@ enum NotchMusicVisibilityTests {
         var agentStripWing: CGFloat = 58
         func agentStripWing(in geometry: NotchGeometry) -> CGFloat { agentStripWing }
         var watchStripWing: CGFloat = 60
-        func watchStripWing(in geometry: NotchGeometry) -> CGFloat { watchStripWing }
+        func watchStripWing(for companion: NotchCompactActivity?, in geometry: NotchGeometry) -> CGFloat { watchStripWing }
         var calendarStripWing: CGFloat = 120
         func calendarStripWing(for companion: NotchCompactActivity?, in geometry: NotchGeometry) -> CGFloat { calendarStripWing }
         var keepAwakeStripWing: CGFloat = 44
-        func keepAwakeStripWing(in geometry: NotchGeometry) -> CGFloat { keepAwakeStripWing }
+        func keepAwakeStripWing(for companion: NotchCompactActivity?, in geometry: NotchGeometry) -> CGFloat { keepAwakeStripWing }
+        var musicStripWing: CGFloat = 44
+        func musicStripWing(for companion: NotchCompactActivity, in geometry: NotchGeometry) -> CGFloat { musicStripWing }
         var notchNeedsMonitor = false
         var heldDrag = false
         var pinned = false
@@ -388,7 +396,29 @@ enum NotchMusicVisibilityTests {
         service.collapse()
         service.hasTimerActivity = true
         service.hasDownloadActivity = true
-        suite.expect(service.compactActivity == .timer, "Nothing for resting music preserves a running timer")
+        // The strip's reading is the activity begun last, and the one begun
+        // before it is drawn at the strip's leading end: both are shown, and the
+        // order they are shown in is the order they began, which is what the
+        // island's record says and not a rank written beside it. A download's
+        // strip has no room for another activity's mark, so a download is drawn
+        // as the mark beside a countdown, and not in front of it.
+        service.stripInsertion.register(["strip.timer", "strip.downloads"])
+        service.companionCandidates = [.timer, .downloads]
+        suite.expect(service.compactActivity == .timer
+                         && service.compactActivities == [.timer, .downloads],
+                     "resting music takes neither the strip's reading nor the list of activities running")
+        suite.expect(service.compactActivities == [.timer, .downloads]
+                         && service.compactActivity != .music,
+                     "resting music leaves both running activities on the island's list, and takes neither")
+        // The same two activities, begun the other way round. The record keeps
+        // an activation date, so re-listing two activities already recorded
+        // cannot re-shuffle them: a new order needs a new pair of beginnings.
+        service.stripInsertion = NotchActivityInsertion()
+        service.stripInsertion.register(["strip.downloads", "strip.timer"])
+        service.companionCandidates = [.downloads, .timer]
+        suite.expect(service.compactActivity == .timer
+                         && service.compactActivities == [.downloads, .timer],
+                     "the same two activities, begun the other way round, are listed in that order: the record of their activation, and not a rank written beside it")
         service.timerCompanions = [.music, .downloads]
         service.activitySelection.select(.timer, available: service.compactActivities)
         suite.expect(service.compactCompanion == .music,
@@ -415,7 +445,15 @@ enum NotchMusicVisibilityTests {
         suite.expect(service.surfaceSize == service.compactActivityGeometry.compactActivitySize,
                "dismissing a device notice restores the underlying activity's width")
         service.hasKeepAwakeActivity = true
-        suite.expect(service.compactActivity == .downloads, "a download outranks a running Keep Awake session")
+        // The Keep Awake session is the later of the two, and its strip has room
+        // for a mark, so it keeps the strip's reading and the download begun first
+        // is drawn at the leading end. Neither is hidden, and neither outranks the
+        // other: the order is the order they began.
+        service.stripInsertion.register(["strip.downloads", "strip.keepAwake"])
+        service.companionCandidates = [.downloads, .keepAwake]
+        suite.expect(service.compactActivity == .keepAwake
+                         && service.compactActivities == [.downloads, .keepAwake],
+                     "a Keep Awake session begun after a download leads the strip, and the download begun first is listed first, for the strip's leading mark")
         service.hasDownloadActivity = false
         suite.expect(service.compactActivity == .keepAwake
                      && service.compactActivityGeometry == service.geometry.compactTimerGeometry(

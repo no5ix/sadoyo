@@ -274,16 +274,43 @@ struct NotchCapsuleMusicStrip: View {
     private var showsControl: Bool { live && service.musicStripShowsControl }
     /// A click's request shows at once, before the player says so.
     private var playing: Bool { (live ? service.musicStripRequest : nil) ?? playback?.isPlaying == true }
+    /// The activity that became active before the song did, drawn at the row's
+    /// leading end so the capsule reads in the order its activities started.
+    private var companion: NotchCompactActivity? { live ? service.compactCompanion : nil }
+    /// The working agents, for the mark of agents that shares the row.
+    private var agentWorking: Int { Set(AgentUsageService.shared.snapshot.live.map(\.provider)).count }
 
     var body: some View {
         let side = CapsuleLayout.artworkSide(geometry)
+        let companion = live ? service.compactCompanion : nil
+        let markWidth = companion.map {
+            CapsuleLayout.timerMarkWidth(companion: $0, workingAgents: agentWorking, downloadPercent: false,
+                                         geometry: geometry, language: l10n.language)
+        }
         // A song is named as it starts and while the pointer rests on its
         // cover, and a strip on its way out leaves as it was. Otherwise the
-        // cover and bars say enough.
-        let named = service.capsuleMusicTitleShown || (live ? service.musicStripNamesSong : snapshot?.namesSong == true)
-        NotchCapsuleRow(size: size ?? CapsuleLayout.musicSurface(title: named ? title : nil, geometry: geometry),
-                        geometry: geometry, leading: 0, trailing: 0) {
+        // cover and bars say enough. Beside another activity the name makes
+        // room: two names cannot share one end of a row.
+        let named = companion == nil
+            && (service.capsuleMusicTitleShown || (live ? service.musicStripNamesSong : snapshot?.namesSong == true))
+        let rowSize = size ?? CapsuleLayout.musicSurface(title: named ? title : nil,
+                                                        companion: companion, geometry: geometry,
+                                                        language: l10n.language)
+        NotchCapsuleRow(size: rowSize, geometry: geometry, leading: 0, trailing: 0) {
             HStack(spacing: 0) {
+                if let companion {
+                    // The click opens the activity drawn at this end, as the
+                    // countdown strip's own mark does.
+                    Button { service.openActivity(companion.module) } label: {
+                        NotchCapsuleCompanionMark(companion: companion, geometry: geometry)
+                            .frame(width: markWidth ?? CapsuleLayout.symbolWidth, alignment: .leading)
+                            .padding(.leading, CapsuleLayout.endPadding)
+                            .frame(maxHeight: .infinity)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(NotchCompanionMark.label(companion, language: l10n.language))
+                }
                 NotchMusicCover(artwork: artwork, side: side, radius: side / 2, source: playback?.track)
                     .padding(.leading, CapsuleLayout.artworkInset(geometry))
                     .frame(maxHeight: .infinity)
@@ -317,7 +344,9 @@ struct NotchCapsuleMusicStrip: View {
             .modifier(NotchMusicSwipeFeedback(enabled: snapshot == nil))
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel([title, playback?.track.artist].compactMap { $0 }.joined(separator: ", "))
+        .accessibilityLabel([companion.map { NotchCompanionMark.label($0, language: l10n.language) },
+                            [title, playback?.track.artist].compactMap { $0 }.joined(separator: ", ")]
+            .compactMap { $0 }.joined(separator: ", "))
         .accessibilityAction(named: Text(FeatureStrings.radialMenu(l10n.language).mediaPlayPause)) {
             if !service.toggleMusicStripSong() { service.openActivity(.music) }
         }
@@ -410,8 +439,8 @@ struct NotchCapsuleSplashStrip: View {
                     .font(Font(CapsuleLayout.readingFont as CTFont))
                     .foregroundStyle(NotchSplashPalette.purple)
                     .lineLimit(1).fixedSize()
-                    // A reading that gains or loses a character, as 9 tok/s
-                    // becomes 10 tok/s, resizes the capsule; the service
+                    // A reading that gains or loses a character, as 9t/s
+                    // becomes 10t/s, resizes the capsule; the service
                     // measures the same reading.
                     .onChange(of: NotchAgentSupport.readingShape(reading)) { _, _ in
                         DispatchQueue.main.async { service.refreshPresentation() }
@@ -490,10 +519,22 @@ private struct NotchCapsuleCompanionMark: View {
                 .font(Font(CapsuleLayout.readingFont as CTFont))
                 .foregroundStyle(NotchSplashPalette.purple)
                 .lineLimit(1).fixedSize()
-        case .timer, .keepAwake, .watch:
-            EmptyView()
+        case .timer:
+            // The countdown's own mark, as the timer strip leads with it: the
+            // finished check, the paused clock, the count up, the countdown.
+            NotchCapsuleSymbol(name: timerService.session.completed ? "checkmark.circle"
+                                 : timerService.session.isPaused ? "pause.circle"
+                                 : timerService.session.countsUp ? "stopwatch" : "timer")
+                .foregroundStyle(.orange)
+        case .watch:
+            NotchCapsuleSymbol(name: NotchModule.watch.symbol)
+        case .keepAwake:
+            NotchCapsuleSymbol(name: NotchKeepAwakeSupport.symbol).foregroundStyle(.yellow)
         }
     }
+
+    /// The countdown, for the mark of a timer that shares another activity's row.
+    @ObservedObject private var timerService = NotchTimerService.shared
 }
 
 /// A working agent: its mark and the reading the person chose.
@@ -599,8 +640,22 @@ struct NotchCapsuleWatchStrip: View {
 
     var body: some View {
         let geometry = displayGeometry ?? service.geometry
+        // The activity begun before the watch keeps the row's leading end as its
+        // mark, and the watch's eye follows it.
+        let companion = service.compactCompanion
         NotchCapsuleRow(size: size, geometry: geometry) {
             HStack(spacing: CapsuleLayout.spacing) {
+                if let companion {
+                    Button { service.openActivity(companion.module) } label: {
+                        NotchCapsuleCompanionMark(companion: companion, geometry: geometry)
+                            .frame(width: CapsuleLayout.timerMarkWidth(companion: companion, workingAgents: 0,
+                                                                      downloadPercent: false, geometry: geometry,
+                                                                      language: l10n.language))
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(NotchCompanionMark.label(companion, language: l10n.language))
+                }
                 NotchWatchEye(size: CapsuleLayout.symbolSize, hidden: watch.state == .hidden)
                     .frame(width: CapsuleLayout.symbolWidth)
                 if watch.showsThumbnail, let preview = watch.preview {
@@ -742,15 +797,32 @@ struct NotchCapsuleKeepAwakeStrip: View {
         }
     }
 
-    private func row(end: Date?, now: Date) -> some View {
-        NotchCapsuleRow(size: size, geometry: displayGeometry ?? service.geometry) {
+    @ViewBuilder private func row(end: Date?, now: Date) -> some View {
+        let geometry = displayGeometry ?? service.geometry
+        // A session begun before another activity keeps the row's leading end as
+        // its cup, and the activity begun after it keeps its reading on the
+        // right, so the row reads in the order its activities started.
+        let companion = service.compactCompanion
+        NotchCapsuleRow(size: size, geometry: geometry) {
             HStack(spacing: CapsuleLayout.spacing) {
-                // The cup is wider than the slot other marks share; the
-                // capsule measures it as drawn.
-                Image(systemName: NotchKeepAwakeSupport.symbol)
-                    .font(.system(size: CapsuleLayout.symbolSize, weight: .medium))
-                    .foregroundStyle(.yellow)
-                    .capsuleCentred(NotchKeepAwakeSupport.symbol)
+                if let companion {
+                    Button { service.openActivity(companion.module) } label: {
+                        NotchCapsuleCompanionMark(companion: companion, geometry: geometry)
+                            .frame(width: CapsuleLayout.timerMarkWidth(companion: companion, workingAgents: 0,
+                                                                      downloadPercent: false, geometry: geometry,
+                                                                      language: l10n.language))
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(NotchCompanionMark.label(companion, language: l10n.language))
+                } else {
+                    // The cup is wider than the slot other marks share; the
+                    // capsule measures it as drawn.
+                    Image(systemName: NotchKeepAwakeSupport.symbol)
+                        .font(.system(size: CapsuleLayout.symbolSize, weight: .medium))
+                        .foregroundStyle(.yellow)
+                        .capsuleCentred(NotchKeepAwakeSupport.symbol)
+                }
                 if let end {
                     let text = NotchKeepAwakeSupport.compactText(until: end, now: now,
                                                                 locale: Locale(identifier: l10n.language.rawValue))

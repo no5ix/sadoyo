@@ -174,6 +174,19 @@ enum NotchPresentationRefreshContract {
         var activitySelection = NotchActivitySelection()
         var compactActivities: [NotchCompactActivity] = []
         func compactCompanions(of primary: NotchCompactActivity) -> [NotchCompactActivity] { [] }
+        /// The closed strip keeps its own record of the order its activities
+        /// began in, and a refresh is where the service learns that one began. This
+        /// contract lays out surfaces, so it is told that the record was asked for
+        /// and keeps the record itself: the order rule is the activity contract's
+        /// to measure, and the ask is here proved to have happened.
+        var stripInsertion = NotchActivityInsertion()
+        var stripTimelineAsks = 0
+        var compactActivityCandidates: [NotchCompactActivity] = []
+        func stripKey(_ activity: NotchCompactActivity) -> String { "strip.\(activity.id)" }
+        func syncStripTimeline() {
+            stripTimelineAsks += 1
+            stripInsertion.register(compactActivityCandidates.map(stripKey))
+        }
         var showsCompactActivityPicker = false
         var hiddenInFullscreen = false
         /// Hidden until hover and set to show activity, as Settings has it.
@@ -616,6 +629,22 @@ enum NotchPresentationRefreshContract {
         retreating.refreshPresentation(animated: false)
         suite.expect(retreating.rearmAsks.last?.surfaceChanged == true,
                      "a banner giving its place back reports the surface that changed under the pointer")
+        // A refresh is also where the closed strip learns that an activity began,
+        // ended, or was running all along: the record of the order they began in is
+        // asked for on every refresh, so the strip's two ends follow the order and
+        // not the order the code happens to list them in.
+        let begun = Service()
+        begun.expanded = false
+        begun.compactActivityCandidates = [.splash]
+        begun.refreshPresentation(animated: false)
+        begun.compactActivityCandidates = [.splash, .music]
+        begun.refreshPresentation(animated: false)
+        begun.compactActivityCandidates = [.music]
+        begun.refreshPresentation(animated: false)
+        suite.expect(begun.stripTimelineAsks >= 3,
+                     "every refresh asks the strip's record to keep up with the activities running")
+        suite.expect(begun.stripInsertion.order == ["strip.music"],
+                     "the record keeps the activity begun first, drops the one that ended, and has no place left where it stood")
         musicStripChecks(suite)
         let fullscreenSimulated = Service()
         fullscreenSimulated.expanded = false

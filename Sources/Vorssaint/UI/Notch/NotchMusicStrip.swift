@@ -73,19 +73,31 @@ struct NotchMusicStrip: View {
 
     var body: some View {
         let wing = geometry.compactActivityWingWidth
-        let named = namedWing
+        // Beside the activity begun before it, the song keeps its bars at the
+        // trailing end and gives the leading end to that activity's mark, so the
+        // strip reads left to right in the order its activities started. The
+        // name makes room; the strip's click opens the island, where every
+        // activity has its card.
+        let companion = live ? service.compactCompanion : nil
+        let named: CGFloat? = companion == nil ? namedWing : nil
         Button { live ? service.activateMusicStrip() : service.openActivity(.music) } label: {
             HStack(spacing: 0) {
                 HStack(spacing: Layout.spacing) {
                     // The words grow out from behind the cover, which keeps its place.
                     if named != nil { namedLabel }
                     if wing > 0 {
-                        // Circular corners, like the strip's, so the two stay parallel.
-                        NotchMusicCover(artwork: artwork, side: artworkSide, radius: artworkRadius,
-                                        source: playback?.track)
+                        if let companion {
+                            NotchCompanionMark(companion: companion, geometry: geometry)
+                        } else {
+                            // Circular corners, like the strip's, so the two stay parallel.
+                            NotchMusicCover(artwork: artwork, side: artworkSide, radius: artworkRadius,
+                                            source: playback?.track)
+                        }
                     }
                 }
-                .padding(.leading, named == nil ? artworkInset : Layout.endInset)
+                .padding(.leading, named == nil
+                          ? (companion == nil ? artworkInset : NotchCompanionMark.inset(companion!, geometry: geometry))
+                          : Layout.endInset)
                 .padding(.trailing, named == nil ? innerInset : wing - artworkInset - artworkSide)
                 .frame(width: named ?? wing, height: geometry.compactActivityContentHeight,
                        alignment: named == nil ? .leading : .trailing)
@@ -111,7 +123,9 @@ struct NotchMusicStrip: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel([title, playback?.track.artist].compactMap { $0 }.joined(separator: ", "))
+        .accessibilityLabel([companion.map { NotchCompanionMark.label($0, language: l10n.language) },
+                            [title, playback?.track.artist].compactMap { $0 }.joined(separator: ", ")]
+            .compactMap { $0 }.joined(separator: ", "))
         .accessibilityHint(FeatureStrings.notch(l10n.language).open)
         .accessibilityAction(named: Text(FeatureStrings.radialMenu(l10n.language).mediaPlayPause)) {
             if !service.toggleMusicStripSong() { service.openActivity(.music) }

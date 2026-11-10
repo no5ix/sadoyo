@@ -106,9 +106,12 @@ struct NotchTimerStrip: View {
     }
 }
 
-/// What shares a strip with a timer or an event, drawn at the strip's left
-/// end: a download's progress, the working agents' marks, the event's dot
-/// and clock or the playing track's cover.
+/// What shares a strip with another activity, drawn at the strip's left end:
+/// a timer's own clock mark, a download's progress, the working agents' marks,
+/// the event's dot and clock, the playing track's cover, the decode speed, the
+/// watch, or the Keep Awake cup. Every activity that is running is drawn, in the
+/// order it became active, and the mark is the activity's own - what its strip
+/// leads with when it owns the island alone.
 struct NotchCompanionMark: View {
     let companion: NotchCompactActivity
     let geometry: NotchGeometry
@@ -161,9 +164,28 @@ struct NotchCompanionMark: View {
                 .onChange(of: NotchAgentSupport.readingShape(splashSpeedText)) { _, _ in
                     DispatchQueue.main.async { service.refreshPresentation() }
                 }
-        case .timer, .keepAwake, .watch:
-            EmptyView()
+        case .timer:
+            // The countdown's own mark, as the timer strip leads with it: the
+            // finished check, the paused clock, the count up, the countdown.
+            Image(systemName: timer.session.completed ? "checkmark.circle"
+                  : timer.session.isPaused ? "pause.circle" : timer.session.countsUp ? "stopwatch" : "timer")
+                .font(.system(size: Self.iconSize(geometry), weight: .medium))
+                .foregroundStyle(.orange)
+        case .watch:
+            // The watch's mark, as its own strip leads with it.
+            Image(systemName: NotchModule.watch.symbol)
+                .font(.system(size: Self.iconSize(geometry), weight: .medium))
+        case .keepAwake:
+            // The cup, as the Keep Awake strip leads with it: a session keeping
+            // the Mac awake is worth a mark beside the work it is keeping awake.
+            Image(systemName: NotchKeepAwakeSupport.symbol)
+                .font(.system(size: Self.iconSize(geometry), weight: .medium))
+                .foregroundStyle(.yellow)
         }
+    }
+
+    private static func iconSize(_ geometry: NotchGeometry) -> CGFloat {
+        min(13, NotchTimerSupport.stripIconSize(height: geometry.compactActivityContentHeight))
     }
 
     private var downloadIndicator: some View {
@@ -209,7 +231,6 @@ struct NotchCompanionMark: View {
             return geometry.compactActivityEdgeInset(boxHeight: side, radius: side / 2)
         }
     }
-
     static func label(_ companion: NotchCompactActivity, language: AppLanguage) -> String {
         switch companion {
         case .downloads:
@@ -235,4 +256,8 @@ struct NotchCompanionMark: View {
             return companion.title(language)
         }
     }
+
+    /// The countdown, for the mark of a timer that shares another activity's
+    /// strip.
+    @ObservedObject private var timer = NotchTimerService.shared
 }

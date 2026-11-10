@@ -570,14 +570,64 @@ final class NotchService: ObservableObject {
 
     var compactActivity: NotchCompactActivity? {
         // A new song waiting for its notice is not drawn yet.
-        activitySelection.current(available: awaitsTrackNotice ? compactActivities.filter { $0 != .music } : compactActivities)
+        //
+        // The strip's reading is the activity begun last: what a person started
+        // most recently is what they are looking at, and the activity begun
+        // earlier keeps the strip's left end as its mark, so the closed island
+        // reads left to right in the order its activities started.
+        //
+        // A strip that has no room for a mark of another activity is not asked to
+        // lead one: the download's strip fills both wings with its own name and
+        // progress, and the agents' with its counts. Those two are drawn as the
+        // mark beside another activity's reading, which keeps them visible instead
+        // of hiding the activity begun before them.
+        let running = awaitsTrackNotice ? compactActivities.filter { $0 != .music } : compactActivities
+        if let leading = running.last(where: carriesCompanion) { return leading }
+        return activitySelection.current(available: running, prefers: .last)
     }
 
+    /// Whether an activity's closed strip has room for the mark of the activity
+    /// begun before it, beside its own reading.
+    private func carriesCompanion(_ activity: NotchCompactActivity) -> Bool {
+        activity != .downloads && activity != .agents
+    }
+
+    /// The activities running now, in the order the machine began them.
+    ///
+    /// The record is kept by `syncStripTimeline`, asked where the island already
+    /// learns that a player, a timer, a download, an agent, an event, a reading
+    /// or a Keep Awake session has begun or ended. Reading this changes nothing.
     var compactActivities: [NotchCompactActivity] {
+        stripInsertion.ordering(compactActivityCandidates) { stripKey($0) }
+    }
+
+    /// The activities running now, in the order the island asks about them, before
+    /// the order of their activation is applied.
+    private var compactActivityCandidates: [NotchCompactActivity] {
         NotchSupport.compactActivities(timer: hasTimerActivity, splash: hasSplashActivity,
                                       watch: hasWatchActivity, downloads: hasDownloadActivity,
                                       agents: hasAgentActivity, calendar: hasCalendarActivity,
                                       music: hasMusicActivity, keepAwake: hasKeepAwakeActivity)
+    }
+
+    /// The closed strip's own record of when each activity became active, kept
+    /// apart from the page's because the strip shows a mark of each activity and
+    /// the page shows a card of each, and the two lists answer different
+    /// questions: the page's first card is the activity begun first, and the
+    /// strip's left-hand mark is the same activity, which is why the strip asks
+    /// for the ends of one order and not for a rank.
+    private var stripInsertion = NotchActivityInsertion()
+
+    /// The activity's place in the strip's record. Prefixed, so an activity and
+    /// the page's card of the same thing never share a number.
+    private func stripKey(_ activity: NotchCompactActivity) -> String { "strip.\(activity.id)" }
+
+    /// Records the activities running now, so the one that has just begun takes
+    /// the strip's right end and the one begun before it keeps the left. Asked
+    /// of every presentation refresh, which is where the island learns that
+    /// something began, ended, or was already running when the island opened.
+    private func syncStripTimeline() {
+        stripInsertion.register(compactActivityCandidates.map(stripKey))
     }
 
     /// The page shows every activity at once, so the island never asks which
@@ -639,28 +689,33 @@ final class NotchService: ObservableObject {
         }
     }
 
-    /// The pairs `primary` supports now.
+    /// The activities `primary` shares the closed strip with, in the order they
+    /// became active: the earliest is the one drawn at the strip's left end.
+    ///
+    /// Not a table of pairs. Every activity running beside `primary` is offered,
+    /// and the one begun first is taken, so the strip's two ends hold the
+    /// activities in the order they started; a song begun beside a watched
+    /// reading is drawn, and so is the reading begun beside a playing song.
     func compactCompanions(of primary: NotchCompactActivity) -> [NotchCompactActivity] {
-        NotchSupport.compactCompanions(of: primary, timer: hasTimerActivity,
-                                       running: NotchTimerService.shared.session.isRunning,
-                                       splash: hasSplashActivity,
-                                       downloads: hasDownloadActivity, agents: hasAgentActivity,
-                                       calendar: hasCalendarActivity, music: hasMusicActivity)
+        NotchSupport.compactCompanions(of: primary, running: NotchTimerService.shared.session.isRunning,
+                                       companions: compactActivities)
     }
 
-    /// Every pair the picker offers, in the activities' own order.
+    /// The pairs the picker offers, in the order their activities began.
+    ///
+    /// Only the pairs the closed strip can actually draw: its reading is the
+    /// activity begun last, so the picker offers that activity beside each of the
+    /// ones begun before it, and no pair the island would refuse to show.
     var compactActivityCombinations: [NotchActivityCombination] {
-        compactActivities.flatMap { primary in
-            compactCompanions(of: primary).map { NotchActivityCombination(primary: primary, companion: $0) }
-        }
+        guard let primary = compactActivity else { return [] }
+        return compactCompanions(of: primary).map { NotchActivityCombination(primary: primary, companion: $0) }
     }
 
-    /// A single activity never borrows another activity's wing implicitly.
-    /// The closed strip's companion. Nothing is asked of the person: the strip
-    /// takes the first companion the running activities answer to, and the
-    /// player leads that list, so a song playing beside a timer is drawn on the
-    /// strip's leading side while the timer keeps its clock on the trailing.
-    /// A pair chosen by hand, where one is chosen, keeps its place.
+    /// The closed strip's companion: nothing is asked of the person. The strip
+    /// takes the activity that became active first, which is the one drawn at
+    /// its leading end, while the activity begun last keeps its reading on the
+    /// trailing side. A pair chosen by hand, where one is chosen, keeps its
+    /// place.
     var compactCompanion: NotchCompactActivity? {
         guard let activity = compactActivity else { return nil }
         return NotchSupport.defaultCompanion(of: activity,
@@ -695,30 +750,38 @@ final class NotchService: ObservableObject {
                                  base: NotchGeometry? = nil) -> NotchGeometry {
         let geometry = base ?? self.geometry
         switch activity {
-        case .music: return geometry.compactMusicGeometry
         case .timer:
             return geometry.compactTimerGeometry(showsDownloads: companion == .downloads,
                                                  wing: timerStripWing(for: companion, in: geometry))
-        // A speed is a reading like a countdown's, so it takes the same wings.
+        // A speed is a reading like a countdown's, so it takes the same wings,
+        // and its companion's mark is measured with them.
         case .splash:
-            return geometry.compactTimerGeometry(showsDownloads: false, wing: splashStripWing(in: geometry))
+            return geometry.compactTimerGeometry(showsDownloads: false, wing: splashStripWing(for: companion, in: geometry))
+        case .music:
+            // Alone, the cover and the bars fill the wings. Beside the activity
+            // begun before it, the song keeps its bars on the trailing side and
+            // the other activity's mark takes the leading side, so the strip
+            // reads in the order its activities started.
+            guard let companion else { return geometry.compactMusicGeometry }
+            return geometry.compactTimerGeometry(showsDownloads: false, wing: musicStripWing(for: companion, in: geometry))
         case .downloads:
             let name = NotchDownloadService.shared.items.first { $0.active && !$0.completed }?.name
             return geometry.compactDownloadGeometry(wing: NotchDownloadSupport.compactWing(for: name, in: geometry))
         case .agents: return geometry.compactAgentGeometry(wing: agentStripWing(in: geometry))
-        case .watch: return geometry.compactWatchGeometry(wing: watchStripWing(in: geometry))
+        case .watch: return geometry.compactWatchGeometry(wing: watchStripWing(for: companion, in: geometry))
         case .calendar:
             return geometry.compactCalendarGeometry(wing: calendarStripWing(for: companion, in: geometry),
                                                     paired: companion != nil)
         // Its reading is a countdown like the timer's, so it takes the timer's wings.
-        case .keepAwake: return geometry.compactTimerGeometry(showsDownloads: false, wing: keepAwakeStripWing(in: geometry))
+        case .keepAwake: return geometry.compactTimerGeometry(showsDownloads: false, wing: keepAwakeStripWing(for: companion, in: geometry))
         default: return geometry
         }
     }
 
     /// The wider side: the eye at the left end, or the reading, or the
-    /// area's own picture when it has no text, with air beside the camera.
-    private func watchStripWing(in geometry: NotchGeometry) -> CGFloat {
+    /// area's own picture when it has no text, with air beside the camera; and
+    /// beside another activity, the mark of the one begun before the watch.
+    private func watchStripWing(for companion: NotchCompactActivity?, in geometry: NotchGeometry) -> CGFloat {
         let provisional = geometry.compactWatchGeometry(wing: NotchWatchSupport.stripWingRange.lowerBound)
         let watch = NotchWatchService.shared
         let size = NotchTimerSupport.stripTextSize(height: provisional.compactActivityContentHeight)
@@ -727,12 +790,19 @@ final class NotchService: ObservableObject {
                 .font: NSFont.monospacedDigitSystemFont(ofSize: size, weight: .medium)
             ]).width.rounded(.up)
         let inset = provisional.compactActivityEdgeInset(boxHeight: size * 0.72, radius: 0)
-        return reading + inset + NotchTimerSupport.stripCameraGap
+        return max(reading + inset, companionMarkWidth(companion, in: provisional))
+            + NotchTimerSupport.stripCameraGap
     }
 
-    private func keepAwakeStripWing(in geometry: NotchGeometry) -> CGFloat {
-        NotchKeepAwakeSupport.stripWing(until: KeepAwakeManager.shared.endDate, now: Date(),
-                                        locale: Locale(identifier: L10n.shared.language.rawValue), in: geometry)
+    /// The wider side of a Keep Awake strip: the time left, and beside another
+    /// activity the mark of the one begun before the session.
+    private func keepAwakeStripWing(for companion: NotchCompactActivity?, in geometry: NotchGeometry) -> CGFloat {
+        let alone = NotchKeepAwakeSupport.stripWing(until: KeepAwakeManager.shared.endDate, now: Date(),
+                                                    locale: Locale(identifier: L10n.shared.language.rawValue), in: geometry)
+        guard let companion else { return alone }
+        let provisional = geometry.compactTimerGeometry(showsDownloads: false,
+                                                        wing: NotchTimerSupport.stripWingRange.lowerBound)
+        return max(alone, companionMarkWidth(companion, in: provisional) + NotchTimerSupport.stripCameraGap)
     }
 
     /// The wider of the two sides, measured with the strip's fonts and its
@@ -787,18 +857,34 @@ final class NotchService: ObservableObject {
     }
 
     /// The wider of the two sides of a speed strip: the reading, drawn as the
-    /// strip draws it, with the clearance from the silhouette's curve and air
-    /// beside the camera. The speed is measured by its widest shape, so the
-    /// island keeps its size as the figure gains or loses a digit.
-    private func splashStripWing(in geometry: NotchGeometry) -> CGFloat {
+    /// strip draws it, or the mark of the activity begun before it, with the
+    /// clearance from the silhouette's curve and air beside the camera. The
+    /// speed is measured by its widest shape, so the island keeps its size as
+    /// the figure gains or loses a digit.
+    private func splashStripWing(for companion: NotchCompactActivity?, in geometry: NotchGeometry) -> CGFloat {
         let provisional = geometry.compactTimerGeometry(showsDownloads: false,
                                                         wing: NotchTimerSupport.stripWingRange.lowerBound)
         let size = NotchTimerSupport.stripTextSize(height: provisional.compactActivityContentHeight)
         let reading = (NotchCapsuleLayout.splashSpeedShape as NSString).size(withAttributes: [
             .font: NSFont.monospacedDigitSystemFont(ofSize: size, weight: .medium)
         ]).width.rounded(.up)
-        return reading + provisional.compactActivityEdgeInset(boxHeight: size * 0.72, radius: 0)
-            + NotchTimerSupport.stripCameraGap
+        let side = max(reading + provisional.compactActivityEdgeInset(boxHeight: size * 0.72, radius: 0),
+                       companionMarkWidth(companion, in: provisional))
+        return side + NotchTimerSupport.stripCameraGap
+    }
+
+    /// The wings of a song sharing the strip with the activity begun before it:
+    /// the equalizer at the trailing end, and the other activity's mark at the
+    /// leading one, measured as the strip draws them.
+    private func musicStripWing(for companion: NotchCompactActivity, in geometry: NotchGeometry) -> CGFloat {
+        let provisional = geometry.compactTimerGeometry(showsDownloads: false,
+                                                        wing: NotchTimerSupport.stripWingRange.lowerBound)
+        let bars = NotchLayout.compactMusicBarsWidth
+            + NotchMusicStripLayout.innerInset(provisional)
+            + max(0, min(provisional.compactMusicBarsInset,
+                         provisional.compactActivityWingWidth - NotchLayout.compactMusicBarsWidth
+                             - NotchMusicStripLayout.innerInset(provisional)))
+        return max(companionMarkWidth(companion, in: provisional), bars) + NotchTimerSupport.stripCameraGap
     }
 
     /// The width of the mark at a strip's left end, the timer's own without a
@@ -1389,9 +1475,14 @@ final class NotchService: ObservableObject {
             let live = NotchMusicService.shared.playback
             let shown = heldMusic ?? (ownDisplay ? musicStripStandIn(for: live) : nil)
             let playback = shown?.playback ?? live
-            return layout.musicSurface(title: named
+            // Beside another activity the song keeps no name in the row: the
+            // activity begun first takes the leading end as its mark, and the
+            // cover and the bars follow, which is the row reading in the order
+            // its activities started and not two names competing for one end.
+            let naming = named && companion == nil
+            return layout.musicSurface(title: naming
                                         ? playback?.track.title ?? FeatureStrings.radialMenu(language).mediaNowPlaying : nil,
-                                       geometry: geometry)
+                                       companion: companion, geometry: geometry, language: language)
         case .timer:
             let timer = NotchTimerService.shared
             return layout.timerSurface(reading: NotchTimerSupport.compactText(for: timer.session, at: timer.now,
@@ -1419,12 +1510,13 @@ final class NotchService: ObservableObject {
                                           geometry: geometry, calendarLeadTime: NotchCalendarService.shared.countdownLeadTime)
         case .watch:
             let watch = NotchWatchService.shared
-            return layout.watchSurface(reading: watch.headline, thumbnail: watch.showsThumbnail, geometry: geometry)
+            return layout.watchSurface(reading: watch.headline, thumbnail: watch.showsThumbnail,
+                                       companion: companion, geometry: geometry)
         case .keepAwake:
             let reading = KeepAwakeManager.shared.endDate.map {
                 NotchKeepAwakeSupport.compactText(until: $0, now: Date(), locale: Locale(identifier: language.rawValue))
             }
-            return layout.keepAwakeSurface(reading: reading, geometry: geometry)
+            return layout.keepAwakeSurface(reading: reading, companion: companion, geometry: geometry, language: language)
         case .splash:
             let reading = NotchSplashSupport.stripSpeedText(NotchSplashService.shared.stripDecodeSpeed,
                                                             language: language)
@@ -3098,8 +3190,11 @@ final class NotchService: ObservableObject {
     func refreshPresentation(animated: Bool = true, transitionContent: NotchContentTransition = .none) {
         // The page's cards keep the order their activities began in, and a
         // refresh is where the island learns that one has begun, ended, or
-        // been running all along under a page that has just opened.
+        // been running all along under a page that has just opened. The closed
+        // strip keeps the same order at its two ends, and records it here for
+        // the same reason.
         syncActivityTimeline()
+        syncStripTimeline()
         // A notice with a new reading, or the music strip naming its song,
         // fits its new width in place.
         let fitsInPlace = noticeFitsInPlace && notice != nil && !noticeExpanded

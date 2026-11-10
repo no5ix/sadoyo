@@ -403,12 +403,28 @@ struct NotchWatchStrip: View {
     private var textInset: CGFloat { geometry.compactActivityEdgeInset(boxHeight: textSize * 0.72, radius: 0) }
 
     var body: some View {
-        Button { service.openActivity(.watch) } label: {
+        // The activity begun before the watch keeps the strip's leading end as
+        // its mark, and the watch's eye follows it, so the strip reads in the
+        // order its activities started.
+        let companion = service.compactCompanion
+        Button {
+            // The mark at the strip's leading end is an activity of its own, and a
+            // click on the strip goes to it, as it does on the timer's strip.
+            if let companion { service.openActivity(companion.module) }
+            else { service.openActivity(.watch) }
+        } label: {
             HStack(spacing: 0) {
-                NotchWatchEye(size: iconSize, hidden: watch.state == .hidden)
-                    .padding(.leading, iconInset)
-                    .frame(width: geometry.compactActivityWingWidth, alignment: .leading)
-                    .opacity(geometry.compactActivityWingWidth >= 28 ? 1 : 0)
+                Group {
+                    if let companion {
+                        NotchCompanionMark(companion: companion, geometry: geometry)
+                            .padding(.leading, NotchCompanionMark.inset(companion, geometry: geometry))
+                    } else {
+                        NotchWatchEye(size: iconSize, hidden: watch.state == .hidden)
+                            .padding(.leading, iconInset)
+                    }
+                }
+                .frame(width: geometry.compactActivityWingWidth, alignment: .leading)
+                .opacity(geometry.compactActivityWingWidth >= 28 ? 1 : 0)
                 Color.clear.frame(width: geometry.compactActivityCameraGap)
                 reading
                     .padding(.trailing, textInset)

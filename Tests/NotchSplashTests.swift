@@ -244,154 +244,92 @@ enum NotchSplashTests {
 
     // MARK: - Words
 
-    // MARK: - What the app measures
+    // MARK: - What the engine measures
 
-    /// The current throughputs, the first token's percentiles of a window, and
-    /// the lines the three measuring cards draw.
+    /// The figures the dashboard draws are the engine's own: the batch it has in
+    /// hand, the rate of its whole running, and the first token's two percentiles.
+    /// The app measures no throughput of its own, so what is tested is that every
+    /// figure is read at the engine's name, that a batch the engine marks invalid
+    /// is no figure, and that a figure the engine does not carry is missing - not
+    /// zero, not the last reading's number, not the lifetime average borrowed into
+    /// the line for the present.
     static func liveMetricChecks(_ suite: TestSuite) {
-        let start = Date(timeIntervalSince1970: 1_900_000_000)
-        func at(_ seconds: TimeInterval) -> Date { start.addingTimeInterval(seconds) }
-        func counters(at date: Date, instance: String = "a", decode: Int64?, decodeWall: Double?,
-                      prefill: Int64?, prefillWall: Double?) -> NotchSplashRateTracker.Reading {
-            NotchSplashRateTracker.Reading(at: date, instanceKey: instance,
-                                           decodeTokens: decode, decodeWallMilliseconds: decodeWall,
-                                           prefillTokens: prefill, prefillWallMilliseconds: prefillWall)
+        // The engine's own figures, read at the engine's names.
+        let running = status("""
+        {"instance": {"id": "a"},
+         "metrics": {"current_decode_batch": {"valid": true, "tokens_per_second": 85.32},
+                     "current_prefill_batch": {"valid": true, "tokens_per_second": 600.5},
+                     "decode_tokens_per_second": 50.97, "prefill_tokens_per_second": 480,
+                     "ttft_ms": {"p50": 700, "p95": 1900}}}
+        """)
+        suite.expectClose(running.metrics.currentDecodeBatchTokensPerSecond ?? 0, 85.32,
+                          "the decode speed of the batch in hand is the engine's figure", tol: 0.0001)
+        suite.expectClose(running.metrics.currentPrefillBatchTokensPerSecond ?? 0, 600.5,
+                          "the prefill speed of the batch in hand is the engine's figure", tol: 0.0001)
+        suite.expectClose(running.metrics.decodeTokensPerSecond ?? 0, 50.97,
+                          "the decode speed over the engine's whole running is the engine's figure", tol: 0.0001)
+        suite.expectClose(running.metrics.prefillTokensPerSecond ?? 0, 480,
+                          "the prefill speed over the engine's whole running is the engine's figure", tol: 0.0001)
+        suite.expect(running.metrics.ttftMilliseconds == 700 && running.metrics.ttftP95Milliseconds == 1_900,
+                     "a p50 and a p95 in one group are read as the two they are")
+
+        // The current line is the batch in hand and nothing else. A batch the
+        // engine marks not valid is no measurement of the present, and the
+        // average over the running is not borrowed to fill the line in.
+        let invalid = status("""
+        {"instance": {"id": "a"},
+         "metrics": {"current_decode_batch": {"valid": false, "tokens_per_second": 85.32},
+                     "decode_tokens_per_second": 50.97}}
+        """)
+        suite.expect(invalid.metrics.currentDecodeBatchTokensPerSecond == nil
+                         && invalid.metrics.decodeTokensPerSecond == 50.97,
+                     "a batch the engine marks invalid is no current figure, and the average keeps its own line")
+        let batchless = status("""
+        {"instance": {"id": "a"}, "metrics": {"decode_tokens_per_second": 50.97}}
+        """)
+        suite.expect(batchless.metrics.currentDecodeBatchTokensPerSecond == nil
+                         && batchless.metrics.currentPrefillBatchTokensPerSecond == nil,
+                     "a server that carries no batch block has no current figure, and the card leaves the line empty")
+        for json in ["{\"metrics\":{\"current_decode_batch\":{\"valid\":true,\"tokens_per_second\":0}}}",
+                     "{\"metrics\":{\"current_decode_batch\":{\"valid\":true,\"tokens_per_second\":-2}}}",
+                     "{\"metrics\":{\"current_decode_batch\":{\"valid\":true}}}",
+                     "{\"metrics\":{\"current_decode_batch\":null}}",
+                     "{\"metrics\":{\"current_decode_batch\":{\"valid\":true,\"tokens_per_second\":null}}}",
+                     "{\"metrics\":{\"current_decode_batch\":{\"valid\":true,\"tokens_per_second\":\"not a number\"}}}",
+                     "{\"metrics\":{\"current_decode_batch\":{\"valid\":true,\"tokens_per_second\":\"nan\"}}}"] {
+            suite.expect(status(json).metrics.currentDecodeBatchTokensPerSecond == nil,
+                         "a batch rate that is absent, not a number, or not a positive one is no figure")
         }
+        // A rate written as a number in a string is the number the engine wrote,
+        // and the JSON node reads it as one; a rate written as a word is not.
+        suite.expect(status("{\"metrics\":{\"current_decode_batch\":{\"valid\":true,\"tokens_per_second\":\"85\"}}}")
+                         .metrics.currentDecodeBatchTokensPerSecond == 85,
+                     "a server that writes its rate quoted is read as the number it says")
+        // A server that carries none of these figures answers with nothing.
+        let bare = status("{\"instance\": {\"id\": \"a\"}, \"metrics\": {}}")
+        suite.expect(bare.metrics.currentDecodeBatchTokensPerSecond == nil
+                         && bare.metrics.currentPrefillBatchTokensPerSecond == nil
+                         && bare.metrics.decodeTokensPerSecond == nil
+                         && bare.metrics.prefillTokensPerSecond == nil
+                         && bare.metrics.ttftMilliseconds == nil
+                         && bare.metrics.ttftP95Milliseconds == nil,
+                     "figures the server does not carry are missing, and not zero")
+        suite.expect(NotchSplashLiveMetrics.current(bare.metrics) == NotchSplashLiveMetrics.empty,
+                     "a reading with no figures leaves the card's current figures empty, and keeps nothing of the last")
 
-        // A rate is the tokens moved across the window over the wall time the
-        // engine says it spent moving them.
-        var rates = NotchSplashRateTracker()
-        rates.observe(counters(at: at(0), decode: 0, decodeWall: 0, prefill: 0, prefillWall: 0))
-        suite.expect(rates.decode == nil && rates.prefill == nil,
-                     "one reading measures no rate: there is nothing to take a difference of")
-        rates.observe(counters(at: at(30), decode: 1_500, decodeWall: 15_000,
-                               prefill: 18_000, prefillWall: 30_000))
-        suite.expectClose(rates.decode ?? 0, 100, "the decode rate of the window", tol: 0.0001)
-        suite.expectClose(rates.prefill ?? 0, 600, "the prefill rate of the window", tol: 0.0001)
-        suite.expect(rates.decodeSeries.values.count == 1 && rates.prefillSeries.values.count == 1,
-                     "a rate measured is one point of its line, and no more")
-
-        // The same reading again measures nothing new, and keeps one point.
-        rates.observe(counters(at: at(31), decode: 1_500, decodeWall: 15_000,
-                               prefill: 18_000, prefillWall: 30_000))
-        suite.expect(rates.decodeSeries.values.count == 1,
-                     "the same counters twice are one measurement, not two: the line is not thickened by a poll")
-
-        // A window whose engine's clock did not move is a window of no work.
-        var idle = NotchSplashRateTracker()
-        idle.observe(counters(at: at(0), decode: 100, decodeWall: 1_000, prefill: 100, prefillWall: 1_000))
-        idle.observe(counters(at: at(30), decode: 100, decodeWall: 1_000, prefill: 100, prefillWall: 1_000))
-        suite.expect(idle.decode == nil && idle.prefill == nil,
-                     "an engine that spent no wall time decoded nothing: the figure is missing, and not zero")
-        suite.expect(idle.decodeSeries.isEmpty, "a window with no work in it draws no line")
-
-        // A rate that has aged out of the window with the work that made it.
-        var aged = NotchSplashRateTracker()
-        aged.observe(counters(at: at(0), decode: 0, decodeWall: 0, prefill: 0, prefillWall: 0))
-        aged.observe(counters(at: at(30), decode: 3_000, decodeWall: 30_000, prefill: 0, prefillWall: 0))
-        suite.expectClose(aged.decode ?? 0, 100, "the rate of the work in the window", tol: 0.0001)
-        aged.observe(counters(at: at(31), decode: 3_000, decodeWall: 30_000, prefill: 0, prefillWall: 0))
-        aged.observe(counters(at: at(120), decode: 3_000, decodeWall: 30_000, prefill: 0, prefillWall: 0))
-        suite.expect(aged.decode == nil,
-                     "a long idle leaves no current rate standing: the window has outlasted the work in it")
-
-        // A span too short to carry a rate is a spike and not a throughput.
-        var spike = NotchSplashRateTracker()
-        spike.observe(counters(at: at(0), decode: 0, decodeWall: 0, prefill: 0, prefillWall: 0))
-        spike.observe(counters(at: at(1), decode: 2, decodeWall: 20, prefill: 0, prefillWall: 0))
-        suite.expect(spike.decode == nil,
-                     "a reading a second apart, measuring twenty milliseconds, is no sustained throughput")
-        spike.observe(counters(at: at(20), decode: 600, decodeWall: 6_000, prefill: 0, prefillWall: 0))
-        suite.expectClose(spike.decode ?? 0, 100, "the same engine over a span that can carry a rate", tol: 0.0001)
-
-        // A counter begun again is not a subtraction, and a window measured
-        // across two engines is no measurement of either.
-        var reset = NotchSplashRateTracker()
-        reset.observe(counters(at: at(0), decode: 10_000, decodeWall: 100_000, prefill: 0, prefillWall: 0))
-        reset.observe(counters(at: at(30), decode: 13_000, decodeWall: 130_000, prefill: 0, prefillWall: 0))
-        suite.expectClose(reset.decode ?? 0, 100, "the rate before the counters were begun again", tol: 0.0001)
-        reset.observe(counters(at: at(31), decode: 5, decodeWall: 50, prefill: 0, prefillWall: 0))
-        suite.expect(reset.decode == nil, "a counter below its mark empties the window and answers nothing: it is never subtracted")
-        reset.observe(counters(at: at(61), decode: 3_005, decodeWall: 30_050, prefill: 0, prefillWall: 0))
-        suite.expectClose(reset.decode ?? 0, 100, "the window begins again where the counters did", tol: 0.0001)
-        reset.observe(counters(at: at(62), instance: "b", decode: 10, decodeWall: 100, prefill: 0, prefillWall: 0))
-        suite.expect(reset.decode == nil, "an engine that is not the one the window began in measures nothing")
-
-        // The windows stay bounded, however long a session runs.
-        var long = NotchSplashRateTracker()
-        for index in 0...1_000 {
-            long.observe(counters(at: at(TimeInterval(index)), decode: Int64(index * 100),
-                                  decodeWall: Double(index * 1_000), prefill: Int64(index * 600),
-                                  prefillWall: Double(index * 1_000)))
-        }
-        suite.expect(long.decodeSeries.values.count <= NotchSplashRateTracker.maximumPoints,
-                     "a line is bounded: \(long.decodeSeries.values.count) points after a thousand readings")
-        suite.expect(long.markCount <= NotchSplashRateTracker.maximumMarks,
-                     "the window of counters is bounded: \(long.markCount) marks after a thousand readings")
-        suite.expect(long.decode != nil, "a server read for a thousand seconds is still a measured rate")
-
-        // A field the server does not report is no rate, and no zero.
-        var missing = NotchSplashRateTracker()
-        missing.observe(counters(at: at(0), decode: nil, decodeWall: nil, prefill: 0, prefillWall: 0))
-        missing.observe(counters(at: at(30), decode: 1_000, decodeWall: nil, prefill: 0, prefillWall: 0))
-        suite.expect(missing.decode == nil && missing.prefill == nil,
-                     "a counter the server does not report measures nothing, and the other is no zero of its own")
-
-        // The first token's percentiles, over the requests that recently finished.
-        func latency(at date: Date, instance: String = "a", completed: Int?, p50: Double?,
-                     p95: Double?) -> NotchSplashLatencyTracker.Reading {
-            NotchSplashLatencyTracker.Reading(at: date, instanceKey: instance, completed: completed,
-                                              p50Milliseconds: p50, p95Milliseconds: p95)
-        }
-        let quiet = NotchSplashLatencyTracker()
-        suite.expect(quiet.p50Seconds == nil && quiet.p95Seconds == nil,
-                     "before a request has finished, the first token's time is a pair of empty places")
-        var times = NotchSplashLatencyTracker()
-        times.observe(latency(at: at(0), completed: 1, p50: 500, p95: 1_400))
-        suite.expectClose(times.p50Seconds ?? 0, 0.5, "one request's p50, in seconds", tol: 0.0001)
-        suite.expectClose(times.p95Seconds ?? 0, 1.4, "one request's p95, in seconds", tol: 0.0001)
-        for (index, p50, p95) in [(2, 900.0, 2_100.0), (3, 700.0, 1_900.0), (4, 1_300.0, 3_000.0)] {
-            times.observe(latency(at: at(TimeInterval(index * 10)), completed: index, p50: p50, p95: p95))
-        }
-        // The window is 0.5, 0.9, 0.7, 1.3 seconds: the p50 is the second of
-        // the four sorted, and the p95 asks for more than the window holds and
-        // answers its highest.
-        suite.expectClose(times.p50Seconds ?? 0, 0.7, "the p50 of the window", tol: 0.0001)
-        suite.expectClose(times.p95Seconds ?? 0, 3.0, "the p95 of the window", tol: 0.0001)
-        suite.expect(times.p50Series.values.count == 4 && times.p95Series.values.count == 4,
-                     "each request that finished is one measurement of each line")
-
-        // A count of finished requests that went down is an engine begun again.
-        times.observe(latency(at: at(60), completed: 1, p50: 400, p95: 600))
-        suite.expectClose(times.p50Seconds ?? 0, 0.4, "a counter begun again empties the window", tol: 0.0001)
-        suite.expect(times.p95Seconds == 0.6 && times.p50Series.values.count == 1,
-                     "the new engine's window begins with its own first reading")
-
-        // A server that reports a p50 and no p95 leaves the p95 empty, and a
-        // server that reports no finished-request count records a request when
-        // its statistics move, and not the same numbers twice.
-        var half = NotchSplashLatencyTracker()
-        half.observe(latency(at: at(0), completed: nil, p50: 800, p95: nil))
-        suite.expect(half.p50Seconds == 0.8 && half.p95Seconds == nil,
-                     "a percentile the server does not report is an empty place, not a copy of the other")
-        half.observe(latency(at: at(1), completed: nil, p50: 800, p95: nil))
-        half.observe(latency(at: at(2), completed: nil, p50: 800, p95: nil))
-        suite.expect(half.sampleCount == 1,
-                     "statistics that have not moved are not three requests: \(half.sampleCount)")
-        half.observe(latency(at: at(3), completed: nil, p50: 900, p95: nil))
-        suite.expect(half.sampleCount == 2, "statistics that moved are a request that finished")
-
-        // The island's strip: what is being decoded now, and the engine's own
-        // average while the window measures nothing.
+        // The strip's number is the batch in hand, and the engine's average while
+        // no batch is in hand; an engine that has moved no tokens shows nothing.
         suite.expect(NotchSplashLiveMetrics.stripDecodeSpeed(current: 53.9, overall: 88) == 53.9,
-                     "the strip leads with the current rate")
+                     "the strip writes the batch in hand while the engine has one")
         suite.expect(NotchSplashLiveMetrics.stripDecodeSpeed(current: nil, overall: 88) == 88,
-                     "with nothing in the window, the strip shows the engine's own average")
+                     "with no batch in hand the strip writes the engine's average over its running")
         suite.expect(NotchSplashLiveMetrics.stripDecodeSpeed(current: nil, overall: 0) == nil
                          && NotchSplashLiveMetrics.stripDecodeSpeed(current: nil, overall: nil) == nil,
-                     "an engine that has decoded nothing, and a server that answers no throughput, leave the strip empty")
+                     "an engine that has decoded nothing, and a server that answers no rate, leave the strip empty")
 
-        // The pair of a card, in the order the card writes it.
+        // The pair of a card, in the order the card writes it: the batch in hand
+        // first and the average second for the two throughputs, the p50 first and
+        // the p95 second for the first token's time.
         let us = Locale(identifier: "en_US")
         suite.expect(NotchSplashSupport.speedPairText(85.32, 50.97, locale: us) == "85.32 / 50.97",
                      "two throughputs are one pair, to two decimals under a hundred")
@@ -399,7 +337,7 @@ enum NotchSplashTests {
                      "a pair keeps each figure's own writing: a hundred and above takes one decimal, a thousand none")
         suite.expect(NotchSplashSupport.speedPairText(nil, 50.97, locale: us)
                          == "\(NotchSplashSupport.placeholder) / 50.97",
-                     "a figure the app has not measured keeps its place empty, and the pair is not shown as one number")
+                     "a figure the engine has not given keeps its place empty, and the pair is not shown as one number")
         suite.expect(NotchSplashSupport.speedPairText(nil, nil, locale: us) == nil,
                      "a pair of nothing is no text at all")
         suite.expect(NotchSplashSupport.ttftPairText(1.3, 2.1, locale: us) == "1.3 / 2.1",
@@ -407,42 +345,17 @@ enum NotchSplashTests {
         suite.expect(NotchSplashSupport.ttftPairText(nil, 2.1, locale: us)
                          == "\(NotchSplashSupport.placeholder) / 2.1",
                      "the pair keeps the order of the percentiles when one of them is missing")
-        suite.expect(NotchSplashSupport.stripSpeedText(53.9, language: .enUS) == "53 tok/s"
-                         && NotchSplashSupport.stripSpeedText(53.9, language: .ru) == "53 ток/с"
-                         && NotchSplashSupport.stripSpeedText(0, language: .enUS) == "0 tok/s"
+        // The strip is a glance: the whole number stands against the unit with no
+        // space between them, and the unit is the page's own, in the reader's
+        // language. Nowhere on the island is the older, longer unit written.
+        suite.expect(NotchSplashSupport.stripSpeedText(53.9, language: .enUS) == "53t/s"
+                         && NotchSplashSupport.stripSpeedText(53.4, language: .ru) == "53т/с"
+                         && NotchSplashSupport.stripSpeedText(0, language: .enUS) == "0t/s"
                          && NotchSplashSupport.stripSpeedText(nil) == nil
                          && NotchSplashSupport.stripSpeedText(-1) == nil
                          && NotchSplashSupport.stripSpeedText(.nan) == nil,
-                     "the strip writes a whole number with the page's own unit, in the reader's language, "
-                     + "and nothing for what is not a rate")
-
-        // The percentile of a window, by nearest rank.
-        suite.expect(notchSplashPercentile([5, 1, 3, 2, 4], 0.5) == 3
-                         && notchSplashPercentile([5, 1, 3, 2, 4], 0.95) == 5
-                         && notchSplashPercentile([5, 1, 3, 2, 4], 0.05) == 1,
-                     "a percentile is taken from sorted measurements")
-        suite.expect(notchSplashPercentile([7], 0.95) == 7 && notchSplashPercentile([7], 0.5) == 7,
-                     "a window of one answers itself, which is the most it can say")
-        suite.expect(notchSplashPercentile([], 0.5) == nil
-                         && notchSplashPercentile([.nan, .infinity], 0.5) == nil,
-                     "a window of nothing, and a window of numbers that are not numbers, answer nothing")
-
-        // The names of the fields a current rate is measured from.
-        let walls = status("""
-        {"instance": {"id": "w"},
-         "metrics": {"decode_wall_ms": 12000, "prefill_wall_ms": 3400,
-                     "ttft_ms": {"p50": 700, "p95": 1900}}}
-        """)
-        suite.expect(walls.metrics.decodeWallMilliseconds == 12_000
-                         && walls.metrics.prefillWallMilliseconds == 3_400,
-                     "the wall times the current rates are measured from are read at the server's names")
-        suite.expect(walls.metrics.ttftP95Milliseconds == 1_900 && walls.metrics.ttftMilliseconds == 700,
-                     "a p50 and a p95 in one group are read as the two they are")
-        let noWalls = status("{\"instance\": {\"id\": \"w\"}, \"metrics\": {\"ttft_ms\": 500}}")
-        suite.expect(noWalls.metrics.decodeWallMilliseconds == nil
-                         && noWalls.metrics.prefillWallMilliseconds == nil
-                         && noWalls.metrics.ttftP95Milliseconds == nil,
-                     "a wall time, and a p95, the server does not carry are no reading, and not a zero")
+                     "the strip writes a whole number against the page's unit with no space, in the reader's "
+                     + "language, and nothing for what is not a rate")
     }
 
     /// The three cards that measure, and the fourth that does not.
@@ -593,6 +506,80 @@ enum NotchSplashTests {
             suite.expect(history.samples.count == 2, "both readings are kept")
         }
 
+        suite.run("splash charts carry the engine's two lines over ten minutes") {
+            // A reading with both of a card's figures: the batch in hand, and the
+            // average over the engine's running, and both of the first token's
+            // percentiles.
+            func dual(current: Double?, average: Double?, currentPrefill: Double?, averagePrefill: Double?,
+                      p50: Double?, p95: Double?, id: String = "a", valid: Bool = true, cache: Bool = true) -> NotchSplashStatus {
+                func number(_ value: Double?) -> String { value.map { String($0) } ?? "null" }
+                let document = """
+                {"instance": {"id": "\(id)"},
+                 "requests": {"completed": 1, "failed": 0, "cancelled": 0}, "active_requests": [],
+                 "metrics": {
+                   "current_decode_batch": {"valid": \(valid), "tokens_per_second": \(number(current))},
+                   "current_prefill_batch": {"valid": \(valid), "tokens_per_second": \(number(currentPrefill))},
+                   "decode_tokens_per_second": \(number(average)),
+                   "prefill_tokens_per_second": \(number(averagePrefill)),
+                   "ttft_ms": {"p50": \(number(p50)), "p95": \(number(p95))}}\(cache ? ", \"cache\": {\"hits\": 48, \"requests\": 50}" : "")}
+                """
+                return NotchSplashStatus(document: SplashJSON.document(Data(document.utf8))!)
+            }
+            var history = NotchSplashHistory()
+            history.record(status: dual(current: 85.32, average: 50.97, currentPrefill: 600, averagePrefill: 480,
+                                        p50: 700, p95: 1900),
+                           instanceKey: "id:a", at: base, calendar: calendar)
+            let kept = history.samples[0]
+            suite.expect(kept.decodeCurrent == 85.32 && kept.decode == 50.97
+                             && kept.prefillCurrent == 600 && kept.prefill == 480
+                             && kept.ttftSeconds == 0.7 && kept.ttftP95Seconds == 1.9
+                             && kept.cachePercent == 96,
+                         "one reading carries both of each card's lines, at the size a chart can show")
+            // Ten minutes of history, and no further: the chart's window is the
+            // ten minutes the cards show, and a reading older than it is not drawn.
+            suite.expect(NotchSplashSupport.chartWindowSeconds == 600,
+                         "the window the cards ask for is ten minutes")
+            suite.expect(history.series(endingAt: base.addingTimeInterval(599)).count == 1,
+                         "a reading nine minutes and fifty-nine seconds old is still drawn")
+            suite.expect(history.series(endingAt: base.addingTimeInterval(601)).isEmpty,
+                         "a reading ten minutes and one second old has left the cards' window")
+            suite.expect(history.series(endingAt: base.addingTimeInterval(300)).count
+                             == history.series(window: 600, endingAt: base.addingTimeInterval(300)).count,
+                         "the cards ask for the window by default, and the default is the ten minutes")
+            // Each line is read from its own field: the current line from the
+            // batch, the average line from the engine's running, and neither line
+            // borrows from the other.
+            suite.expect(history.values({ $0.decodeCurrent }, endingAt: base) == [85.32]
+                             && history.values({ $0.decode }, endingAt: base) == [50.97],
+                         "the decode card's two lines read the two figures the engine gave")
+            suite.expect(history.values({ $0.ttftP95Seconds }, endingAt: base) == [1.9]
+                             && history.values({ $0.ttftSeconds }, endingAt: base) == [0.7],
+                         "the first token's card draws the p95 as the upper line and the p50 as the lower")
+            // A reading whose batch the engine invalidates keeps the average's
+            // point and draws no current point: the line stops, and does not
+            // continue on the strength of the figure it last had.
+            var stopped = NotchSplashHistory()
+            stopped.record(status: dual(current: 85.32, average: 50.97, currentPrefill: 600, averagePrefill: 480,
+                                        p50: 700, p95: 1900),
+                           instanceKey: "id:a", at: base, calendar: calendar)
+            stopped.record(status: dual(current: nil, average: 50.97, currentPrefill: nil, averagePrefill: 480,
+                                        p50: 700, p95: 1900, valid: false),
+                           instanceKey: "id:a", at: base.addingTimeInterval(2), calendar: calendar)
+            suite.expect(stopped.values({ $0.decodeCurrent }, endingAt: base.addingTimeInterval(2)) == [85.32]
+                             && stopped.values({ $0.decode }, endingAt: base.addingTimeInterval(2)).count == 2,
+                         "an invalidated batch draws no current point, and the average's line goes on")
+            // A reading with no figures at all - no batch, no average, no
+            // percentile, no counter - is no point on any line.
+            var silent = NotchSplashHistory()
+            silent.record(status: dual(current: nil, average: nil, currentPrefill: nil, averagePrefill: nil,
+                                       p50: nil, p95: nil, cache: false),
+                          instanceKey: "id:a", at: base, calendar: calendar)
+            suite.expect(silent.samples.isEmpty
+                             && silent.values({ $0.decode }, endingAt: base).isEmpty
+                             && silent.values({ $0.cachePercent }, endingAt: base).isEmpty,
+                         "a reading that measured nothing adds no point to any line, and invents none")
+        }
+
         suite.run("splash history is not fooled by a reset, a restart, or a counter that went down") {
             var history = NotchSplashHistory()
             history.record(status: reading(decode: 70, prefill: 601, ttftMs: 900, hits: 1, requests: 2,
@@ -718,8 +705,8 @@ enum NotchSplashTests {
         suite.expect(NotchSplashSupport.taskIdleSeconds == 10 * 60 && NotchSplashSupport.taskIdleReadings == 1,
                      "the app's window is one unbroken ten-minute quiet, the engine's own span from work to sleep, "
                      + "so no pause between turns and no tool call inside a run ends it")
-        suite.expect(NotchSplashSupport.chartWindowMinutes == 30,
-                     "the four charts look back over half an hour")
+        suite.expect(NotchSplashSupport.chartWindowSeconds == 10 * 60,
+                     "the three measuring charts look back over ten minutes, and no further")
 
         let busy = #"{"instance": {"id": "a"}, "requests": {"completed": 3}, "active_requests": [{"id": "r1"}]}"#
         let turn = #"{"instance": {"id": "a"}, "requests": {"completed": 4}, "active_requests": []}"#
@@ -1482,7 +1469,8 @@ enum NotchSplashTests {
         suite.expect(english.decode == "Decode Speed" && english.prefill == "Prefill Speed"
                          && english.ttft == "TTFT" && english.cacheHitRate == "Cache Hit Rate",
                      "the four readings are named as the reference names them")
-        suite.expect(english.tokensPerSecond == "tok/s", "the throughput's unit is the reference's")
+        suite.expect(english.tokensPerSecond == "t/s",
+                     "the throughput's unit is the short form, written against the number and nowhere longer")
         suite.expect(english.hitsAndRequests(55, 57) == "55 hits / 57 requests",
                      "the counters are read out with both counts named")
         suite.expect(english.intervalLabel(2) == "Every 2 seconds", "the interval is spoken in seconds")
@@ -1506,6 +1494,25 @@ enum NotchSplashTests {
         suite.expect(NotchSplashPalette.tone(.neutral) != NotchSplashPalette.green
                          && NotchSplashPalette.red != NotchSplashPalette.green,
                      "a missing reading is not shown as a good one")
+        // The figures of a measuring card are drawn in the colours of the lines
+        // they come from, and the first token's card is the one written the other
+        // way round: its lower percentile is the average's line.
+        suite.expect(NotchSplashPalette.figureTints(.decode) == (NotchSplashPalette.purple, NotchSplashPalette.blue)
+                         && NotchSplashPalette.figureTints(.prefill) == (NotchSplashPalette.purple, NotchSplashPalette.blue),
+                     "a throughput's batch in hand is purple, the average over the running blue")
+        suite.expect(NotchSplashPalette.figureTints(.ttft) == (NotchSplashPalette.blue, NotchSplashPalette.purple),
+                     "the first token's p50 is written first, in the average's blue, and its p95 second, in purple")
+        suite.expect(NotchSplashPalette.lineTints(.decode) == (NotchSplashPalette.purple, NotchSplashPalette.blue)
+                         && NotchSplashPalette.lineTints(.prefill) == (NotchSplashPalette.purple, NotchSplashPalette.blue)
+                         && NotchSplashPalette.lineTints(.ttft) == (NotchSplashPalette.purple, NotchSplashPalette.blue),
+                     "every measuring card draws its leading line purple and the average's line blue")
+        // The cache's hit rate keeps the colour of its own threshold, and is not
+        // one of the paired cards.
+        suite.expect(NotchSplashSupport.cacheTone(NotchSplashSupport.cacheGreenThreshold + 1) == .green
+                         && NotchSplashSupport.cacheTone(NotchSplashSupport.cacheAmberThreshold) == .amber
+                         && NotchSplashSupport.cacheTone(NotchSplashSupport.cacheAmberThreshold - 1) == .red
+                         && NotchSplashSupport.cacheTone(nil) == .neutral,
+                     "the hit rate is coloured by its own thresholds, as it has always been")
     }
 
     // MARK: - A whole session, read

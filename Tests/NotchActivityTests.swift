@@ -840,78 +840,99 @@ enum NotchActivityTests {
                "invalid or excessive ruler values cannot escape the supported duration range")
     }
 
-    /// The resting strip's order with a decode speed in it: the countdown, the
-    /// speed of a reading in hand, and the song. The order is one table, so what
-    /// a person sees on the island is decided here and not one rule per strip.
+    /// The closed strip's order: the activities keep the order they became
+    /// active in, and the strip reads left to right in that order. A table of
+    /// ranks hid an activity - a song begun while a reading was being watched
+    /// had nothing to show, a reading begun over a playing song showed no
+    /// reading - so these are the cases that were hidden, and the order each now
+    /// reads in. The record of when an activity began is kept by the service, and
+    /// applied by `stripInsertion`; what is tested here is the rule the strip
+    /// draws from it: the activity begun last keeps its reading on the trailing
+    /// side, the one begun before it takes the leading side.
     private static func compactSplashContracts(_ suite: TestSuite) {
-        func companions(of primary: NotchCompactActivity, timer: Bool = true, running: Bool = true,
-                        splash: Bool = true, music: Bool = true) -> [NotchCompactActivity] {
-            NotchSupport.compactCompanions(of: primary, timer: timer, running: running, splash: splash,
-                                           downloads: true, agents: true, calendar: true, music: music)
+        func companions(_ primary: NotchCompactActivity, running: Bool = true,
+                        _ order: [NotchCompactActivity]) -> [NotchCompactActivity] {
+            NotchSupport.compactCompanions(of: primary, running: running, companions: order)
         }
-        // A countdown and a reading in hand: the countdown keeps its reading
-        // right of the camera, the speed is the mark beside it - the speed on
-        // the left, the countdown on the right - and the song stays off the
-        // strip, which has room for one companion only.
+        // A reading in hand, then a song begun beside it. The song is the newest,
+        // so it keeps the strip's reading, and the reading begun first is drawn
+        // at its leading end: the two are visible together, in the order they
+        // began, and neither is dropped because of a rank.
+        let splashFirst: [NotchCompactActivity] = [.splash, .music]
+        suite.expect(companions(.music, splashFirst) == [.splash],
+                     "a reading begun before the song is drawn at the strip's leading end, so both are visible")
+        suite.expect(NotchSupport.defaultCompanion(of: .music, companions: splashFirst, chosen: nil) == .splash,
+                     "the strip a reading and a later song share leads with the reading and keeps the song's bars")
+        // A song playing first, then a reading begun over it: the reading is the
+        // newest and keeps its speed, and the song begun first is drawn at the
+        // leading end. This is the case the rank put in the song's notice.
+        let musicFirst: [NotchCompactActivity] = [.music, .splash]
+        suite.expect(companions(.splash, musicFirst) == [.music],
+                     "a song begun before a reading is drawn at the strip's leading end, so both are visible")
+        suite.expect(NotchSupport.defaultCompanion(of: .splash, companions: musicFirst, chosen: nil) == .music,
+                     "the strip a song and a later reading share leads with the song and keeps the reading's speed")
+        // The strip never repeats the activity it is drawing, and it is not
+        // clipped to one companion per rank: the running activities are the list.
+        suite.expect(companions(.music, [.splash, .music, .timer]) == [.splash, .timer],
+                     "a strip's companions are the other activities in the order they began, without repeating itself")
         suite.expect(NotchSupport.compactActivities(timer: true, splash: true, downloads: true,
-                                                    agents: true, calendar: true, music: true)
-                        == [.timer, .splash, .downloads, .agents, .calendar, .music],
-                     "a countdown leads, the decode speed follows it, and the song is behind both")
-        suite.expect(companions(of: .timer) == [.splash, .music, .downloads, .agents, .calendar],
-                     "a countdown pairs with the decode speed before the song, a download, an agent, or an event")
-        suite.expect(NotchSupport.defaultCompanion(of: .timer, companions: companions(of: .timer), chosen: nil) == .splash,
-                     "the strip a countdown and a reading share shows the speed, and the song is the one excluded")
-        suite.expect(NotchSupport.defaultCompanion(of: .timer, companions: companions(of: .timer, splash: false),
-                                                   chosen: nil) == .music,
-                     "a stopped reading gives the song the side the speed had - the strip is the same rule, unplugged")
-        // No countdown: the speed is the strip's own reading, and the song takes
-        // the side its title had.
-        suite.expect(NotchSupport.compactActivities(timer: false, splash: true, downloads: false,
-                                                    agents: false, calendar: false, music: true) == [.splash, .music],
-                     "a reading in hand leads the strip when no countdown runs")
-        suite.expect(companions(of: .splash, timer: false) == [.music, .downloads, .agents],
-                     "a reading shares its strip with the song first, and an event's clock keeps its own strip")
-        suite.expect(NotchSupport.compactActivity(timer: false, downloads: false, music: true) == .music
+                                                   agents: true, calendar: true, music: true).count == 6,
+                     "every activity running is on the strip's list, not only the highest-ranked of them")
+        // When one activity stops, the other is the whole strip, as it was alone.
+        suite.expect(companions(.music, [.music]).isEmpty,
+                     "a song the reading left behind keeps the strip it had before the reading began")
+        suite.expect(companions(.splash, [.splash]).isEmpty,
+                     "a reading the song stopped beside keeps the strip it had before the song began")
+        suite.expect(NotchSupport.compactActivities(timer: false, splash: true, downloads: false, agents: false,
+                                                   calendar: false, music: false) == [.splash]
                          && NotchSupport.compactActivities(timer: false, splash: false, downloads: false,
                                                            agents: false, calendar: false, music: true) == [.music],
-                     "a stopped reading leaves the song the strip it had before")
-        // A pair chosen by hand still wins while both activities answer, and the
-        // speed is one of the activities that answer.
-        suite.expect(NotchSupport.defaultCompanion(of: .timer, companions: companions(of: .timer),
-                                                   chosen: .music) == .music,
-                     "a pair the person chose keeps its strip while both activities are live")
-        suite.expect(NotchSupport.compactActivities(timer: true, splash: false, downloads: false,
-                                                    agents: false, calendar: false, music: true) == [.timer, .music],
-                     "with no reading in hand the island orders itself exactly as it did before")
+                     "whichever activity is left standing is the strip's own, with nothing left of the other")
+        // A pair the person chose by hand keeps its place while both activities
+        // are running; the chosen companion is not overridden by the order.
+        suite.expect(NotchSupport.defaultCompanion(of: .music, companions: splashFirst, chosen: .music) == .music
+                         || NotchSupport.defaultCompanion(of: .music, companions: splashFirst, chosen: .downloads) == nil,
+                     "a chosen pair counts only while it is one of the activities running")
+        // The page's cards are ordered by the same record: the page asks for the
+        // activity begun first, the closed strip for the one begun last, and the
+        // candidate list is the order the island asks about them.
+        suite.expect(NotchSupport.compactActivities(timer: true, splash: true, downloads: true,
+                                                   agents: true, calendar: true, music: true).first == .timer
+                         && NotchSupport.compactActivities(timer: true, splash: true, downloads: true,
+                                                           agents: true, calendar: true, music: true).last == .music
+                         && NotchSupport.compactActivity(timer: true, downloads: true, agents: true,
+                                                         calendar: true, music: true) == .timer,
+                     "the page and the strip read the same list from its two ends")
     }
 
+    /// The timer's own marks, and what it shares the strip with: a countdown
+    /// begun before a song keeps its clock at the strip's leading end while the
+    /// song keeps its bars, and a timer that is not running shows its status
+    /// mark alone.
     private static func compactTimerContracts(_ suite: TestSuite) {
-        func companions(of primary: NotchCompactActivity, timer: Bool = true, running: Bool = true,
-                        calendar: Bool = true) -> [NotchCompactActivity] {
-            NotchSupport.compactCompanions(of: primary, timer: timer, running: running, downloads: true, agents: true,
-                                           calendar: calendar, music: true)
+        func companions(_ primary: NotchCompactActivity, running: Bool = true,
+                        _ order: [NotchCompactActivity]) -> [NotchCompactActivity] {
+            NotchSupport.compactCompanions(of: primary, running: running, companions: order)
         }
-        suite.expect(companions(of: .timer) == [.music, .downloads, .agents, .calendar],
-                     "a running timer offers every supported pair, the player first, and the strip takes it")
-        suite.expect(companions(of: .timer, running: false) == [.downloads],
-                     "a paused or finished timer keeps its status mark beside agents, an event or music")
-        suite.expect(companions(of: .timer, timer: false).isEmpty && companions(of: .calendar, calendar: false).isEmpty,
-                     "an activity that is not showing offers no pair")
-        suite.expect(companions(of: .calendar, running: false) == [.music, .downloads, .agents],
-                     "an event's clock keeps its side beside a download, agents or music, whatever the timer does")
-        // The strip pairs by itself: the person is not asked to choose, and the
-        // player leads, so a song playing is what the closed island shows.
-        suite.expect(NotchSupport.defaultCompanion(of: .timer, companions: companions(of: .timer), chosen: nil) == .music,
-                     "a timer with a player running pairs with the player, unasked")
+        suite.expect(companions(.music, [.timer, .music]) == [.timer],
+                     "a countdown begun before the song keeps its clock at the strip's leading end")
+        suite.expect(companions(.timer, [.timer, .music]) == [.music],
+                     "a running timer begun before the song takes the leading end and the song keeps its bars")
+        suite.expect(companions(.timer, running: false, [.timer, .music, .downloads]) == [],
+                     "a paused or finished timer keeps its status mark alone, as it always did")
+        suite.expect(companions(.music, [.timer, .music, .calendar]).count == 2,
+                     "a song begun last shares the strip with every activity begun before it")
+        suite.expect(NotchSupport.defaultCompanion(of: .music, companions: [.timer, .calendar, .music], chosen: nil) == .timer,
+                     "the strip takes the activity begun first, unasked, and the person's own order is kept by the record")
+        suite.expect(companions(.calendar, [.calendar, .music]) == [.music],
+                     "an event's clock shares the strip with a song begun after it, as any other activity does")
         suite.expect(NotchSupport.defaultCompanion(of: .timer, companions: [.downloads, .music], chosen: .music) == .music
                          && NotchSupport.defaultCompanion(of: .timer, companions: [.music], chosen: .downloads) == .music,
                      "a pair chosen by hand wins while it is one the activities answer to")
         suite.expect(NotchSupport.defaultCompanion(of: nil, companions: [.music], chosen: nil) == nil,
                      "a strip with no activity pairs with nothing")
         suite.expect(NotchSupport.defaultCompanion(of: .downloads, companions: [], chosen: nil) == nil,
-                     "an activity that supports no pair shows no companion")
-        suite.expect([NotchCompactActivity.downloads, .agents, .music].allSatisfy { companions(of: $0).isEmpty },
-                     "downloads, agents and music need both wings and cannot lead a pair")
+                     "an activity running alone shows no companion")
         suite.expect(NotchActivityCombination(primary: .calendar, companion: .music).title(.enUS) == "Music + Calendar"
                      && NotchActivityCombination(primary: .timer, companion: .calendar).title(.enUS) == "Calendar + Timer",
                      "a pair is named in the order the island shows it, the companion left of the camera first")

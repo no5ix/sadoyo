@@ -276,19 +276,25 @@ struct NotchSplashStatus: Equatable {
     }
 
     struct Metrics: Equatable {
+        /// What the engine has moved on average over the whole of its running.
         let decodeTokensPerSecond: Double?
         let prefillTokensPerSecond: Double?
+        /// What the engine says it is moving in the batch it has in hand now.
+        ///
+        /// These are the engine's own measurement of the batch, taken over the
+        /// batch's own wall time, and they are the figure a card's first line
+        /// shows. A batch that reports itself not valid, a server that carries
+        /// no batch block, and a rate that is not a number are all no
+        /// measurement, and the card leaves that line empty rather than
+        /// borrowing the lifetime average for it.
+        let currentDecodeBatchTokensPerSecond: Double?
+        let currentPrefillBatchTokensPerSecond: Double?
         /// Time to first token, in milliseconds, at the p50 the server names.
         let ttftMilliseconds: Double?
         /// The same statistic at the p95, on a build that reports it.
         let ttftP95Milliseconds: Double?
         let prefillInputTokens: Int64?
         let decodeOutputTokens: Int64?
-        /// The wall time the engine has spent decoding and prefilling, over the
-        /// whole of its running. These two, with the token counters beside them,
-        /// are what a current throughput is measured from.
-        let decodeWallMilliseconds: Double?
-        let prefillWallMilliseconds: Double?
     }
 
     struct Cache: Equatable {
@@ -408,6 +414,10 @@ struct NotchSplashStatus: Equatable {
             prefillTokensPerSecond: stats.readDouble(["prefill_tokens_per_second", "prefill_tps",
                                                       "prefill_throughput"])
                 ?? root.readDouble(["prefill_tokens_per_second"]),
+            currentDecodeBatchTokensPerSecond: Self.batchRate(stats.field(["current_decode_batch",
+                                                                           "decode_batch", "live_decode_batch"])),
+            currentPrefillBatchTokensPerSecond: Self.batchRate(stats.field(["current_prefill_batch",
+                                                                            "prefill_batch", "live_prefill_batch"])),
             ttftMilliseconds: ttft.readDouble(["p50", "median", "p50_ms", "value"])
                 ?? stats.readDouble(["ttft_ms", "ttft_ms_p50", "ttft"]),
             ttftP95Milliseconds: ttft.readDouble(["p95", "p95_ms", "percentile_95", "p095"])
@@ -415,11 +425,7 @@ struct NotchSplashStatus: Equatable {
             prefillInputTokens: stats.readBytes(["prefill_input_tokens", "input_tokens", "prompt_tokens"])
                 ?? root.readBytes(["prefill_input_tokens"]),
             decodeOutputTokens: stats.readBytes(["decode_output_tokens", "output_tokens", "completion_tokens"])
-                ?? root.readBytes(["decode_output_tokens"]),
-            decodeWallMilliseconds: stats.readDouble(["decode_wall_ms", "decode_wall_milliseconds", "decode_wall"])
-                ?? root.readDouble(["decode_wall_ms"]),
-            prefillWallMilliseconds: stats.readDouble(["prefill_wall_ms", "prefill_wall_milliseconds", "prefill_wall"])
-                ?? root.readDouble(["prefill_wall_ms"])
+                ?? root.readBytes(["decode_output_tokens"])
         )
 
         let cache = root.field(["cache", "prefix_cache"])
@@ -479,6 +485,21 @@ struct NotchSplashStatus: Equatable {
             ids.append(id ?? "position.\(index)")
         }
         return ids
+    }
+
+    /// The rate of the batch a server names, as the engine measured that batch.
+    ///
+    /// A batch block that says it is not valid carries a rate over work that
+    /// has finished, and a block that answers no rate, a rate that is not a
+    /// number, or a rate of nothing is no measurement of the present. Each of
+    /// them answers nil, which is an empty line on the card, and never the
+    /// lifetime average wearing a current figure's place.
+    static func batchRate(_ batch: SplashJSON?) -> Double? {
+        guard let batch else { return nil }
+        if batch.readBool(["valid"]) == false { return nil }
+        guard let rate = batch.readDouble(["tokens_per_second", "tps", "throughput"]),
+              rate.isFinite, rate > 0 else { return nil }
+        return rate
     }
 
     /// A timestamp as a server writes it: ISO 8601, epoch seconds, or epoch
@@ -609,9 +630,13 @@ enum NotchSplashSupport {
     /// The interval a dashboard with nothing set reads at.
     static let defaultInterval = 1
     static let intervalRange = 1...10
-    /// How far back the four metric charts look: the last half hour of
-    /// readings, whatever the app has kept for longer.
-    static let chartWindowMinutes = 30
+    /// How far back the metric charts look: ten minutes of readings.
+    ///
+    /// This is the charts' span and nothing else. It is not a window a rate is
+    /// measured over - the figures are the engine's own, answered with the
+    /// reading - and the history file keeps far more than the chart shows.
+    /// A reading older than this leaves the line, and nothing older is drawn.
+    static let chartWindowSeconds: TimeInterval = 600
     /// A reading older than this many intervals is stale: the server stopped
     /// answering, and its last words are not evidence about the present.
     static let staleIntervalFactor = 3
@@ -849,12 +874,16 @@ enum NotchSplashSupport {
 
     /// The decode speed the island's strip writes: a whole number, and the
     /// unit the splash page uses for a throughput, so the strip and the card
-    /// name the same thing in the reader's language. The strip's shape is
-    /// measured from "88 tok/s", the widest reading of the widest language.
+    /// name the same thing in the reader's language.
+    ///
+    /// The strip is the menu bar's room, so it writes the figure against the
+    /// unit with no space in it - `53t/s` - where the card, which has room,
+    /// keeps the space between a number and its unit. The strip's shape is
+    /// measured from "888t/s", the widest reading of the widest language.
     static func stripSpeedText(_ tokensPerSecond: Double?,
                                language: AppLanguage = .enUS) -> String? {
         guard let tokensPerSecond, tokensPerSecond.isFinite, tokensPerSecond >= 0 else { return nil }
-        return "\(Int(tokensPerSecond.rounded(.down))) \(FeatureStrings.notchSplash(language).tokensPerSecond)"
+        return "\(Int(tokensPerSecond.rounded(.down)))\(FeatureStrings.notchSplash(language).tokensPerSecond)"
     }
 
     /// Time to first token, in seconds with its unit.
@@ -964,8 +993,38 @@ enum NotchSplashPalette {
     static let red = Color(red: 0.949, green: 0.329, blue: 0.310)
     static let neutral = Color.white.opacity(0.55)
 
-    /// A figure with no tone of its own rests in the reference's beige.
+    /// The colour of a figure with no tone of its own rests in the reference's beige.
     static let resting = beige
+
+    /// Which of a measuring card's two lines a figure belongs to.
+    ///
+    /// The decode and prefill cards write the batch in hand first and the average
+    /// over the engine's running second; the first token's card writes the p50
+    /// first and the p95 second, because the lower percentile is the case a person
+    /// reads as usual and the tail is the one they read after it.
+    enum NotchSplashMeasurement {
+        case decode, prefill, ttft
+    }
+
+    /// The colour of a card's two figures, each the colour of the line it is drawn
+    /// from, so a pair of numbers needs no key: the batch in hand is the purple
+    /// line and the average over the running is the blue, and the first token's
+    /// card is the one whose written order is the other way round - its p50 is the
+    /// average's blue and its p95 the leading purple.
+    static func figureTints(_ measurement: NotchSplashMeasurement) -> (first: Color, second: Color) {
+        switch measurement {
+        case .decode, .prefill: return (purple, blue)
+        case .ttft: return (blue, purple)
+        }
+    }
+
+    /// The colour of a card's two lines: the leading line, which is the batch in
+    /// hand for the two throughputs and the p95 for the first token's time, and
+    /// the average's line beside it.
+    static func lineTints(_ measurement: NotchSplashMeasurement) -> (leading: Color, average: Color) {
+        _ = measurement
+        return (purple, blue)
+    }
 
     /// The colour of a figure. `reference` is the colour the figure has when
     /// it carries no warning — the cache’s purple, the governor’s orange — so
@@ -1448,15 +1507,13 @@ final class NotchSplashService: ObservableObject {
     /// invented for the moment.
     @Published private(set) var history = NotchSplashHistory.empty
 
-    /// The figures the three measuring cards draw: the current throughputs read
-    /// out of the cumulative counters over a window of readings, the first
-    /// token's percentiles over the requests that recently finished, and the
-    /// line of each. They arrive as one value, so a card's figure and its line
-    /// are always the same window of the same readings.
+    /// The engine's own figures for the reading last answered: the batches in
+    /// hand and the first token's percentiles.
     ///
-    /// These are measured by the app, and the engine's own lifetime averages are
-    /// read straight from the reading beside them; nothing here is a figure the
-    /// server was asked for and did not answer.
+    /// Nothing here is measured by the app. Each figure is one the endpoint
+    /// answered, and a session clears them when the reading it came from stops
+    /// being current, so a card never draws a figure from the past as the
+    /// machine's present.
     @Published private(set) var live = NotchSplashLiveMetrics.empty
 
     /// A reading of the server's spilling and reservation pressure, which
@@ -1466,10 +1523,9 @@ final class NotchSplashService: ObservableObject {
 
     private var tracker = NotchSplashTaskTracker()
     private var announcements = NotchSplashAnnouncements()
-    /// The window of counters the current throughputs are measured from, and the
-    /// window of finished requests the first token's percentiles are taken over.
-    private var rates = NotchSplashRateTracker()
-    private var latency = NotchSplashLatencyTracker()
+    /// The engine the figures last shown belong to, so an engine begun again
+    /// starts from no measurements at all.
+    private var liveInstanceKey: String?
     private var loop: Task<Void, Never>?
     private var generation = UUID()
     /// What became of the last task timed, so the polling loop can be asked
@@ -1540,9 +1596,8 @@ final class NotchSplashService: ObservableObject {
     var isTaskRunning: Bool { tracker.isRunning }
     var isTaskFinished: Bool { tracker.isFinished }
     var trackedID: String? { tracker.trackedID }
-    /// The decode speed the island's strip shows: the current rate of the
-    /// window, and the engine's own average while nothing in the window
-    /// measures one.
+    /// The decode speed the island's strip shows: the batch in hand, and the
+    /// engine's own average over its whole running while no batch is in hand.
     var stripDecodeSpeed: Double? {
         NotchSplashLiveMetrics.stripDecodeSpeed(current: live.decode,
                                                 overall: snapshot?.status.metrics.decodeTokensPerSecond)
@@ -1591,11 +1646,11 @@ final class NotchSplashService: ObservableObject {
         generation = UUID()
         tracker.begin()
         tracker.clearFinished()
-        // A session measures from its first reading: a window carried over from
-        // a session taken back would measure the gap between the two as work.
-        rates.reset()
-        latency.reset()
+        // A session begins with no measurements. The figures beside the chart
+        // are the engine's, and the first reading of this session is the first
+        // one this session can show.
         live = .empty
+        liveInstanceKey = nil
         phase = tracker.phase
         taskTokens = tracker.taskTokens
         lastOutcome = nil
@@ -1692,37 +1747,22 @@ final class NotchSplashService: ObservableObject {
         }
     }
 
-    /// Measures one reading: the two current throughputs from how far the
-    /// engine's cumulative counters moved across their window, and the first
-    /// token's percentiles over the requests that have recently finished.
+    /// The engine's figures for one reading.
     ///
-    /// The two windows are the app's own, bounded, and kept on the main thread
-    /// with the reading, which is why a session measures nothing before its
-    /// first reading and a server read every second grows no array without end.
+    /// Nothing is measured here: each figure is one the endpoint answered for
+    /// the batch it has in hand, or the percentile of the requests it has
+    /// finished. A batch the server marks not valid, and a field the server
+    /// does not carry, answer nil, which is an empty line and an empty figure.
+    ///
+    /// An engine that is not the one the figures last shown came from -
+    /// a restart, an address that moved - starts from no measurements, because
+    /// the batches of one engine say nothing about another.
     private func recordLive(snapshot: NotchSplashSnapshot, at date: Date) {
-        let metrics = snapshot.status.metrics
-        rates.observe(NotchSplashRateTracker.Reading(
-            at: date,
-            instanceKey: snapshot.instanceKey,
-            decodeTokens: metrics.decodeOutputTokens,
-            decodeWallMilliseconds: metrics.decodeWallMilliseconds,
-            prefillTokens: metrics.prefillInputTokens,
-            prefillWallMilliseconds: metrics.prefillWallMilliseconds))
-        latency.observe(NotchSplashLatencyTracker.Reading(
-            at: date,
-            instanceKey: snapshot.instanceKey,
-            completed: snapshot.status.requests.completed,
-            p50Milliseconds: metrics.ttftMilliseconds,
-            p95Milliseconds: metrics.ttftP95Milliseconds))
-        live = NotchSplashLiveMetrics(
-            decode: rates.decode,
-            prefill: rates.prefill,
-            ttftP50: latency.p50Seconds,
-            ttftP95: latency.p95Seconds,
-            decodeSeries: rates.decodeSeries.values,
-            prefillSeries: rates.prefillSeries.values,
-            ttftP50Series: latency.p50Series.values,
-            ttftP95Series: latency.p95Series.values)
+        if liveInstanceKey != snapshot.instanceKey {
+            liveInstanceKey = snapshot.instanceKey
+            live = .empty
+        }
+        live = NotchSplashLiveMetrics.current(snapshot.status.metrics)
     }
 
     // MARK: The loop
@@ -1792,8 +1832,14 @@ final class NotchSplashService: ObservableObject {
         // A reading that did not arrive: the last one stays on the card, and
         // once it is older than the polling should have moved, it stops
         // counting as evidence, so a server that comes back late cannot be
-        // read as finishing a request it never saw.
-        if let snapshot, isStale(snapshot) { self.failure = .stale }
+        // read as finishing a request it never saw. Its figures of the batch
+        // in hand go with it: a batch measured a minute ago is not the batch in
+        // hand, and a card that has no current figure leaves that line empty.
+        if let snapshot, isStale(snapshot) {
+            self.failure = .stale
+            live = .empty
+            liveInstanceKey = nil
+        }
     }
 
     private func isStale(_ snapshot: NotchSplashSnapshot) -> Bool {

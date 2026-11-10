@@ -1385,8 +1385,9 @@ def main():
           + "}\n}\n")
     music_visibility = "".join(declaration(notch, prefix).replace("    private ", "    ", 1) for prefix in [
         "    private var hiddenUntilHover:", "    var fullscreenCompact:", "    var idleContent:", "    var hasMusicActivity:",
-        "    private func musicStripHolds(", "    var compactActivity:",
+        "    private func musicStripHolds(", "    var compactActivity:", "    private func carriesCompanion(",
         "    var compactActivityGeometry:", "    private func compactGeometry(", "    var compactActivities:",
+        "    private var compactActivityCandidates:", "    private var stripInsertion",
         "    var compactCompanion:",
         "    var surfaceSize:", "    var surfaceShift:", "    var showsDashboard: Bool {",
         "    func collapse(",
@@ -1402,7 +1403,8 @@ def main():
     music_visibility = music_visibility.replace("splash: hasSplashActivity", "splash: false")
     # The splash strip's wing is measured from the service's speed, which this
     # fixture does not run; the pair's width is the splash suite's to measure.
-    music_visibility = music_visibility.replace("wing: splashStripWing(in: geometry)", "wing: 44")
+    music_visibility = music_visibility.replace("wing: splashStripWing(for: companion, in: geometry)", "wing: 44")
+    music_visibility = music_visibility.replace("wing: musicStripWing(for: companion, in: geometry)", "wing: 44")
     music_visibility = music_visibility.replace("playback?.isPlaying == true)",
                                                 "playback?.isPlaying == true, in: ReviewDefaults.current)")
     music_visibility = music_visibility.replace("captureControls: captureControls != nil)",
