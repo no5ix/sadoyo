@@ -554,13 +554,28 @@ final class NotchService: ObservableObject {
         NotchKeepAwakeSupport.showsActivity() && KeepAwakeManager.shared.isActive
     }
 
+    /// The decode speed of a reading in hand.
+    ///
+    /// The strip stands for the reading and its numbers, by the card's own rule:
+    /// it appears when Start begins the reading and leaves when the way out ends
+    /// it, and while it stands the strip's figure is the speed the dashboard is
+    /// measuring. A reading that has stopped answering, and a server that
+    /// reports no speed at all, leave the strip away: the island shows what is
+    /// measured, and a stale number is not a measurement of the present.
+    var hasSplashActivity: Bool {
+        NotchSplashSupport.showsDashboardCard(sectionVisible: modules.contains(.splash),
+                                              isMonitoring: NotchSplashService.shared.isMonitoring)
+            && NotchSplashService.shared.stripShowsDecodeSpeed
+    }
+
     var compactActivity: NotchCompactActivity? {
         // A new song waiting for its notice is not drawn yet.
         activitySelection.current(available: awaitsTrackNotice ? compactActivities.filter { $0 != .music } : compactActivities)
     }
 
     var compactActivities: [NotchCompactActivity] {
-        NotchSupport.compactActivities(timer: hasTimerActivity, watch: hasWatchActivity, downloads: hasDownloadActivity,
+        NotchSupport.compactActivities(timer: hasTimerActivity, splash: hasSplashActivity,
+                                      watch: hasWatchActivity, downloads: hasDownloadActivity,
                                       agents: hasAgentActivity, calendar: hasCalendarActivity,
                                       music: hasMusicActivity, keepAwake: hasKeepAwakeActivity)
     }
@@ -628,6 +643,7 @@ final class NotchService: ObservableObject {
     func compactCompanions(of primary: NotchCompactActivity) -> [NotchCompactActivity] {
         NotchSupport.compactCompanions(of: primary, timer: hasTimerActivity,
                                        running: NotchTimerService.shared.session.isRunning,
+                                       splash: hasSplashActivity,
                                        downloads: hasDownloadActivity, agents: hasAgentActivity,
                                        calendar: hasCalendarActivity, music: hasMusicActivity)
     }
@@ -683,6 +699,9 @@ final class NotchService: ObservableObject {
         case .timer:
             return geometry.compactTimerGeometry(showsDownloads: companion == .downloads,
                                                  wing: timerStripWing(for: companion, in: geometry))
+        // A speed is a reading like a countdown's, so it takes the same wings.
+        case .splash:
+            return geometry.compactTimerGeometry(showsDownloads: false, wing: splashStripWing(in: geometry))
         case .downloads:
             let name = NotchDownloadService.shared.items.first { $0.active && !$0.completed }?.name
             return geometry.compactDownloadGeometry(wing: NotchDownloadSupport.compactWing(for: name, in: geometry))
@@ -767,6 +786,21 @@ final class NotchService: ObservableObject {
         return max(reading, companionMarkWidth(companion, in: provisional)) + NotchTimerSupport.stripCameraGap
     }
 
+    /// The wider of the two sides of a speed strip: the reading, drawn as the
+    /// strip draws it, with the clearance from the silhouette's curve and air
+    /// beside the camera. The speed is measured by its widest shape, so the
+    /// island keeps its size as the figure gains or loses a digit.
+    private func splashStripWing(in geometry: NotchGeometry) -> CGFloat {
+        let provisional = geometry.compactTimerGeometry(showsDownloads: false,
+                                                        wing: NotchTimerSupport.stripWingRange.lowerBound)
+        let size = NotchTimerSupport.stripTextSize(height: provisional.compactActivityContentHeight)
+        let reading = (NotchCapsuleLayout.splashSpeedShape as NSString).size(withAttributes: [
+            .font: NSFont.monospacedDigitSystemFont(ofSize: size, weight: .medium)
+        ]).width.rounded(.up)
+        return reading + provisional.compactActivityEdgeInset(boxHeight: size * 0.72, radius: 0)
+            + NotchTimerSupport.stripCameraGap
+    }
+
     /// The width of the mark at a strip's left end, the timer's own without a
     /// companion, drawn as `NotchCompanionMark` draws it, with its clearance
     /// from the silhouette's curve.
@@ -782,6 +816,12 @@ final class NotchService: ObservableObject {
                 + provisional.compactActivityEdgeInset(boxHeight: side + 4, radius: (side + 4) / 2)
         case .calendar:
             return provisional.compactActivityEdgeInset(boxHeight: 9, radius: 0) + calendarClockWidth
+        case .splash:
+            let size = NotchTimerSupport.stripTextSize(height: height)
+            let reading = (NotchCapsuleLayout.splashSpeedShape as NSString).size(withAttributes: [
+                .font: NSFont.monospacedDigitSystemFont(ofSize: size, weight: .medium)
+            ]).width.rounded(.up)
+            return reading + provisional.compactActivityEdgeInset(boxHeight: size * 0.72, radius: 0)
         default:
             // Every mark the strip shows is about a square of its point size.
             let side = NotchTimerSupport.stripIconSize(height: height)
@@ -1247,24 +1287,22 @@ final class NotchService: ObservableObject {
                                                expanded: expanded, peeking: peeking)
     }
 
-    /// What the closed island rests at: an activity's strip while one is
-    /// showing, the island and its wings otherwise. The hover emphasis is not
-    /// part of it - the place a person aims at is the island at rest.
-    private var closedRestingSize: CGSize {
-        compactActivity == nil ? geometry.collapsed : compactActivityGeometry.compactActivitySize
-    }
-
-    /// The closed island's own place, in the island's space, while a banner of
-    /// the island's own is drawn over it: the strip at rest, centred where the
-    /// island rests. The island answers the pointer there, and a click there
-    /// opens the whole dashboard, because for as long as the banner is on
-    /// screen that strip is the only way in.
+    /// The place the island answers, while a banner of the island's own is
+    /// drawn over the closed island: the whole surface the banner draws.
+    ///
+    /// The banner is the island's own news - a countdown that has ended, a song
+    /// that changed, a download that finished - and it has no control of its
+    /// own. The strip a click used to open is under it, off screen, so for as
+    /// long as the banner is on screen the island's door is the island: a
+    /// pointer anywhere on what the person sees asks for the page, and a click
+    /// anywhere opens the whole dashboard. A mirrored notification is the
+    /// person's own message, keeps its own card, and is not one of these.
     var islandAreaUnderNotice: CGRect? {
         guard noticeCoversIsland else { return nil }
-        let area = NotchSupport.islandAreaUnderNotice(resting: closedRestingSize, surface: surfaceSize, geometry: geometry)
-        guard !area.isNull, area.width > 0, area.height > 0 else { return nil }
-        // The window is laid out where the banner reaches; the strip it covers
-        // stays over the camera, so the place is carried back to it.
+        let area = CGRect(origin: .zero, size: surfaceSize)
+        guard area.width > 0, area.height > 0 else { return nil }
+        // The window is laid out where the banner reaches, so the place is
+        // carried back over the camera, as every other closed place is.
         return area.offsetBy(dx: -surfaceShift, dy: 0)
     }
 
@@ -1387,6 +1425,18 @@ final class NotchService: ObservableObject {
                 NotchKeepAwakeSupport.compactText(until: $0, now: Date(), locale: Locale(identifier: language.rawValue))
             }
             return layout.keepAwakeSurface(reading: reading, geometry: geometry)
+        case .splash:
+            let reading = NotchSplashSupport.stripSpeedText(NotchSplashService.shared.stripDecodeSpeed,
+                                                            language: language)
+                ?? NotchSplashSupport.placeholder
+            // A countdown keeps its own reading and takes the speed as its mark.
+            if companion != nil {
+                return layout.timerSurface(reading: reading, companion: companion, workingAgents: working,
+                                           downloadPercent: download?.fraction != nil, geometry: geometry,
+                                           language: language,
+                                           calendarLeadTime: NotchCalendarService.shared.countdownLeadTime)
+            }
+            return layout.splashSurface(reading: reading, geometry: geometry)
         }
     }
 
@@ -1927,36 +1977,7 @@ final class NotchService: ObservableObject {
                   !expanded, !peeking, !dragPlaceholder,
                   hoverOpeningEnabled else { return }
             if !hiddenInFullscreen, compactStripAnswersPointer { return }
-            let work = DispatchWorkItem { [weak self] in
-                guard let self else { return }
-                self.hoverWork = nil
-                // An opening that is no longer eligible keeps any following:
-                // an emphasis may still show, and the next move
-                // decides whether it is still needed.
-                guard self.running, !self.suspended, self.inside, !self.hoverState.suppressed,
-                      !self.expanded, !self.peeking, !self.pinned, !self.heldDrag, !self.keepsWorkingSurface,
-                      self.captureControls == nil,
-                      (self.notice?.notificationID == nil || self.hiddenUntilHover), !self.dragPlaceholder,
-                      self.hoverOpeningEnabled,
-                      self.windowHost?.blocksHoverReveal() == false,
-                      self.pointerOverIsland(NSEvent.mouseLocation) else { return }
-                // Following the closed island ends as it opens or peeks.
-                self.removeHoverExitMonitors()
-                if UserDefaults.standard.bool(forKey: DefaultsKey.notchHoverExpands) {
-                    // The whole dashboard, whatever the closed island was
-                    // showing: the strip under the pointer is the island's own
-                    // news - a countdown that has ended, a song, a download -
-                    // and a pointer reaching in asks for the page, not for the
-                    // last thing that moved.
-                    self.open(takeFocus: false, wholeDashboard: true)
-                } else {
-                    self.mutatePresentation(transitionContent: .reveal) { self.peeking = true }
-                    self.provideHapticFeedback()
-                }
-            }
-            hoverWork = work
-            let delay = NotchSupport.sanitizedHoverDelay(UserDefaults.standard.double(forKey: DefaultsKey.notchHoverDelay))
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+            scheduleHoverOpen()
         } else if holdsNotification
                     || NotchSupport.closesOnPointerExit(expanded: expanded, peeking: peeking, openedByHover: openedByHover) {
             let work = DispatchWorkItem { [weak self] in
@@ -3141,6 +3162,9 @@ final class NotchService: ObservableObject {
         }
         let access = NotchQuickAccessConfiguration.current()
         let size = surfaceSize
+        // What the surface was before this layout, so a change of bounds under a
+        // pointer that has not moved is visible as a change.
+        let previousSize = windowHost?.targetSize
         let contentTransition = compactMusicTransition(transitionContent, animated: animated)
         if captureControls == nil {
             // A simulated cutout yields to the menu bar when it reappears in full screen.
@@ -3151,7 +3175,10 @@ final class NotchService: ObservableObject {
         // service property. Update SwiftUI's layout along with the native host.
         if let windowHost, windowHost.targetSize != size { objectWillChange.send() }
         windowHost?.setOutline(enabled: !fullscreenCompact && UserDefaults.standard.bool(forKey: DefaultsKey.notchOutlineEnabled),
-                               color: compactActivityIsVisible && compactActivity == .timer ? .systemOrange : .white)
+                               color: compactActivityIsVisible
+                                   ? (compactActivity == .timer ? .systemOrange
+                                      : compactActivity == .splash ? .systemPurple : .white)
+                                   : .white)
         // Something else took the place the stand-in was headed for, as music
         // arriving while the island closes: it goes now rather than stand
         // over what came instead.
@@ -3181,7 +3208,9 @@ final class NotchService: ObservableObject {
         // Closing can shrink the island away from a pointer that has not moved,
         // with no boundary crossing to report it. Only a pointer still over the
         // island may keep its next approach from opening it.
-        if windowHost?.containsHover(NSEvent.mouseLocation) != true { hoverState.update(pointerInside: false) }
+        let overIsland = windowHost?.containsHover(NSEvent.mouseLocation) == true
+        if !overIsland { hoverState.update(pointerInside: false) }
+        rearmHoverOpen(overIsland: overIsland, surfaceChanged: previousSize != size)
         let activationRect: CGRect
         if captureControls != nil {
             activationRect = captureControlsCollapsed ? CGRect(origin: .zero, size: size) : .zero
@@ -3237,6 +3266,62 @@ final class NotchService: ObservableObject {
             } else { finishMusicDeparture() }
         }
         syncScreenEdgeClicks()
+    }
+
+    /// The deliberate hover's opening, asked for once: the delay the person
+    /// chose, and the deadline's own questions - the pointer still on the
+    /// island, nothing open, nothing holding the surface.
+    ///
+    /// It is asked for both when the pointer reaches the island and when the
+    /// island changes under a pointer that has not moved, and it never opens
+    /// anything of its own: a countdown that has ended, a song, a download, a
+    /// banner over the strip, a strip of any activity, and an island at rest all
+    /// open the same whole dashboard, because a pointer reaching in asks for the
+    /// page and not for the last thing that moved.
+    private func scheduleHoverOpen() {
+        guard hoverWork == nil || hoverWork?.isCancelled == true else { return }
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.hoverWork = nil
+            // An opening that is no longer eligible keeps any following:
+            // an emphasis may still show, and the next move
+            // decides whether it is still needed.
+            guard self.running, !self.suspended, self.inside, !self.hoverState.suppressed,
+                  !self.expanded, !self.peeking, !self.pinned, !self.heldDrag, !self.keepsWorkingSurface,
+                  self.captureControls == nil,
+                  (self.notice?.notificationID == nil || self.hiddenUntilHover), !self.dragPlaceholder,
+                  self.hoverOpeningEnabled,
+                  self.windowHost?.blocksHoverReveal() == false,
+                  self.pointerOverIsland(NSEvent.mouseLocation) else { return }
+            // Following the closed island ends as it opens or peeks.
+            self.removeHoverExitMonitors()
+            if UserDefaults.standard.bool(forKey: DefaultsKey.notchHoverExpands) {
+                self.open(takeFocus: false, wholeDashboard: true)
+            } else {
+                self.mutatePresentation(transitionContent: .reveal) { self.peeking = true }
+                self.provideHapticFeedback()
+            }
+        }
+        hoverWork = work
+        let delay = NotchSupport.sanitizedHoverDelay(UserDefaults.standard.double(forKey: DefaultsKey.notchHoverDelay))
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    /// Whether a surface that changed under a pointer that has not moved must
+    /// ask for the hover's opening again.
+    ///
+    /// A banner that ends, a strip that leaves, and a notice that gives its
+    /// place back all shrink the island away from a pointer that is still
+    /// resting on it, and a change of bounds with no boundary crossing leaves no
+    /// entry for the pointer to report. The island answers where it now rests,
+    /// so the pointer resting on it is asked about again: no activity, and no
+    /// transition, decides whether the island can open, and nothing is made to
+    /// wait for a pointer to leave and come back.
+    private func rearmHoverOpen(overIsland: Bool, surfaceChanged: Bool) {
+        guard surfaceChanged, overIsland, !expanded, !peeking, !pinned, !heldDrag, !keepsWorkingSurface,
+              !dragPlaceholder, notice == nil, captureControls == nil, !hoverState.suppressed,
+              hoverOpeningEnabled, hoverWork == nil else { return }
+        scheduleHoverOpen()
     }
 
     private func syncHiddenHoverMonitoring() {

@@ -162,6 +162,11 @@ struct NotchSplashDashboardCard: View {
     /// The measured past: the readings the four charts draw, and the daily
     /// tokens the trend draws.
     var history: NotchSplashHistory = .empty
+    /// What the app measures: the current throughputs over their window, and the
+    /// first token's percentiles over the requests that recently finished. The
+    /// three cards that measure draw these beside the engine's own averages, and
+    /// the fourth - the cache's rate - is the reading alone.
+    var live: NotchSplashLiveMetrics = .empty
     /// Why the reading stopped answering, while it is being watched.
     var failure: NotchSplashFailure?
     /// The server being read, named when it does not answer.
@@ -383,35 +388,57 @@ struct NotchSplashDashboardCard: View {
     /// the first token's time, and the cache's hits. Each line keeps its
     /// metric's colour and each figure takes the colour of how it reads, so a
     /// card that reads badly is not also drawn in a colour that says so twice.
+    ///
+    /// The first three cards measure, and so show two figures and two lines: the
+    /// figure the app measures over a window of readings, in the reference's
+    /// purple, and the engine's own average over the whole of its running, in
+    /// its blue. The time to first token is the one card whose figures are not
+    /// in its lines' order: it writes p50 first and p95 second, and draws p95 in
+    /// purple and p50 in blue, because the percentile a window is judged by is
+    /// its worst tail and the pair is read from the middle out.
+    ///
+    /// The lines are not named in words. The card names what it measures, and the
+    /// two figures above the chart are the two lines.
     private var charts: some View {
         let decode = metrics?.decodeTokensPerSecond
         let prefill = metrics?.prefillTokensPerSecond
-        let ttft = NotchSplashSupport.ttftSeconds(milliseconds: metrics?.ttftMilliseconds)
         let cache = NotchSplashSupport.cacheHitPercent(hits: status?.cache.hits,
                                                       requests: status?.cache.requests,
                                                       reportedRate: status?.cache.reportedRate)
         return HStack(spacing: NotchSplashLayout.metricSpacing) {
-            NotchSplashMetricCard(title: text.decode,
-                                  values: series.compactMap(\.decode),
-                                  line: NotchSplashPalette.orange,
-                                  value: NotchSplashSupport.speedText(decode),
-                                  unit: decode == nil ? nil : text.tokensPerSecond,
-                                  tone: NotchSplashSupport.decodeTone(decode),
-                                  empty: text.noMeasurements)
-            NotchSplashMetricCard(title: text.prefill,
-                                  values: series.compactMap(\.prefill),
-                                  line: NotchSplashPalette.blue,
-                                  value: NotchSplashSupport.speedText(prefill),
-                                  unit: prefill == nil ? nil : text.tokensPerSecond,
-                                  tone: NotchSplashSupport.prefillTone(prefill),
-                                  empty: text.noMeasurements)
-            NotchSplashMetricCard(title: text.ttft,
-                                  values: series.compactMap(\.ttftSeconds),
-                                  line: NotchSplashPalette.blue,
-                                  value: NotchSplashSupport.ttftParts(ttft)?.value,
-                                  unit: NotchSplashSupport.ttftParts(ttft)?.unit,
-                                  tone: NotchSplashSupport.ttftTone(ttft),
-                                  empty: text.noMeasurements)
+            NotchSplashDualMetricCard(title: text.decode,
+                                      current: live.decode,
+                                      overall: decode,
+                                      currentSeries: live.decodeSeries,
+                                      overallSeries: series.compactMap(\.decode),
+                                      currentTint: NotchSplashPalette.purple,
+                                      overallTint: NotchSplashPalette.blue,
+                                      value: NotchSplashSupport.speedPairText(live.decode, decode),
+                                      unit: live.decode == nil && decode == nil ? nil : text.tokensPerSecond,
+                                      tone: NotchSplashSupport.decodeTone(live.decode ?? decode),
+                                      empty: text.noMeasurements)
+            NotchSplashDualMetricCard(title: text.prefill,
+                                      current: live.prefill,
+                                      overall: prefill,
+                                      currentSeries: live.prefillSeries,
+                                      overallSeries: series.compactMap(\.prefill),
+                                      currentTint: NotchSplashPalette.purple,
+                                      overallTint: NotchSplashPalette.blue,
+                                      value: NotchSplashSupport.speedPairText(live.prefill, prefill),
+                                      unit: live.prefill == nil && prefill == nil ? nil : text.tokensPerSecond,
+                                      tone: NotchSplashSupport.prefillTone(live.prefill ?? prefill),
+                                      empty: text.noMeasurements)
+            NotchSplashDualMetricCard(title: text.ttft,
+                                      current: live.ttftP95,
+                                      overall: live.ttftP50,
+                                      currentSeries: live.ttftP95Series,
+                                      overallSeries: live.ttftP50Series,
+                                      currentTint: NotchSplashPalette.purple,
+                                      overallTint: NotchSplashPalette.blue,
+                                      value: NotchSplashSupport.ttftPairText(live.ttftP50, live.ttftP95),
+                                      unit: NotchSplashSupport.ttftParts(live.ttftP50 ?? live.ttftP95)?.unit,
+                                      tone: NotchSplashSupport.ttftTone(live.ttftP50 ?? live.ttftP95),
+                                      empty: text.noMeasurements)
             NotchSplashMetricCard(title: text.cacheHitRate,
                                   values: series.compactMap(\.cachePercent),
                                   line: NotchSplashPalette.green,
@@ -839,6 +866,86 @@ extension NotchSplashMetricCard where Footer == EmptyView {
     }
 }
 
+/// A card of two figures and two lines, in the measure of the card it replaces.
+///
+/// The card is the same size, has the same name above the figures, the same
+/// figures above the chart, the same chart height, the same ground, and the same
+/// words when nothing has been measured. What it shows is two things and not
+/// one: the figure the app measures over a window of readings, drawn in the
+/// reference's purple, and the engine's own average over the whole of its
+/// running, drawn in its blue. The pair is written in the card's order, which is
+/// not always its lines' order - the time to first token writes p50 first and
+/// draws p95 in purple - and the two lines share the chart's scale, so a line
+/// above the other is the one that is really higher.
+///
+/// Nothing is drawn for what was not measured, and no words name the lines: the
+/// card says what it measures, and the figures beside the chart are its lines.
+struct NotchSplashDualMetricCard: View {
+    let title: String
+    /// The two figures, in the order the card writes them.
+    let current: Double?
+    let overall: Double?
+    /// Their measurements, oldest first, which are the two lines.
+    let currentSeries: [Double]
+    let overallSeries: [Double]
+    let currentTint: Color
+    let overallTint: Color
+    /// The pair as one line, and its unit.
+    let value: String?
+    let unit: String?
+    /// The colour of the pair, from the threshold of the figure the card leads
+    /// with, so a card that reads badly is not drawn in a colour that says so
+    /// twice.
+    let tone: NotchSplashTone
+    /// What to say while there is nothing to draw.
+    var empty: String? = nil
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.system(size: NotchSplashLayout.labelSize))
+                .foregroundStyle(.white.opacity(0.6))
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+            HStack(alignment: .firstTextBaseline, spacing: 3) {
+                Text(value ?? NotchSplashSupport.placeholder)
+                    .font(.system(size: NotchSplashLayout.pairValueSize, weight: .semibold, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(NotchSplashPalette.tone(tone))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.5)
+                    .contentTransition(.numericText())
+                if let unit {
+                    Text(unit)
+                        .font(.system(size: NotchSplashLayout.footerSize))
+                        .foregroundStyle(.white.opacity(0.5))
+                        .fixedSize()
+                }
+            }
+            NotchDualSparkline(primary: currentSeries, secondary: overallSeries,
+                               primaryTint: currentTint, secondaryTint: overallTint,
+                               height: NotchSplashLayout.sparklineHeight)
+            Group {
+                if currentSeries.isEmpty && overallSeries.isEmpty, let empty {
+                    Text(empty)
+                        .font(.system(size: NotchSplashLayout.footerSize))
+                        .foregroundStyle(.white.opacity(0.45))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(height: NotchSplashLayout.metricCardHeight)
+        .background(.white.opacity(0.05),
+                    in: RoundedRectangle(cornerRadius: NotchSplashLayout.metricCornerRadius, style: .continuous))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(title)
+    }
+}
+
 // MARK: - The page
 
 /// The dedicated page: the interval to read at, and the dashboard.
@@ -909,6 +1016,7 @@ struct NotchSplashView: View {
                 isMonitoring: service.isMonitoring,
                 isSpilling: service.isSpilling,
                 history: service.history,
+                live: service.live,
                 failure: service.failure,
                 address: service.endpointDescription,
                 onStop: service.isMonitoring ? { service.stop() } : nil,

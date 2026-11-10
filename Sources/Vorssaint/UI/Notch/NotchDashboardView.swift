@@ -458,6 +458,7 @@ struct NotchDashboardView: View {
             isMonitoring: splash.isMonitoring,
             isSpilling: splash.isSpilling,
             history: splash.history,
+            live: splash.live,
             failure: splash.failure,
             address: splash.endpointDescription,
             onStop: splash.isMonitoring ? { splash.stop() } : nil,

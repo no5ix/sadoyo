@@ -865,13 +865,14 @@ enum NotchMusicStripLayout {
 }
 
 enum NotchCompactActivity: String, Identifiable {
-    case timer, watch, downloads, agents, calendar, music, keepAwake
+    case timer, splash, watch, downloads, agents, calendar, music, keepAwake
 
     var id: String { rawValue }
 
     func title(_ language: AppLanguage) -> String {
         switch self {
         case .timer: return FeatureStrings.notchActivities(language).timer
+        case .splash: return FeatureStrings.notchSplash(language).title
         case .watch: return FeatureStrings.notchWatch(language).title
         case .downloads: return FeatureStrings.notchFiles(language).downloadsTitle
         case .agents: return FeatureStrings.notchAgents(language).title
@@ -885,6 +886,7 @@ enum NotchCompactActivity: String, Identifiable {
     var module: NotchModule {
         switch self {
         case .timer: return .timer
+        case .splash: return .splash
         case .watch: return .watch
         case .downloads: return .downloads
         case .agents: return .agents
@@ -1211,6 +1213,21 @@ enum NotchCapsuleLayout {
             + width(NotchAgentSupport.readingShape(reading), font: readingFont)
         return surface(content: content, maximum: Maximum.activity, geometry: geometry)
     }
+
+    /// The decode speed of a reading in hand: the section's mark, and the speed
+    /// measured over the window. A countdown that shares the capsule keeps its
+    /// own reading and takes the speed as its mark, so a pair with a countdown
+    /// measures through `timerSurface`, as every other pair sharing one does.
+    static func splashSurface(reading: String, geometry: NotchGeometry) -> CGSize {
+        let content = symbolWidth + spacing + width(NotchAgentSupport.readingShape(reading), font: readingFont)
+        return surface(content: content, maximum: Maximum.activity, geometry: geometry)
+    }
+
+    /// The widest speed the strip writes, so the island keeps its size as the
+    /// figure gains or loses a digit. Three digits and the widest unit the
+    /// splash page ships ("ток/с") is the shape the wing is measured from.
+    static let splashSpeedShape = "888 tok/s"
+    static var splashSpeedWidth: CGFloat { width(splashSpeedShape, font: readingFont) }
 
     /// A download's arrow and name, then its meter and percentage, or a
     /// spinner until its size is known.
@@ -1840,10 +1857,17 @@ enum NotchSupport {
     /// Keep Awake comes last: a session can run all day, even more than
     /// music plays, and it only says that the Mac stays awake. A watch
     /// follows the timer: the person started both and is waiting on them.
-    static func compactActivities(timer: Bool, watch: Bool = false, downloads: Bool, agents: Bool,
-                                  calendar: Bool, music: Bool, keepAwake: Bool = false) -> [NotchCompactActivity] {
+    ///
+    /// The decode speed stands second, behind the countdown and ahead of the
+    /// song. The order is the island's rule and is kept here and nowhere else:
+    /// the activity that leads the list keeps its reading right of the camera,
+    /// and what shares the strip with it is chosen by `compactCompanions`, so
+    /// the priority of an activity is one table and not one rule per strip.
+    static func compactActivities(timer: Bool, splash: Bool = false, watch: Bool = false, downloads: Bool,
+                                  agents: Bool, calendar: Bool, music: Bool,
+                                  keepAwake: Bool = false) -> [NotchCompactActivity] {
         let candidates: [(Bool, NotchCompactActivity)] = [
-            (timer, .timer), (watch, .watch), (downloads, .downloads), (agents, .agents),
+            (timer, .timer), (splash, .splash), (watch, .watch), (downloads, .downloads), (agents, .agents),
             (calendar, .calendar), (music, .music), (keepAwake, .keepAwake)
         ]
         return candidates.compactMap { $0.0 ? $0.1 : nil }
@@ -1866,18 +1890,21 @@ enum NotchSupport {
         return companions.first
     }
 
-    static func compactCompanions(of primary: NotchCompactActivity, timer: Bool, running: Bool, downloads: Bool,
-                                  agents: Bool, calendar: Bool, music: Bool) -> [NotchCompactActivity] {
-        // The player leads the pairs. The island's page shows everything at
-        // once, and the closed strip has room for one companion, so what is
-        // heard is the companion that is put in it: a song that plays is what a
-        // person is listening to, ahead of a download, an agent, or a date.
+    static func compactCompanions(of primary: NotchCompactActivity, timer: Bool, running: Bool, splash: Bool = false,
+                                  downloads: Bool, agents: Bool, calendar: Bool, music: Bool) -> [NotchCompactActivity] {
+        // The pairs are ranked by the same rule the strip's primary is: the
+        // decode speed of a reading in hand leads, because it is the work the
+        // island is being asked about; the player follows, because what is
+        // heard is what a person is listening to, ahead of a download, an
+        // agent, or a date.
         let pairs: [(Bool, NotchCompactActivity)]
         switch primary {
         case .timer where timer:
-            pairs = [(running && music, .music), (downloads, .downloads), (running && agents, .agents),
-                     (running && calendar, .calendar)]
+            pairs = [(splash, .splash), (running && music, .music), (downloads, .downloads),
+                     (running && agents, .agents), (running && calendar, .calendar)]
         case .calendar where calendar:
+            pairs = [(splash, .splash), (music, .music), (downloads, .downloads), (agents, .agents)]
+        case .splash where splash:
             pairs = [(music, .music), (downloads, .downloads), (agents, .agents)]
         default:
             pairs = []
@@ -2085,29 +2112,16 @@ enum NotchSupport {
     ///
     /// A banner the island raised itself - a countdown ending, a song changing,
     /// a volume moving - is drawn over the strip it came from, and for as long
-    /// as it is on screen that strip is the only place left to reach the island
-    /// from. So the strip's place stays the island's: the pointer resting there
-    /// opens the page, and a click there opens it, as they do the moment the
-    /// banner is gone. A mirrored notification is the person's own message and
-    /// is held under the pointer, where a deliberate hover opens its card in
-    /// place; an open island and a preview have their own answers already.
+    /// as it is on screen that strip is off screen: the banner is all the person
+    /// sees, and it has no control of its own. So the island's whole surface
+    /// stays the island's door: the pointer resting anywhere on it opens the
+    /// page, and a click anywhere opens it, as they do the moment the banner is
+    /// gone. A mirrored notification is the person's own message and is held
+    /// under the pointer, where a deliberate hover opens its card in place; an
+    /// open island and a preview have their own answers already.
     static func answersPointerUnderNotice(hasNotice: Bool, mirrored: Bool,
                                           expanded: Bool, peeking: Bool) -> Bool {
         hasNotice && !mirrored && !expanded && !peeking
-    }
-
-    /// The closed island's place inside a surface the island's own banner
-    /// covers: the strip at rest, centred where the island rests. A banner
-    /// shifts and grows on the side its words need; the strip it covers stays
-    /// where the island is, so the place is taken as the island at rest is
-    /// placed. Nil when there is no strip left inside the surface.
-    static func islandAreaUnderNotice(resting: CGSize, surface: CGSize,
-                                      geometry: NotchGeometry) -> CGRect {
-        var restingGeometry = geometry
-        restingGeometry.surfaceShift = 0
-        let area = restingGeometry.restingArea(width: resting.width, height: resting.height, in: surface)
-        guard !area.isNull, area.width > 0, area.height > 0 else { return .zero }
-        return area
     }
 
     /// Another app becoming active closes the open island like a click away.
@@ -3062,18 +3076,6 @@ struct NotchGeometry: Equatable {
     private func local(_ point: CGPoint, in size: CGSize) -> CGPoint {
         let frame = frame(for: size)
         return CGPoint(x: point.x - frame.minX, y: frame.maxY - point.y)
-    }
-
-    /// The closed island's own place in the local space of a surface that has
-    /// grown over it: the strip it rests at, centred where the island rests. A
-    /// banner of the island's own covers the strip it came from, and that place
-    /// stays the island's to answer, so the pointer and a click keep reaching
-    /// the island for as long as the banner is on screen.
-    func restingArea(width: CGFloat, height: CGFloat, in size: CGSize) -> CGRect {
-        let width = min(width, size.width)
-        let height = min(height, size.height)
-        guard width > 0, height > 0 else { return .zero }
-        return CGRect(x: (size.width - width) / 2, y: 0, width: width, height: height)
     }
 }
 

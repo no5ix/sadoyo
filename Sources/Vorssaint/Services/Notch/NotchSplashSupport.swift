@@ -30,6 +30,10 @@ enum NotchSplashLayout {
     /// A reading is its name, its figure, its unit and the line of what it
     /// has measured: a card of its own, and taller than a row of text.
     static let metricCardHeight: CGFloat = 86
+    /// The two figures of a card that measures, in the room its width has for
+    /// them: a pair is read as one line, so it is set a little under a single
+    /// figure and stays legible in a card of the same width as the rest.
+    static let pairValueSize: CGFloat = 16
     /// The line a metric's measurements draw, in the height of a thumb.
     static let sparklineHeight: CGFloat = 22
     /// The memory's card: its name and the three readings in one row, and the
@@ -276,8 +280,15 @@ struct NotchSplashStatus: Equatable {
         let prefillTokensPerSecond: Double?
         /// Time to first token, in milliseconds, at the p50 the server names.
         let ttftMilliseconds: Double?
+        /// The same statistic at the p95, on a build that reports it.
+        let ttftP95Milliseconds: Double?
         let prefillInputTokens: Int64?
         let decodeOutputTokens: Int64?
+        /// The wall time the engine has spent decoding and prefilling, over the
+        /// whole of its running. These two, with the token counters beside them,
+        /// are what a current throughput is measured from.
+        let decodeWallMilliseconds: Double?
+        let prefillWallMilliseconds: Double?
     }
 
     struct Cache: Equatable {
@@ -399,10 +410,16 @@ struct NotchSplashStatus: Equatable {
                 ?? root.readDouble(["prefill_tokens_per_second"]),
             ttftMilliseconds: ttft.readDouble(["p50", "median", "p50_ms", "value"])
                 ?? stats.readDouble(["ttft_ms", "ttft_ms_p50", "ttft"]),
+            ttftP95Milliseconds: ttft.readDouble(["p95", "p95_ms", "percentile_95", "p095"])
+                ?? stats.readDouble(["ttft_ms_p95", "ttft_p95_ms"]),
             prefillInputTokens: stats.readBytes(["prefill_input_tokens", "input_tokens", "prompt_tokens"])
                 ?? root.readBytes(["prefill_input_tokens"]),
             decodeOutputTokens: stats.readBytes(["decode_output_tokens", "output_tokens", "completion_tokens"])
-                ?? root.readBytes(["decode_output_tokens"])
+                ?? root.readBytes(["decode_output_tokens"]),
+            decodeWallMilliseconds: stats.readDouble(["decode_wall_ms", "decode_wall_milliseconds", "decode_wall"])
+                ?? root.readDouble(["decode_wall_ms"]),
+            prefillWallMilliseconds: stats.readDouble(["prefill_wall_ms", "prefill_wall_milliseconds", "prefill_wall"])
+                ?? root.readDouble(["prefill_wall_ms"])
         )
 
         let cache = root.field(["cache", "prefix_cache"])
@@ -803,6 +820,41 @@ enum NotchSplashSupport {
         if magnitude >= 1000 { return String(format: "%.0f", locale: locale, tokensPerSecond) }
         if magnitude >= 100 { return String(format: "%.1f", locale: locale, tokensPerSecond) }
         return String(format: "%.2f", locale: locale, tokensPerSecond)
+    }
+
+    // MARK: The pair of figures a measuring card shows
+
+    /// Two figures on one line, `85.32 / 50.97`, in the order the card shows
+    /// them. A figure the server did not answer keeps its place empty, so a
+    /// pair is never shown as one figure and never as an invented one.
+    static func pairText(_ first: String?, _ second: String?) -> String? {
+        guard first != nil || second != nil else { return nil }
+        return "\(first ?? placeholder) / \(second ?? placeholder)"
+    }
+
+    /// The two throughputs of a speed card: what is being measured now, and the
+    /// engine's own average over the whole of its running.
+    static func speedPairText(_ current: Double?, _ overall: Double?, locale: Locale = locale) -> String? {
+        pairText(current == nil ? nil : speedText(current, locale: locale),
+                 overall == nil ? nil : speedText(overall, locale: locale))
+    }
+
+    /// The first token's time at its two percentiles, in the order the card
+    /// writes them: p50 first and p95 second, whatever order its lines draw
+    /// them in.
+    static func ttftPairText(_ p50: Double?, _ p95: Double?, locale: Locale = locale) -> String? {
+        pairText(p50 == nil ? nil : ttftParts(p50, locale: locale)?.value,
+                 p95 == nil ? nil : ttftParts(p95, locale: locale)?.value)
+    }
+
+    /// The decode speed the island's strip writes: a whole number, and the
+    /// unit the splash page uses for a throughput, so the strip and the card
+    /// name the same thing in the reader's language. The strip's shape is
+    /// measured from "88 tok/s", the widest reading of the widest language.
+    static func stripSpeedText(_ tokensPerSecond: Double?,
+                               language: AppLanguage = .enUS) -> String? {
+        guard let tokensPerSecond, tokensPerSecond.isFinite, tokensPerSecond >= 0 else { return nil }
+        return "\(Int(tokensPerSecond.rounded(.down))) \(FeatureStrings.notchSplash(language).tokensPerSecond)"
     }
 
     /// Time to first token, in seconds with its unit.
@@ -1396,6 +1448,17 @@ final class NotchSplashService: ObservableObject {
     /// invented for the moment.
     @Published private(set) var history = NotchSplashHistory.empty
 
+    /// The figures the three measuring cards draw: the current throughputs read
+    /// out of the cumulative counters over a window of readings, the first
+    /// token's percentiles over the requests that recently finished, and the
+    /// line of each. They arrive as one value, so a card's figure and its line
+    /// are always the same window of the same readings.
+    ///
+    /// These are measured by the app, and the engine's own lifetime averages are
+    /// read straight from the reading beside them; nothing here is a figure the
+    /// server was asked for and did not answer.
+    @Published private(set) var live = NotchSplashLiveMetrics.empty
+
     /// A reading of the server's spilling and reservation pressure, which
     /// only the tracker can tell from two readings in a row.
     private(set) var isSpilling = false
@@ -1403,6 +1466,10 @@ final class NotchSplashService: ObservableObject {
 
     private var tracker = NotchSplashTaskTracker()
     private var announcements = NotchSplashAnnouncements()
+    /// The window of counters the current throughputs are measured from, and the
+    /// window of finished requests the first token's percentiles are taken over.
+    private var rates = NotchSplashRateTracker()
+    private var latency = NotchSplashLatencyTracker()
     private var loop: Task<Void, Never>?
     private var generation = UUID()
     /// What became of the last task timed, so the polling loop can be asked
@@ -1473,6 +1540,19 @@ final class NotchSplashService: ObservableObject {
     var isTaskRunning: Bool { tracker.isRunning }
     var isTaskFinished: Bool { tracker.isFinished }
     var trackedID: String? { tracker.trackedID }
+    /// The decode speed the island's strip shows: the current rate of the
+    /// window, and the engine's own average while nothing in the window
+    /// measures one.
+    var stripDecodeSpeed: Double? {
+        NotchSplashLiveMetrics.stripDecodeSpeed(current: live.decode,
+                                                overall: snapshot?.status.metrics.decodeTokensPerSecond)
+    }
+    /// Whether the island's strip has a decode speed to show: a reading is in
+    /// hand, and it is not so old that its numbers are about the past.
+    var stripShowsDecodeSpeed: Bool {
+        guard let snapshot, failure == nil, isMonitoring else { return false }
+        return !isStale(snapshot) && stripDecodeSpeed != nil
+    }
     var taskOutcome: NotchSplashTaskTracker.Outcome? {
         if case .finished(_, let outcome, _, _) = phase { return outcome }
         return nil
@@ -1511,6 +1591,11 @@ final class NotchSplashService: ObservableObject {
         generation = UUID()
         tracker.begin()
         tracker.clearFinished()
+        // A session measures from its first reading: a window carried over from
+        // a session taken back would measure the gap between the two as work.
+        rates.reset()
+        latency.reset()
+        live = .empty
         phase = tracker.phase
         taskTokens = tracker.taskTokens
         lastOutcome = nil
@@ -1607,6 +1692,39 @@ final class NotchSplashService: ObservableObject {
         }
     }
 
+    /// Measures one reading: the two current throughputs from how far the
+    /// engine's cumulative counters moved across their window, and the first
+    /// token's percentiles over the requests that have recently finished.
+    ///
+    /// The two windows are the app's own, bounded, and kept on the main thread
+    /// with the reading, which is why a session measures nothing before its
+    /// first reading and a server read every second grows no array without end.
+    private func recordLive(snapshot: NotchSplashSnapshot, at date: Date) {
+        let metrics = snapshot.status.metrics
+        rates.observe(NotchSplashRateTracker.Reading(
+            at: date,
+            instanceKey: snapshot.instanceKey,
+            decodeTokens: metrics.decodeOutputTokens,
+            decodeWallMilliseconds: metrics.decodeWallMilliseconds,
+            prefillTokens: metrics.prefillInputTokens,
+            prefillWallMilliseconds: metrics.prefillWallMilliseconds))
+        latency.observe(NotchSplashLatencyTracker.Reading(
+            at: date,
+            instanceKey: snapshot.instanceKey,
+            completed: snapshot.status.requests.completed,
+            p50Milliseconds: metrics.ttftMilliseconds,
+            p95Milliseconds: metrics.ttftP95Milliseconds))
+        live = NotchSplashLiveMetrics(
+            decode: rates.decode,
+            prefill: rates.prefill,
+            ttftP50: latency.p50Seconds,
+            ttftP95: latency.p95Seconds,
+            decodeSeries: rates.decodeSeries.values,
+            prefillSeries: rates.prefillSeries.values,
+            ttftP50Series: latency.p50Series.values,
+            ttftP95Series: latency.p95Series.values)
+    }
+
     // MARK: The loop
 
     private func startLoop() {
@@ -1691,6 +1809,7 @@ final class NotchSplashService: ObservableObject {
         // what has been recorded, and the day's tokens are the difference this
         // reading's counters make against the last.
         recordHistory(snapshot: snapshot, at: date)
+        recordLive(snapshot: snapshot, at: date)
         if snapshot.status.hasWork { lastActiveAt = date }
         let event = tracker.observe(snapshot, at: date)
         phase = tracker.phase

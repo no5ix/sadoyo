@@ -17,6 +17,7 @@ enum NotchActivityTests {
         modePickerContracts(suite)
         rulerContracts(suite)
         compactTimerContracts(suite)
+        compactSplashContracts(suite)
         compactMarginContracts(suite)
         compactDownloadContracts(suite)
         keepAwakeContracts(suite)
@@ -837,6 +838,51 @@ enum NotchActivityTests {
         suite.expect(NotchTimerRulerScale.minute(.nan) == 1 && NotchTimerRulerScale.minute(.infinity) == 1
                && NotchTimerRulerScale.minute(.greatestFiniteMagnitude) == 180,
                "invalid or excessive ruler values cannot escape the supported duration range")
+    }
+
+    /// The resting strip's order with a decode speed in it: the countdown, the
+    /// speed of a reading in hand, and the song. The order is one table, so what
+    /// a person sees on the island is decided here and not one rule per strip.
+    private static func compactSplashContracts(_ suite: TestSuite) {
+        func companions(of primary: NotchCompactActivity, timer: Bool = true, running: Bool = true,
+                        splash: Bool = true, music: Bool = true) -> [NotchCompactActivity] {
+            NotchSupport.compactCompanions(of: primary, timer: timer, running: running, splash: splash,
+                                           downloads: true, agents: true, calendar: true, music: music)
+        }
+        // A countdown and a reading in hand: the countdown keeps its reading
+        // right of the camera, the speed is the mark beside it - the speed on
+        // the left, the countdown on the right - and the song stays off the
+        // strip, which has room for one companion only.
+        suite.expect(NotchSupport.compactActivities(timer: true, splash: true, downloads: true,
+                                                    agents: true, calendar: true, music: true)
+                        == [.timer, .splash, .downloads, .agents, .calendar, .music],
+                     "a countdown leads, the decode speed follows it, and the song is behind both")
+        suite.expect(companions(of: .timer) == [.splash, .music, .downloads, .agents, .calendar],
+                     "a countdown pairs with the decode speed before the song, a download, an agent, or an event")
+        suite.expect(NotchSupport.defaultCompanion(of: .timer, companions: companions(of: .timer), chosen: nil) == .splash,
+                     "the strip a countdown and a reading share shows the speed, and the song is the one excluded")
+        suite.expect(NotchSupport.defaultCompanion(of: .timer, companions: companions(of: .timer, splash: false),
+                                                   chosen: nil) == .music,
+                     "a stopped reading gives the song the side the speed had - the strip is the same rule, unplugged")
+        // No countdown: the speed is the strip's own reading, and the song takes
+        // the side its title had.
+        suite.expect(NotchSupport.compactActivities(timer: false, splash: true, downloads: false,
+                                                    agents: false, calendar: false, music: true) == [.splash, .music],
+                     "a reading in hand leads the strip when no countdown runs")
+        suite.expect(companions(of: .splash, timer: false) == [.music, .downloads, .agents],
+                     "a reading shares its strip with the song first, and an event's clock keeps its own strip")
+        suite.expect(NotchSupport.compactActivity(timer: false, downloads: false, music: true) == .music
+                         && NotchSupport.compactActivities(timer: false, splash: false, downloads: false,
+                                                           agents: false, calendar: false, music: true) == [.music],
+                     "a stopped reading leaves the song the strip it had before")
+        // A pair chosen by hand still wins while both activities answer, and the
+        // speed is one of the activities that answer.
+        suite.expect(NotchSupport.defaultCompanion(of: .timer, companions: companions(of: .timer),
+                                                   chosen: .music) == .music,
+                     "a pair the person chose keeps its strip while both activities are live")
+        suite.expect(NotchSupport.compactActivities(timer: true, splash: false, downloads: false,
+                                                    agents: false, calendar: false, music: true) == [.timer, .music],
+                     "with no reading in hand the island orders itself exactly as it did before")
     }
 
     private static func compactTimerContracts(_ suite: TestSuite) {

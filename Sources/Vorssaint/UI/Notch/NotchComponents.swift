@@ -1100,10 +1100,14 @@ struct NotchSparkline: View {
 
     var body: some View {
         GeometryReader { proxy in
-            let line = linePath(in: proxy.size)
+            let line = NotchSparklineGeometry.linePath(
+                NotchSparklineGeometry.points(values, in: proxy.size, padding: padding,
+                                              scale: NotchSparklineGeometry.scale(of: [values])))
             ZStack {
-                if hasLine {
-                    areaPath(in: proxy.size)
+                if hasLine, let scale = NotchSparklineGeometry.scale(of: [values]) {
+                    NotchSparklineGeometry.areaPath(
+                        NotchSparklineGeometry.points(values, in: proxy.size, padding: padding, scale: scale),
+                        in: proxy.size)
                         .fill(tint.opacity(0.22))
                     line
                         .stroke(tint, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round, lineJoin: .round))
@@ -1124,19 +1128,46 @@ struct NotchSparkline: View {
     }
 
     private var hasLine: Bool { values.count > 1 && values.allSatisfy(\.isFinite) }
+}
 
-    /// Each measurement's height, from the top of the drawing: the highest of
-    /// them at 0, the lowest at 1. A series that never moves sits in the
-    /// middle, which is the honest drawing of a flat run.
-    private var heights: [CGFloat] {
-        guard let low = values.min(), let high = values.max(), high - low > 1e-9, values.count > 1 else {
-            return Array(repeating: 0.5, count: values.count)
-        }
-        return values.map { CGFloat((high - $0) / (high - low)) }
+/// The geometry a sparkline draws with, shared by a chart of one line and a
+/// chart of two.
+///
+/// One line of code decides where every measurement of every chart sits, so a
+/// card of one line and a card of two are drawn by the same rule and a chart
+/// cannot drift into a shape of its own. A scale is asked for the whole chart,
+/// which is what lets two lines of one card be compared by eye: the highest
+/// measurement of the card is the top of the drawing and the lowest is the
+/// bottom, so a line above the other is the one that is really higher, and not
+/// the one whose own numbers are drawn to fill the space.
+enum NotchSparklineGeometry {
+    /// The scale of a chart: the lowest and highest measurement of every line it
+    /// draws, ignoring the readings that are not numbers. Nil when no line in
+    /// the chart has a measurement in it.
+    static func scale(of series: [[Double]]) -> (low: Double, high: Double)? {
+        let real = series.flatMap { $0 }.filter(\.isFinite)
+        guard let low = real.min(), let high = real.max() else { return nil }
+        return (low, high)
     }
 
-    private func points(in size: CGSize) -> [CGPoint] {
-        let heights = heights
+    /// Each measurement's height from the top of the drawing: the highest of the
+    /// chart's measurements at 0, the lowest at 1. A series that never moves, or
+    /// a chart whose measurements are all one number, sits in the middle, which
+    /// is the honest drawing of a flat run.
+    static func heights(_ values: [Double], _ scale: (low: Double, high: Double)?) -> [CGFloat] {
+        guard let scale, scale.high - scale.low > 1e-9, values.count > 1 else {
+            return Array(repeating: 0.5, count: values.count)
+        }
+        return values.map { CGFloat((scale.high - $0) / (scale.high - scale.low)) }
+    }
+
+    /// Each measurement's place, spread across the width by the count of the
+    /// line it belongs to, so a line of its own readings reaches both ends of
+    /// the chart. A line of one measurement has no line to draw, and answers the
+    /// two points of the quiet middle, as an empty chart does.
+    static func points(_ values: [Double], in size: CGSize, padding: CGFloat,
+                       scale: (low: Double, high: Double)?) -> [CGPoint] {
+        let heights = heights(values, scale)
         guard heights.count > 1 else {
             let y = (size.height - padding * 2) / 2 + padding
             return [CGPoint(x: 0, y: y), CGPoint(x: size.width, y: y)]
@@ -1148,10 +1179,9 @@ struct NotchSparkline: View {
         }
     }
 
-    /// The line, curved through the midpoints of the measurements so a series
-    /// of samples reads as a shape and not as a fence.
-    private func linePath(in size: CGSize) -> Path {
-        let points = points(in: size)
+    /// The line, curved through the midpoints of the measurements so a series of
+    /// samples reads as a shape and not as a fence.
+    static func linePath(_ points: [CGPoint]) -> Path {
         var path = Path()
         guard let first = points.first else { return path }
         path.move(to: first)
@@ -1169,13 +1199,80 @@ struct NotchSparkline: View {
         return path
     }
 
-    /// The soft ground under the line, the same tint and much fainter.
-    private func areaPath(in size: CGSize) -> Path {
-        var path = linePath(in: size)
-        guard let last = points(in: size).last, let first = points(in: size).first else { return path }
+    /// The soft ground under a line, its own tint and much fainter.
+    static func areaPath(_ points: [CGPoint], in size: CGSize) -> Path {
+        var path = linePath(points)
+        guard let last = points.last, let first = points.first else { return path }
         path.addLine(to: CGPoint(x: last.x, y: size.height))
         path.addLine(to: CGPoint(x: first.x, y: size.height))
         path.closeSubpath()
         return path
+    }
+}
+
+/// Two lines in one chart, on one scale.
+///
+/// A card that measures shows two things at once: the figure the app measures
+/// over a window of readings, and the engine's own average. Two charts in a
+/// card this size would be two unreadable ones, so the two lines share a chart
+/// and its scale, and each keeps its own colour. There is no legend and the
+/// lines are not named in words: the card names the metric above them, and the
+/// two figures above the chart are the two lines, in the card's own order.
+///
+/// A line of its own is drawn only where it has measurements: a metric the
+/// server does not answer leaves its line away, and the other line keeps
+/// drawing, which is a gap and not an invented shape.
+struct NotchDualSparkline: View {
+    /// The measurements of each line, oldest first.
+    let primary: [Double]
+    let secondary: [Double]
+    /// The lines' colours, which belong to the two figures and not to how the
+    /// figures read: a line keeps its colour as its figure turns green or red.
+    let primaryTint: Color
+    let secondaryTint: Color
+    var height: CGFloat = 22
+    var lineWidth: CGFloat = 1.5
+    var padding: CGFloat = 2
+    /// The ground under each line, fainter than the line above it.
+    var fillOpacity: Double = 0.16
+
+    var body: some View {
+        GeometryReader { proxy in
+            let scale = NotchSparklineGeometry.scale(of: [primary, secondary])
+            let leading = line(secondary, in: proxy.size, scale: scale, tint: secondaryTint)
+            let trailing = line(primary, in: proxy.size, scale: scale, tint: primaryTint)
+            ZStack {
+                if scale == nil {
+                    // Nothing measured on either line: the place where the
+                    // lines will go.
+                    Path { path in
+                        let y = (proxy.size.height - padding * 2) / 2 + padding
+                        path.move(to: CGPoint(x: 0, y: y))
+                        path.addLine(to: CGPoint(x: proxy.size.width, y: y))
+                    }
+                    .stroke(primaryTint.opacity(0.25),
+                            style: StrokeStyle(lineWidth: 1, dash: [2, 3], dashPhase: 1))
+                } else {
+                    leading
+                    trailing
+                }
+            }
+        }
+        .frame(height: height)
+        .accessibilityHidden(true)
+    }
+
+    /// One line of the chart, and its ground: nothing is drawn for a line with
+    /// one measurement or none, which is a gap in the chart.
+    private func line(_ values: [Double], in size: CGSize,
+                      scale: (low: Double, high: Double)?, tint: Color) -> some View {
+        let points = NotchSparklineGeometry.points(values, in: size, padding: padding, scale: scale)
+        return ZStack {
+            if values.count > 1, values.allSatisfy(\.isFinite) {
+                NotchSparklineGeometry.areaPath(points, in: size).fill(tint.opacity(fillOpacity))
+                NotchSparklineGeometry.linePath(points)
+                    .stroke(tint, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round, lineJoin: .round))
+            }
+        }
     }
 }

@@ -132,6 +132,14 @@ enum NotchPresentationRefreshContract {
         /// out, so the place is only recorded here.
         var hoverArea: CGRect?
         func setHoverArea(_ area: CGRect?) { hoverArea = area }
+        /// As the production host answers: the surface it draws, plus the closed
+        /// island's place under a banner of the island's own - the door a banner
+        /// leaves, which the hover's re-arm reads.
+        func containsHoverArea(_ point: CGPoint) -> Bool {
+            guard !concealedForMissionControl, let area = hoverArea, area.width > 0 else { return false }
+            return frame.minX + area.minX <= point.x && point.x <= frame.minX + area.maxX
+                && frame.maxY - area.maxY <= point.y && point.y <= frame.maxY - area.minY
+        }
         var onPresent: ((CGSize) -> Void)?
         var usesGlass = false
         var revealFromHidden = false
@@ -249,6 +257,13 @@ enum NotchPresentationRefreshContract {
         func syncVisibleConsumers() {}
         var hoverWork: DispatchWorkItem?
         var hoverState = NotchHoverState()
+        /// This contract is about the surfaces a refresh lays out, not about what
+        /// the hover does with them: the hover's contract measures the opening,
+        /// and here the ask is only recorded.
+        var rearmAsks: [(overIsland: Bool, surfaceChanged: Bool)] = []
+        func rearmHoverOpen(overIsland: Bool, surfaceChanged: Bool) {
+            rearmAsks.append((overIsland, surfaceChanged))
+        }
         var windowHost: Host? = Host()
         var panel: Panel? { windowHost?.panel }
         var geometry = NotchGeometry(screen: CGRect(x: 0, y: 0, width: 1440, height: 900),
@@ -259,18 +274,23 @@ enum NotchPresentationRefreshContract {
         var expandedGeometry: NotchGeometry { geometry }
         var compactActivityGeometry: NotchGeometry { geometry.compactTimerGeometry(showsDownloads: false) }
         /// This contract lays the island's surfaces out. Under the island's own
-        /// banner the closed island keeps the strip at rest as its place, which
+        /// banner the whole surface the banner draws is the island's place, which
         /// the hover and activation contracts measure; here it is the same place
         /// by size, so the door a banner leaves can be checked.
         var islandAreaUnderNotice: CGRect? {
             guard notice == true else { return nil }
-            let resting = geometry.collapsed
-            return CGRect(x: (surfaceSize.width - min(resting.width, surfaceSize.width)) / 2, y: 0,
-                          width: min(resting.width, surfaceSize.width), height: min(resting.height, surfaceSize.height))
+            guard surfaceSize.width > 0, surfaceSize.height > 0 else { return nil }
+            return CGRect(origin: .zero, size: surfaceSize)
         }
         var surfaceSize: CGSize {
             if fullscreenCompact { return geometry.restingSize(showsContent: false) }
             if captureControls != nil { return captureControlsCollapsed ? geometry.collapsed : geometry.peek }
+            // The island's own banner is drawn over the closed island, and reaches
+            // further than what it covers: the surface it draws is what these
+            // contracts measure, and the surface it gives back is a change.
+            if notice == true, !expanded {
+                return geometry.noticeSize(wings: NotchNoticeWings(leading: 130, trailing: 130))
+            }
             if !expanded, compactActivityIsVisible { return compactActivityGeometry.compactActivitySize }
             if !expanded { return geometry.collapsed }
             return expandedGeometry.expandedSize(module: selected, capturePreviewHeight: captureContent == nil ? nil : captureContentHeight,
@@ -566,19 +586,36 @@ enum NotchPresentationRefreshContract {
         suite.expect(countdown.countdownOpenings == 1 && !countdown.expanded,
                      "the open island's close button still closes it while an event counts down")
         // The island's own news - a countdown ending, a song changing - is drawn
-        // over the strip that was the way in, and leaves that strip the island's
-        // door: the activation area is the strip's place, and a click there asks
-        // for the whole dashboard, because the strip a click would otherwise
-        // open is not on screen to be opened.
+        // over the strip that was the way in, and the banner itself becomes the
+        // island's door: the activation area is the whole surface the banner
+        // draws, and a click anywhere on it asks for the whole dashboard. The
+        // strip a click used to open is off screen under the banner, so a door
+        // the size of the strip would be no door at all, and a person clicking
+        // the banner's words - far out in a wing, and in every state the island
+        // can be in - is clicking the island.
         let covered = Service()
         covered.expanded = false
         covered.notice = true
         covered.refreshPresentation(animated: false)
         suite.expect(covered.windowHost?.activationRect == covered.islandAreaUnderNotice,
-                     "the island's own banner leaves the strip's place the island's door")
+                     "the island's own banner leaves the surface it draws the island's door")
+        suite.expect(covered.windowHost?.activationRect == CGRect(origin: .zero, size: covered.surfaceSize),
+                     "the door under the island's own banner is the whole surface, not a strip under it")
         covered.windowHost?.activate?()
         suite.expect(covered.openedPages.last?.wholeDashboard == true && covered.openedPages.last?.takeFocus == true,
-                     "a click on the strip under the island's own banner opens the whole dashboard")
+                     "a click on the island's own banner opens the whole dashboard")
+        // The banner giving its place back is a surface that changed under a
+        // pointer that never moved, and the layout contract reports that change
+        // to the hover's own contract: no transition decides whether the island
+        // can open, and no activity's animation gets a dead zone of its own.
+        let retreating = Service()
+        retreating.expanded = false
+        retreating.notice = true
+        retreating.refreshPresentation(animated: false)
+        retreating.notice = nil
+        retreating.refreshPresentation(animated: false)
+        suite.expect(retreating.rearmAsks.last?.surfaceChanged == true,
+                     "a banner giving its place back reports the surface that changed under the pointer")
         musicStripChecks(suite)
         let fullscreenSimulated = Service()
         fullscreenSimulated.expanded = false

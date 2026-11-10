@@ -1350,6 +1350,8 @@ def main():
               "    private func missionControlDidRestore()",
               "    private var hoverOpensThroughNotice:",
               "    private var compactStripAnswersPointer:",
+              "    private func scheduleHoverOpen()",
+              "    private func rearmHoverOpen(",
               "    private var holdsNotification:", "    private func holdNotification(",
               "    private func syncNoticeWithPreferences(",
               "    private func releaseNotification(", "    private func scheduleNoticeDismissal(",
@@ -1364,10 +1366,22 @@ def main():
               "    func musicStripStandIn("])
           .replace("NotchSupport.routes(notice.event)", "routesNotices")
           .replace("NotchSupport.hiddenShowsActivity()", "hiddenShowsActivity")
+          # Splash is not one of this fixture's activities: the strip the
+          # pointer answers is the music strip's.
+          .replace("hasSplashActivity", "false")
           .replace("NotchSupport.closeDelay()", "NotchSupport.sanitizedCloseDelay(UserDefaults.standard.closeDelay)")
           + capsule_music
           + declaration(notch, "    func toggleMusicStripSong(")
               .replace("    func toggleMusicStripSong", "    @discardableResult\n    func toggleMusicStripSong", 1)
+          # The mirror of production's re-arm: a surface that changed under a
+          # pointer that has not moved asks for the opening again, and the
+          # fixture reads that change from the bounds it hands the host.
+          + "    func rearmUnderRestingPointer() {\n"
+          + "        let previous = windowHost?.rect\n"
+          + "        updateBounds()\n"
+          + "        rearmHoverOpen(overIsland: windowHost?.containsHover(NSEvent.mouseLocation) == true,\n"
+          + "                       surfaceChanged: previous != windowHost?.rect)\n"
+          + "    }\n"
           + "}\n}\n")
     music_visibility = "".join(declaration(notch, prefix).replace("    private ", "    ", 1) for prefix in [
         "    private var hiddenUntilHover:", "    var fullscreenCompact:", "    var idleContent:", "    var hasMusicActivity:",
@@ -1385,6 +1399,10 @@ def main():
                                                 "NotchSupport.routes(.track, in: ReviewDefaults.current)")
     music_visibility = music_visibility.replace("UserDefaults.standard", "ReviewDefaults.current!")
     music_visibility = music_visibility.replace("calendar: hasCalendarActivity", "calendar: false")
+    music_visibility = music_visibility.replace("splash: hasSplashActivity", "splash: false")
+    # The splash strip's wing is measured from the service's speed, which this
+    # fixture does not run; the pair's width is the splash suite's to measure.
+    music_visibility = music_visibility.replace("wing: splashStripWing(in: geometry)", "wing: 44")
     music_visibility = music_visibility.replace("playback?.isPlaying == true)",
                                                 "playback?.isPlaying == true, in: ReviewDefaults.current)")
     music_visibility = music_visibility.replace("captureControls: captureControls != nil)",

@@ -169,11 +169,13 @@ enum NotchHoverTests {
                                                    mirrored: notice?.notificationID != nil,
                                                    expanded: expanded, peeking: peeking)
         }
-        /// The closed island's own place under a banner of the island's own.
+        /// The closed island's own place under a banner of the island's own:
+        /// the whole surface the banner draws, as production reads it.
         var islandAreaUnderNotice: CGRect? {
             guard noticeCoversIsland else { return nil }
-            let strip = compactActivity == nil ? geometry.collapsed : compactActivityGeometry.compactActivitySize
-            return NotchSupport.islandAreaUnderNotice(resting: strip, surface: surfaceSize, geometry: geometry)
+            let area = CGRect(origin: .zero, size: surfaceSize)
+            guard area.width > 0, area.height > 0 else { return nil }
+            return area
         }
         /// Out of sight at rest, as production reads it: the island has no window
         /// for the pointer to enter, so hover follows the pointer over its place.
@@ -1063,13 +1065,19 @@ enum NotchHoverTests {
                                      symbol: "alarm.fill")
         for banner in [volume, completion] {
             for physical in [false, true] {
-                let strip = fixture(physical: physical).compactActivityGeometry.compactActivitySize
-                let surface = fixture(physical: physical).geometry
-                    .noticeSize(wingWidth: banner.preferredWingWidth)
-                let place = NotchSupport.islandAreaUnderNotice(resting: strip, surface: surface,
-                                                              geometry: fixture(physical: physical).geometry)
-                let frame = fixture(physical: physical).geometry.frame(for: surface)
-                let at = CGPoint(x: frame.minX + place.minX + 1, y: frame.maxY - 6)
+                // The banner is the island's own news, and the strip a click used
+                // to open is off screen under it: the whole surface the banner
+                // draws is the island's place, so a point out at the far wing -
+                // far outside the strip at rest - asks for the page.
+                let covering = fixture(physical: physical)
+                covering.compactActivity = .timer
+                _ = covering.show(banner)
+                let place = covering.islandAreaUnderNotice ?? .zero
+                let frame = covering.geometry.frame(for: covering.surfaceSize)
+                expect(place == CGRect(origin: .zero, size: covering.surfaceSize),
+                       "the island's own banner leaves the whole surface as the island's place, \(physical)")
+                let at = CGPoint(x: frame.minX + place.maxX - 1, y: frame.maxY - 6)
+                leave(covering)
 
                 // The pointer on the strip opens the island, and a click on the
                 // island's own place closes it while the pointer stays: the
@@ -1086,7 +1094,7 @@ enum NotchHoverTests {
                 expect(resting.islandAreaUnderNotice != nil,
                        "the closed island under its own banner keeps a place of its own, \(physical)")
                 expect(resting.geometry.contains(at, in: resting.surfaceSize, area: resting.islandAreaUnderNotice!),
-                       "the strip at rest answers the pointer under the banner, \(physical)")
+                       "the far wing of the island's own banner answers the pointer, \(physical)")
                 // A pointer that closed the island and never left is a dismissal
                 // the island honours, banner or no banner.
                 DispatchQueue.main.advance(0.26)
@@ -1128,6 +1136,32 @@ enum NotchHoverTests {
             expect(!mirrored.expanded && mirrored.openings == 0,
                    "a pointer resting on a mirrored notification opens no page of the island")
             leave(mirrored)
+        }
+
+        // A banner that ends leaves the island smaller under a pointer that has
+        // not moved, so there is no entry for that pointer to report: the
+        // pointer resting on the island is asked about again, and the island
+        // opens within the hover's own delay - not seconds later, and not only
+        // once the pointer has left and come back.
+        for banner in [volume, completion] {
+            let stationary = fixture(physical: true)
+            stationary.compactActivity = .timer
+            _ = stationary.show(banner)
+            NSEvent.mouseLocation = CGPoint(x: stationary.geometry.screen.midX,
+                                            y: stationary.geometry.screen.maxY - 6)
+            // Production learns the pointer is inside from a tracking event; the
+            // banner was shown under it, so it is.
+            stationary.inside = true
+            expect(stationary.hoverWork == nil, "a resting pointer on a banner has no opening pending")
+            // The banner leaves: the island shrinks under that pointer.
+            stationary.notice = nil
+            stationary.rearmUnderRestingPointer()
+            expect(stationary.hoverWork != nil && !stationary.expanded,
+                   "the island shrinking under a resting pointer asks for the opening again")
+            DispatchQueue.main.advance(0.26)
+            expect(stationary.openings == 1 && stationary.expanded && stationary.askedWholeDashboard,
+                   "a banner ending under a resting pointer opens the whole dashboard within the delay")
+            leave(stationary)
         }
 
         // A preview, over a strip with wings: the music strip keeps its own

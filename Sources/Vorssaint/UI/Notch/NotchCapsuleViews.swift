@@ -382,6 +382,57 @@ struct NotchCapsuleTimerStrip: View {
     }
 }
 
+/// A Splash reading in hand: the section's mark, or the activity it shares the
+/// capsule with, and the decode speed the dashboard is measuring. The reading
+/// is a whole number and the page's own unit, measured by its widest shape, so
+/// the capsule keeps its size as the figure gains or loses a digit.
+struct NotchCapsuleSplashStrip: View {
+    @ObservedObject var service: NotchService
+    let size: CGSize
+    /// Another display's capsule, when the island shows on every display.
+    var displayGeometry: NotchGeometry? = nil
+    @ObservedObject private var splash = NotchSplashService.shared
+    @ObservedObject private var l10n = L10n.shared
+
+    private var geometry: NotchGeometry { displayGeometry ?? service.geometry }
+    private var companion: NotchCompactActivity? { service.compactCompanion }
+
+    private var reading: String {
+        NotchSplashSupport.stripSpeedText(splash.stripDecodeSpeed, language: l10n.language)
+            ?? NotchSplashSupport.placeholder
+    }
+
+    var body: some View {
+        NotchCapsuleRow(size: size, geometry: geometry, leading: CapsuleLayout.endPadding) {
+            HStack(spacing: CapsuleLayout.markGap(companion)) {
+                mark
+                Text(reading)
+                    .font(Font(CapsuleLayout.readingFont as CTFont))
+                    .foregroundStyle(NotchSplashPalette.purple)
+                    .lineLimit(1).fixedSize()
+                    // A reading that gains or loses a character, as 9 tok/s
+                    // becomes 10 tok/s, resizes the capsule; the service
+                    // measures the same reading.
+                    .onChange(of: NotchAgentSupport.readingShape(reading)) { _, _ in
+                        DispatchQueue.main.async { service.refreshPresentation() }
+                    }
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(FeatureStrings.notchSplash(l10n.language).title)
+        .accessibilityValue(FeatureStrings.notchSplash(l10n.language).decode + " " + reading)
+        .accessibilityHint(FeatureStrings.notch(l10n.language).open)
+    }
+
+    @ViewBuilder private var mark: some View {
+        if let companion {
+            NotchCapsuleCompanionMark(companion: companion, geometry: geometry)
+        } else {
+            NotchCapsuleSymbol(name: NotchModule.splash.symbol, tint: NotchSplashPalette.purple)
+        }
+    }
+}
+
 /// The working agents' marks, side by side, each in a frame wider than it.
 private struct NotchCapsuleAgentMarks: View {
     let providers: [AgentProvider]
@@ -403,6 +454,7 @@ private struct NotchCapsuleCompanionMark: View {
     @ObservedObject private var music = NotchMusicService.shared
     @ObservedObject private var usage = AgentUsageService.shared
     @ObservedObject private var calendar = NotchCalendarService.shared
+    @ObservedObject private var splash = NotchSplashService.shared
     @ObservedObject private var l10n = L10n.shared
 
     var body: some View {
@@ -429,6 +481,15 @@ private struct NotchCapsuleCompanionMark: View {
                     NotchCapsuleCalendarStrip.clockMark(countdown, now: context.date)
                 }
             }
+        case .splash:
+            // The speed of a reading in hand, beside the countdown's clock: the
+            // same text the service measures the capsule from, in the same
+            // figure, so the two agree at the eye.
+            Text(NotchSplashSupport.stripSpeedText(splash.stripDecodeSpeed, language: l10n.language)
+                 ?? NotchSplashSupport.placeholder)
+                .font(Font(CapsuleLayout.readingFont as CTFont))
+                .foregroundStyle(NotchSplashPalette.purple)
+                .lineLimit(1).fixedSize()
         case .timer, .keepAwake, .watch:
             EmptyView()
         }

@@ -116,6 +116,16 @@ struct NotchCompanionMark: View {
     @ObservedObject private var music = NotchMusicService.shared
     @ObservedObject private var usage = AgentUsageService.shared
     @ObservedObject private var calendar = NotchCalendarService.shared
+    @ObservedObject private var splash = NotchSplashService.shared
+    @ObservedObject private var service = NotchService.shared
+    @ObservedObject private var l10n = L10n.shared
+
+    /// The speed as the strip writes it, in the reader's language: the same
+    /// text the service measures the wings from.
+    private var splashSpeedText: String {
+        NotchSplashSupport.stripSpeedText(splash.stripDecodeSpeed, language: l10n.language)
+            ?? NotchSplashSupport.placeholder
+    }
 
     var body: some View {
         switch companion {
@@ -136,6 +146,21 @@ struct NotchCompanionMark: View {
         case .music:
             NotchMusicCover(artwork: music.artwork, side: geometry.compactMusicArtworkSide,
                             radius: geometry.compactMusicArtworkRadius, source: music.playback?.track)
+        case .splash:
+            // The speed of a reading in hand, as the strip's own reading of it:
+            // the countdown keeps its clock on the other side, and this is the
+            // mark of the work the island is being asked about.
+            Text(splashSpeedText)
+                .font(.system(size: NotchTimerSupport.stripTextSize(height: geometry.compactActivityContentHeight),
+                              weight: .medium)).monospacedDigit()
+                .foregroundStyle(NotchSplashPalette.purple)
+                .lineLimit(1).minimumScaleFactor(0.65)
+                .fixedSize()
+                // A reading that gains or loses a character resizes the wings;
+                // the service measures the same reading.
+                .onChange(of: NotchAgentSupport.readingShape(splashSpeedText)) { _, _ in
+                    DispatchQueue.main.async { service.refreshPresentation() }
+                }
         case .timer, .keepAwake, .watch:
             EmptyView()
         }
@@ -174,6 +199,11 @@ struct NotchCompanionMark: View {
             return geometry.compactMusicArtworkInset
         case .calendar:
             return geometry.compactActivityEdgeInset(boxHeight: 9, radius: 0)
+        case .splash:
+            // The speed is text, so its ink is about the cap height, as a
+            // strip's reading keeps it.
+            let size = NotchTimerSupport.stripTextSize(height: geometry.compactActivityContentHeight)
+            return geometry.compactActivityEdgeInset(boxHeight: size * 0.72, radius: 0)
         case .downloads, .timer, .keepAwake, .watch:
             let side = min(13, NotchTimerSupport.stripIconSize(height: geometry.compactActivityContentHeight))
             return geometry.compactActivityEdgeInset(boxHeight: side, radius: side / 2)
@@ -195,6 +225,12 @@ struct NotchCompanionMark: View {
             let playback = NotchMusicService.shared.playback
             let title = playback?.track.title ?? FeatureStrings.radialMenu(language).mediaNowPlaying
             return [title, playback?.track.artist].compactMap { $0 }.joined(separator: ", ")
+        case .splash:
+            let text = FeatureStrings.notchSplash(language)
+            let speed = NotchSplashSupport.stripSpeedText(NotchSplashService.shared.stripDecodeSpeed,
+                                                          language: language)
+                ?? NotchSplashSupport.placeholder
+            return "\(text.decode) \(speed)"
         case .timer, .keepAwake, .watch:
             return companion.title(language)
         }
