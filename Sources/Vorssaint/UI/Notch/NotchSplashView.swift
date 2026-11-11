@@ -342,12 +342,16 @@ struct NotchSplashDashboardCard: View {
     }
 
     /// The task's clock. It belongs to the task: nothing at all before the
-    /// engine has work, running while it does, frozen at its length after.
+    /// engine has work, counting while it does, and resting at the length of
+    /// the work once the engine has stopped answering with work. The
+    /// confirmation window is not task time, so the number does not grow while
+    /// the window runs; the tick below only repaints what the readings say, and
+    /// a span measured from the run's beginning would count the window as work.
     private func clockMark(_ value: String) -> some View {
         Group {
-            if case .running(_, let startedAt) = phase, isMonitoring {
+            if case .running = phase, isMonitoring {
                 TimelineView(.periodic(from: Date(timeIntervalSinceNow: 1), by: 1)) { _ in
-                    clockText(NotchSplashSupport.taskClock(max(0, Date().timeIntervalSince(startedAt))))
+                    clockText(NotchSplashSupport.taskClock(elapsed))
                 }
             } else {
                 clockText(value)

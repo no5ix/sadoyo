@@ -2091,6 +2091,13 @@ enum NotchSplashTests {
                      "the capsule's row wears the same mark as the strip and the card")
         suite.expect(card.contains("NotchSectionMark(module: .splash, size:"),
                      "the card's mark is the shared view, so the strip and the card have one definition")
+        // The clock the card shows is the tracker's, not a span measured here:
+        // a wall-clock span from the run's beginning would count the whole
+        // confirmation window as task time, which is the number the card must
+        // never show.
+        suite.expect(card.contains("clockText(NotchSplashSupport.taskClock(elapsed))")
+                         && !card.contains("Date().timeIntervalSince(startedAt)"),
+                     "the card's clock ticks from what the readings measured, so the window is never counted as task time")
         suite.expect(strip.contains("NotchSectionMark.side(size: iconSize, module: .splash)")
                          && strip.contains("boxHeight: markSide, radius: markSide / 2"),
                      "the strip reserves and clears what the mark is drawn at, so its position stays the strip's own")
