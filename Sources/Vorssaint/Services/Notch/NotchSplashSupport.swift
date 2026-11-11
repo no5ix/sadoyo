@@ -342,6 +342,11 @@ struct NotchSplashStatus: Equatable {
         let waiting: Int
         /// Requests the server has accepted and not finished.
         let pending: Int
+        /// Requests the front end holds: accepted and being served, and waiting
+        /// there for the engine. This is the stretch between a client's prompt
+        /// arriving and the scheduler naming it, which the scheduler's own
+        /// counts do not cover.
+        let frontend: Int
         /// Client requests in flight, which covers the time between a request
         /// arriving and the engine picking it up.
         let httpRequests: Int
@@ -350,11 +355,12 @@ struct NotchSplashStatus: Equatable {
         let statusIsStale: Bool
 
         static let quiet = Activity(activeRequests: 0, queued: 0, prefilling: 0, decoding: 0,
-                                    waiting: 0, pending: 0, httpRequests: 0, statusIsStale: false)
+                                    waiting: 0, pending: 0, frontend: 0, httpRequests: 0,
+                                    statusIsStale: false)
 
         var hasWork: Bool {
             activeRequests > 0 || queued > 0 || prefilling > 0 || decoding > 0 || waiting > 0
-                || pending > 0 || httpRequests > 0 || statusIsStale
+                || pending > 0 || frontend > 0 || httpRequests > 0 || statusIsStale
         }
     }
 
@@ -385,6 +391,7 @@ struct NotchSplashStatus: Equatable {
 
         let scheduler = root.field(["scheduler", "scheduler_state"])
         let transport = root.field(["transport"])
+        let frontend = root.field(["frontend", "front_end"])
         let http = root.field(["http"])
         activity = Activity(
             activeRequests: activeRequestIDs.count,
@@ -394,6 +401,7 @@ struct NotchSplashStatus: Equatable {
             waiting: ["waiting_resources", "waiting_prefix", "waiting_mask", "terminal"]
                 .reduce(0) { total, name in total + (scheduler.readInt([name]) ?? 0) },
             pending: transport.readInt(["pending"]) ?? 0,
+            frontend: (frontend.readInt(["active"]) ?? 0) + (frontend.readInt(["waiting"]) ?? 0),
             httpRequests: (http.field(["requests"]) ?? http).readInt(["active"]) ?? 0,
             statusIsStale: transport.readBool(["status_stale"]) ?? false
         )
@@ -650,14 +658,20 @@ enum NotchSplashSupport {
     /// request counters move inside the run, so a request ending is not a run
     /// ending and one pause is not the end of the work. The only signal the
     /// endpoint gives is a quiet that has outlasted the pauses, so the window
-    /// is the engine's own idle-to-sleep span, ten minutes, and the app says
-    /// what it knows - the activity ended - rather than a completion it was
-    /// never told. Short idle gaps keep the clock running; a full ten minutes
-    /// of nothing stops it.
-    static let taskIdleSeconds: TimeInterval = 10 * 60
-    /// Quiet readings needed, one: the window is ten minutes, and waiting
-    /// through two of them would be twenty minutes of a clock that has
-    /// already stopped.
+    /// is a confirmation period of five minutes, and the app says what it
+    /// knows - the activity ended - rather than a completion it was never
+    /// told. Short idle gaps keep the run open; five minutes of nothing closes
+    /// it.
+    ///
+    /// This window belongs to the dashboard. It is not Splash's own
+    /// `weights.idle_release_seconds`, which is the engine deciding when to put
+    /// its weights to sleep; the two mechanisms are asked separately and one
+    /// setting does not move the other.
+    static let taskIdleSeconds: TimeInterval = 5 * 60
+    /// Quiet readings needed, one: the window is five minutes, and waiting
+    /// through two of them would be ten minutes of a run whose work has
+    /// already stopped - and the clock the card shows stops with the work, not
+    /// with the window.
     static let taskIdleReadings = 1
     /// How often a long session re-applies the thirty-day keeping to the file.
     static let historyCleanupInterval: TimeInterval = 6 * 60 * 60
@@ -731,15 +745,16 @@ enum NotchSplashSupport {
     /// Whether the closed island draws a reading: the section is on the island,
     /// and the card's clock is advancing.
     ///
-    /// The clock is the question the island answers - is work being watched
-    /// now - and it is the same clock the card shows, advanced by the tracker
-    /// while a task runs and frozen by the tracker at its end, in the one
-    /// moment the task's news is told. A frozen clock is a task that has
-    /// finished, and the island has nothing left to watch: the reading goes on,
-    /// the server keeps answering, the dashboard keeps its card and its frozen
-    /// numbers, and none of that is an activity. Nothing here watches the
-    /// server, times out, or guesses from numbers that stop moving: the island
-    /// asks the tracker the single question the card asks.
+    /// The clock is the question the island answers - is a run of work being
+    /// watched now - and it is the same clock the card shows: advanced while the
+    /// engine works, stopped at the first reading that found it quiet, and the
+    /// run kept open through the confirmation window after that, while the card
+    /// and the island both show the number the work came to. The island leaves
+    /// when the window closes, because a run confirmed over is news and not
+    /// work: the reading goes on, the server keeps answering, the dashboard keeps
+    /// its card and its frozen numbers, and none of that is an activity. Nothing
+    /// here watches the server, times out, or guesses from numbers that stop
+    /// moving: the island asks the tracker the single question the card asks.
     static func showsIslandActivity(sectionVisible: Bool, isTaskRunning: Bool) -> Bool {
         sectionVisible && isTaskRunning
     }
@@ -1022,24 +1037,36 @@ enum NotchSplashPalette {
         case decode, prefill, ttft
     }
 
-    /// The colour of a card's two figures, each the colour of the line it is drawn
-    /// from, so a pair of numbers needs no key: the batch in hand is the purple
-    /// line and the average over the running is the blue, and the first token's
-    /// card is the one whose written order is the other way round - its p50 is the
-    /// average's blue and its p95 the leading purple.
+    /// The colour of a card's two figures, each the colour of the line it is
+    /// drawn from, so a pair of numbers needs no key. A card's two figures keep
+    /// the same two colours in the same two places: the figure written first is
+    /// purple and the figure written second is green. The two throughput cards
+    /// write the batch in hand first, in purple, and the average over the
+    /// engine's running second, in green. The first token's card writes its
+    /// percentiles in the other pair's words - p50 first, in purple, and p95
+    /// second, in green - because the lower percentile is the case a person
+    /// reads as usual and the tail is the one they read after it.
     static func figureTints(_ measurement: NotchSplashMeasurement) -> (first: Color, second: Color) {
-        switch measurement {
-        case .decode, .prefill: return (purple, blue)
-        case .ttft: return (blue, purple)
-        }
+        _ = measurement
+        return (purple, green)
     }
 
     /// The colour of a card's two lines: the leading line, which is the batch in
     /// hand for the two throughputs and the p95 for the first token's time, and
-    /// the average's line beside it.
+    /// the average's line beside it, which for the first token's time is the
+    /// p50. The batch in hand and the p50 are the purple line in all three cards
+    /// and the average over the running and the p95 are the green, so a figure
+    /// is the colour of the line it is drawn from in every card: the throughput
+    /// cards' first figure is the purple batch in hand, and the first token's
+    /// card's first figure is the purple p50.
     static func lineTints(_ measurement: NotchSplashMeasurement) -> (leading: Color, average: Color) {
-        _ = measurement
-        return (purple, blue)
+        switch measurement {
+        case .decode, .prefill: return (purple, green)
+        // The first token's card draws its tail, the p95, in green and its
+        // middle, the p50, in purple, which is the way round the figures are
+        // written: p50 first in purple, p95 second in green.
+        case .ttft: return (green, purple)
+        }
     }
 
     /// The colour of a figure. `reference` is the colour the figure has when
@@ -1099,6 +1126,13 @@ struct NotchSplashSnapshot: Equatable {
 /// that has outlasted the pauses between turns. A request completing in the
 /// middle of a run is a request completing, and moves nothing: that is the
 /// whole point of the window.
+///
+/// The client's own conversation file was weighed as a second witness and left
+/// out: the endpoint names requests and an instance and nothing that ties a
+/// request to a conversation, the file is written at event boundaries and so
+/// keeps still through a long generation, and one conversation is many
+/// requests. `docs/decisions/0001-splash-task-liveness-from-status.md` keeps the
+/// whole of that reasoning, and the readings' rule with it.
 struct NotchSplashTaskTracker {
     enum Outcome: Equatable {
         case completed, failed, cancelled, lost
@@ -1231,10 +1265,19 @@ struct NotchSplashTaskTracker {
 
     /// The clock's value: a running task's length so far, a finished task's
     /// frozen length, and nothing at all with no task.
+    ///
+    /// A run that has gone quiet is timed to the first reading that found
+    /// nothing running, and not to the moment its confirmation window closes:
+    /// the idle confirmation is not task time, so a task that worked for eleven
+    /// minutes is shown as eleven minutes while the window runs, and freezes at
+    /// the same number the window closes on. Work seen again lifts the clock off
+    /// that mark and it goes on from the work's own beginning.
     func elapsed(at date: Date) -> TimeInterval {
         switch phase {
         case .idle: return 0
-        case .running(_, let startedAt): return max(0, date.timeIntervalSince(startedAt))
+        case .running(_, let startedAt):
+            if let quiet = firstQuietAt { return max(0, quiet.timeIntervalSince(startedAt)) }
+            return max(0, date.timeIntervalSince(startedAt))
         case .finished(_, _, _, let elapsed): return max(0, elapsed)
         }
     }
@@ -1251,8 +1294,11 @@ struct NotchSplashTaskTracker {
     /// Whether the engine's counters moved since the reading before: a request
     /// completed, failed, or cancelled. A generation shorter than the interval
     /// between readings never appears as an active request in any reading, and
-    /// its counters are all that is left of it, so the counters are taken as
-    /// work too. A first reading has no reading before it and says nothing.
+    /// its counters are all that is left of it, so the counters are how such a
+    /// request is noticed at all - they open a run. They do not keep one open:
+    /// the counters are cumulative, so a busy neighbour's work, measured
+    /// against the reading before, would hold a finished run open forever. What
+    /// a run is doing now is answered by the fields that name work in hand.
     private func countersGrew(_ incoming: NotchSplashStatus.Requests) -> Bool {
         guard let last = lastRequests else { return false }
         func grew(_ before: Int?, _ after: Int?) -> Bool {
@@ -1282,11 +1328,18 @@ struct NotchSplashTaskTracker {
     mutating func observe(_ snapshot: NotchSplashSnapshot, at date: Date) -> Event? {
         let status = snapshot.status
         isSpilling = spillsGrew(status.kv.spillCount)
-        let work = status.hasWork || countersGrew(status.requests)
+        // What the engine says it is doing now: requests running, queued,
+        // prefilling, decoding, waiting for resources, in flight over the
+        // front end, pending in the transport, and a snapshot taken mid-loop.
+        let work = status.hasWork
+        // Counters that moved are how a request shorter than the polling
+        // interval is noticed, and they open a run; they are not evidence that
+        // a run is busy, which is what the quiet window measures.
+        let openedWork = work || countersGrew(status.requests)
         lastRequests = status.requests
         switch phase {
         case .idle, .finished:
-            guard work else { return nil }
+            guard openedWork else { return nil }
             return start(id: status.activeRequestIDs.first ?? NotchSplashTaskTracker.unnumbered,
                          at: date, snapshot: snapshot)
 
@@ -1298,6 +1351,8 @@ struct NotchSplashTaskTracker {
             advanceTokens(input: status.metrics.prefillInputTokens,
                           output: status.metrics.decodeOutputTokens)
             if work {
+                // Work in hand cancels the confirmation window and the clock
+                // lifts off the mark it had rested at.
                 firstQuietAt = nil
                 quietReadings = 0
                 return nil
@@ -1873,7 +1928,12 @@ final class NotchSplashService: ObservableObject {
         recordHistory(snapshot: snapshot, at: date)
         recordLive(snapshot: snapshot, at: date)
         if snapshot.status.hasWork { lastActiveAt = date }
-        let event = tracker.observe(snapshot, at: date)
+        // A reading that is already old when it arrives says what the engine
+        // was doing, not what it is doing: it is kept for the charts and the
+        // card, and the task's quiet window is not measured from it, so a pause
+        // in the polling, an answer that arrived late, and a machine that was
+        // asleep are never counted as minutes of an engine doing nothing.
+        let event = isStale(snapshot) ? nil : tracker.observe(snapshot, at: date)
         phase = tracker.phase
         taskTokens = tracker.taskTokens
         isSpilling = tracker.isSpilling

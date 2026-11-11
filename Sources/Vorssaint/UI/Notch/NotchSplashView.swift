@@ -392,10 +392,10 @@ struct NotchSplashDashboardCard: View {
     /// The first three cards measure, and so show two figures and two lines,
     /// both of them the engine's own: the batch in hand, in the reference's
     /// purple, and the average over the whole of the engine's running, in its
-    /// blue. The time to first token is the one card whose figures are not
-    /// in its lines' order: it writes p50 first and p95 second, and draws p95 in
-    /// purple and p50 in blue, because the percentile a window is judged by is
-    /// its worst tail and the pair is read from the middle out.
+    /// green. The time to first token is the one card whose figures are named by
+    /// percentiles: it writes p50 first, in purple, and p95 second, in green, and
+    /// draws its lines in the same two colours, so each figure is the colour of
+    /// its own line while the pair is read from the middle out.
     ///
     /// The cache's card is the reading alone, and keeps the colour of how it
     /// reads: green while the hits are there, amber as they thin, red when the
@@ -444,8 +444,8 @@ struct NotchSplashDashboardCard: View {
                                       overallSeries: series.compactMap(\.ttftSeconds),
                                       currentTint: NotchSplashPalette.lineTints(.ttft).leading,
                                       overallTint: NotchSplashPalette.lineTints(.ttft).average,
-                                      // Written from the middle out: p50 first, in the average's blue, and
-                                      // p95 second, in the lead's purple.
+                                      // Written from the middle out: p50 first, in the purple of its own
+                                      // line, and p95 second, in the green of its line.
                                       firstFigure: NotchSplashSupport.ttftParts(live.ttftP50)?.value,
                                       firstTint: NotchSplashPalette.figureTints(.ttft).first,
                                       secondFigure: NotchSplashSupport.ttftParts(live.ttftP95)?.value,
