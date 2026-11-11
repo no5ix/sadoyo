@@ -728,6 +728,22 @@ enum NotchSplashSupport {
         sectionVisible && isMonitoring
     }
 
+    /// Whether the closed island draws a reading: the section is on the island,
+    /// and the card's clock is advancing.
+    ///
+    /// The clock is the question the island answers - is work being watched
+    /// now - and it is the same clock the card shows, advanced by the tracker
+    /// while a task runs and frozen by the tracker at its end, in the one
+    /// moment the task's news is told. A frozen clock is a task that has
+    /// finished, and the island has nothing left to watch: the reading goes on,
+    /// the server keeps answering, the dashboard keeps its card and its frozen
+    /// numbers, and none of that is an activity. Nothing here watches the
+    /// server, times out, or guesses from numbers that stop moving: the island
+    /// asks the tracker the single question the card asks.
+    static func showsIslandActivity(sectionVisible: Bool, isTaskRunning: Bool) -> Bool {
+        sectionVisible && isTaskRunning
+    }
+
     // MARK: Thresholds
 
     /// Decode speed is green at 70 tokens a second and red below it.

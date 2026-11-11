@@ -32,6 +32,10 @@ struct NotchSplashStrip: View {
         let height = geometry.compactActivityContentHeight
         let wing = geometry.compactActivityWingWidth
         let iconSize = NotchTimerSupport.stripIconSize(height: height)
+        // The section's mark is drawn wider than the type size it is asked for,
+        // and the strip reserves what is drawn so its own clearance from the
+        // silhouette's curve is the clearance a person sees.
+        let markSide = NotchSectionMark.side(size: iconSize, module: .splash)
         let textSize = NotchTimerSupport.stripTextSize(height: height)
         let speed = NotchSplashSupport.stripSpeedText(splash.stripDecodeSpeed, language: l10n.language)
             ?? NotchSplashSupport.placeholder
@@ -48,13 +52,16 @@ struct NotchSplashStrip: View {
                         if let companion {
                             NotchCompanionMark(companion: companion, geometry: geometry)
                         } else {
-                            Image(systemName: NotchModule.splash.symbol)
-                                .font(.system(size: iconSize, weight: .medium))
+                            // The mark the card wears, in the same view: the knot
+                            // the section's card draws, at the strip's size and in
+                            // the strip's colour, so one section is known by one
+                            // shape on the island and on the page.
+                            NotchSectionMark(module: .splash, size: iconSize, tint: NotchSplashPalette.purple)
                         }
                     }
                 }
                 .padding(.leading, companion == nil
-                          ? geometry.compactActivityEdgeInset(boxHeight: iconSize, radius: iconSize / 2)
+                          ? geometry.compactActivityEdgeInset(boxHeight: markSide, radius: markSide / 2)
                           : NotchCompanionMark.inset(companion!, geometry: geometry))
                 .frame(width: wing, height: height, alignment: .leading)
                 Color.clear.frame(width: geometry.compactActivityCameraGap)

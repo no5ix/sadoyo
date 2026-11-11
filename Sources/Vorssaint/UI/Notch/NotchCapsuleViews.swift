@@ -457,7 +457,12 @@ struct NotchCapsuleSplashStrip: View {
         if let companion {
             NotchCapsuleCompanionMark(companion: companion, geometry: geometry)
         } else {
-            NotchCapsuleSymbol(name: NotchModule.splash.symbol, tint: NotchSplashPalette.purple)
+            // The mark the card wears, in the same view, at the row's own slot:
+            // the knot is drawn wider than the type size it is asked for, and
+            // the row reserves its slot, so the mark is centred in it as a
+            // symbol is.
+            NotchSectionMark(module: .splash, size: CapsuleLayout.symbolSize, tint: NotchSplashPalette.purple)
+                .frame(width: CapsuleLayout.symbolWidth)
         }
     }
 }

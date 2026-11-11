@@ -556,15 +556,19 @@ final class NotchService: ObservableObject {
 
     /// The decode speed of a reading in hand.
     ///
-    /// The strip stands for the reading and its numbers, by the card's own rule:
-    /// it appears when Start begins the reading and leaves when the way out ends
-    /// it, and while it stands the strip's figure is the speed the dashboard is
-    /// measuring. A reading that has stopped answering, and a server that
-    /// reports no speed at all, leave the strip away: the island shows what is
-    /// measured, and a stale number is not a measurement of the present.
+    /// The strip stands for the reading and its numbers, by the card's own rule,
+    /// and the rule it follows is the card's clock: the activity is the task,
+    /// so the strip appears while that clock advances, and leaves in the same
+    /// moment the clock freezes and the task's news is told. A reading that has
+    /// stopped answering, and a server that reports no speed at all, leave the
+    /// strip away: the island shows what is measured, and a stale number is not
+    /// a measurement of the present. What is not asked here: whether the server
+    /// is reachable, whether the numbers are moving, or how long it has been
+    /// quiet - the clock is the only state, and a dashboard left open with a
+    /// finished task is not an activity.
     var hasSplashActivity: Bool {
-        NotchSplashSupport.showsDashboardCard(sectionVisible: modules.contains(.splash),
-                                              isMonitoring: NotchSplashService.shared.isMonitoring)
+        NotchSplashSupport.showsIslandActivity(sectionVisible: modules.contains(.splash),
+                                               isTaskRunning: NotchSplashService.shared.isTaskRunning)
             && NotchSplashService.shared.stripShowsDecodeSpeed
     }
 

@@ -1688,12 +1688,27 @@ enum NotchSplashTests {
             suite.expect(world.notices.count == 2 && world.notices.last?.body.contains("10m 17s") == true,
                          "the second completion is its own notice")
             suite.expect(service.isMonitoring, "and the reading is still running")
+            // The same moment, read as the island reads it: the clock froze, so
+            // Splash is no longer an activity, while the card keeps its reading
+            // and its frozen numbers. The two rules answer two questions, and
+            // the clock is the state behind both.
+            suite.expect(!service.isTaskRunning
+                             && !NotchSplashSupport.showsIslandActivity(sectionVisible: true,
+                                                                         isTaskRunning: service.isTaskRunning)
+                             && service.isMonitoring
+                             && NotchSplashSupport.showsDashboardCard(sectionVisible: true,
+                                                                       isMonitoring: service.isMonitoring),
+                         "at the notice the clock is frozen: no Splash activity on the island, and the card stays")
 
             // A task that fails is told as a failure, and the reading goes on
             // to take up the next request. The completed count does not move:
             // only the failed one does, which is what makes this a failure.
             world.documents = [running("req-c", completed: 5)]
             spin(1.4)
+            suite.expect(service.isTaskRunning
+                             && NotchSplashSupport.showsIslandActivity(sectionVisible: true,
+                                                                        isTaskRunning: service.isTaskRunning),
+                         "the next request begins a clock of its own, and the island takes Splash back as an activity")
             world.documents = [done(5, failed: 1)]
             world.now = world.now.addingTimeInterval(5)
             spin(1.4)
@@ -1929,6 +1944,88 @@ enum NotchSplashTests {
     }
 
 
+    // MARK: The island's activity, and the mark it wears
+
+    /// The closed island asks one question of a reading, and the answer is the
+    /// card's clock: while that clock advances, Splash is an activity, and in
+    /// the one moment the clock freezes and the task's news is told, it is not.
+    ///
+    /// The reading, the server and the dashboard are untouched by that moment
+    /// and keep their state, which is exactly why the island may not read them:
+    /// a card left open on a finished task, and a server that still answers, are
+    /// not work being watched. The mark is the other half of the same section:
+    /// the strip wears the mark the card wears, in the same view at the strip's
+    /// size, so one section is one shape wherever it is seen.
+    static func islandActivityChecks(_ suite: TestSuite) {
+        func source(_ path: String) -> String { (try? String(contentsOfFile: path, encoding: .utf8)) ?? "" }
+        // The rule, in its three cases.
+        suite.expect(NotchSplashSupport.showsIslandActivity(sectionVisible: true, isTaskRunning: true),
+                     "a clock that is advancing is an activity on the island")
+        suite.expect(!NotchSplashSupport.showsIslandActivity(sectionVisible: true, isTaskRunning: false),
+                     "a frozen clock is not an activity, whatever the server and the dashboard go on to say")
+        suite.expect(!NotchSplashSupport.showsIslandActivity(sectionVisible: false, isTaskRunning: true),
+                     "a section not in the island has no strip, clock advancing or not")
+        // One clock, one answer, at the tracker's own moment of ending: the task
+        // runs, the island registers it; the task ends, its clock freezes, and
+        // the island lets it go while the card keeps it.
+        var tracker = NotchSplashTaskTracker(quiescence: 30, quietReadingsNeeded: 2)
+        _ = tracker.observe(snapshot(#"{"instance": {"id": "a"}, "requests": {"completed": 3}, "active_requests": [{"id": "r1"}]}"#),
+                            at: start)
+        suite.expect(tracker.isRunning
+                         && NotchSplashSupport.showsIslandActivity(sectionVisible: true,
+                                                                    isTaskRunning: tracker.isRunning),
+                     "the running clock the card shows is the state the island registers")
+        _ = tracker.observe(snapshot(#"{"instance": {"id": "a"}, "requests": {"completed": 4}, "active_requests": []}"#),
+                            at: start.addingTimeInterval(10))
+        _ = tracker.observe(snapshot(#"{"instance": {"id": "a"}, "requests": {"completed": 4}, "active_requests": []}"#),
+                            at: start.addingTimeInterval(45))
+        let ended = tracker.observe(snapshot(#"{"instance": {"id": "a"}, "requests": {"completed": 4}, "active_requests": []}"#),
+                                    at: start.addingTimeInterval(80))
+        suite.expect(ended != nil && !tracker.isRunning
+                         && !NotchSplashSupport.showsIslandActivity(sectionVisible: true,
+                                                                     isTaskRunning: tracker.isRunning)
+                         && NotchSplashSupport.showsDashboardCard(sectionVisible: true, isMonitoring: true)
+                         && tracker.elapsed(at: start.addingTimeInterval(600)) == 45,
+                     "the moment the task is told leaves the island and keeps the card, on the one frozen clock")
+        // The service asks the clock and nothing else, and is told by the same
+        // publication that freezes it: no health check, no connection test,
+        // no timeout of its own beside the tracker's.
+        let service = source("Sources/Vorssaint/Services/Notch/NotchService.swift")
+        let head = "    var hasSplashActivity: Bool {"
+        let body: String = {
+            guard let found = service.range(of: head) else { return "" }
+            let tail = service[found.upperBound...]
+            let end = tail.range(of: "\n    }")?.lowerBound ?? tail.startIndex
+            return String(tail[..<end])
+        }()
+        suite.expect(body.contains("showsIslandActivity") && body.contains("isTaskRunning"),
+                     "the island's Splash activity is the clock: \(body.trimmingCharacters(in: .whitespacesAndNewlines))")
+        suite.expect(!body.contains("isMonitoring") && !body.contains("isTaskFinished"),
+                     "a reading that goes on, and a task that has been told, are not in the island's rule")
+        suite.expect(service.contains("Publishers.CombineLatest3(splash.$isMonitoring.removeDuplicates(),")
+                         && service.contains("splash.$phase.removeDuplicates()"),
+                     "the island is woken by the same publication that freezes the clock, and by no poller of its own")
+        // The mark, in one definition: the card's view at the strip's size, and
+        // the room the knot is drawn at, which the shared rule answers.
+        let strip = source("Sources/Vorssaint/UI/Notch/NotchSplashStrip.swift")
+        let capsule = source("Sources/Vorssaint/UI/Notch/NotchCapsuleViews.swift")
+        let card = source("Sources/Vorssaint/UI/Notch/NotchSplashView.swift")
+        suite.expect(strip.contains("NotchSectionMark(module: .splash, size: iconSize, tint: NotchSplashPalette.purple)")
+                         && !strip.contains("Image(systemName: NotchModule.splash.symbol)"),
+                     "the strip wears the card's mark in the card's view, and draws no symbol of its own")
+        suite.expect(capsule.contains("NotchSectionMark(module: .splash, size: CapsuleLayout.symbolSize, tint: NotchSplashPalette.purple)")
+                         && !capsule.contains("NotchCapsuleSymbol(name: NotchModule.splash.symbol"),
+                     "the capsule's row wears the same mark as the strip and the card")
+        suite.expect(card.contains("NotchSectionMark(module: .splash, size:"),
+                     "the card's mark is the shared view, so the strip and the card have one definition")
+        suite.expect(strip.contains("NotchSectionMark.side(size: iconSize, module: .splash)")
+                         && strip.contains("boxHeight: markSide, radius: markSide / 2"),
+                     "the strip reserves and clears what the mark is drawn at, so its position stays the strip's own")
+        suite.expect(source("Sources/Vorssaint/UI/Notch/NotchComponents.swift")
+                         .contains("module == .splash ? size * AgentProvider.codex.markScale : size"),
+                     "the wider side the knot is drawn at is one rule, shared by every surface that reserves room for it")
+    }
+
     // MARK: The page, its spacing, and what it does not draw
 
     /// The page before a reading, and the space a section's mark keeps from its
@@ -2005,6 +2102,7 @@ enum NotchSplashTests {
         suite.run("splash monitoring") { monitoringChecks(suite) }
         suite.run("splash ruler") { rulerChecks(suite) }
         suite.run("splash dashboard") { dashboardChecks(suite) }
+        suite.run("splash island activity") { islandActivityChecks(suite) }
         suite.run("splash page") { pageChecks(suite) }
         suite.run("splash strings") { localizationChecks(suite) }
         suite.run("splash palette") { paletteChecks(suite) }

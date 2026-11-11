@@ -903,6 +903,31 @@ enum NotchActivityTests {
                          && NotchSupport.compactActivity(timer: true, downloads: true, agents: true,
                                                          calendar: true, music: true) == .timer,
                      "the page and the strip read the same list from its two ends")
+
+        // The record, at the moment a reading ends beside a playing song. Its key
+        // is pruned and the song's own record is not moved: the song takes the
+        // strip whole, in the place its own activation gives it, and no position
+        // is left empty for want of a promotion.
+        func stripKey(_ activity: NotchCompactActivity) -> String { "strip.\(activity.id)" }
+        var ledger = NotchActivityInsertion()
+        _ = ledger.register(["strip.splash", "strip.music"])
+        let song = ledger.entry(for: "strip.music")
+        _ = ledger.register(["strip.music"])
+        let selection = NotchActivitySelection()
+        suite.expect(ledger.order == ["strip.music"]
+                         && ledger.entry(for: "strip.music") == song
+                         && ledger.ordering([.music, .timer]) { stripKey($0) } == [.music, .timer],
+                     "the reading's leaving promotes the song, and the song's record does not move")
+        suite.expect(selection.current(available: ledger.ordering([.music]) { stripKey($0) }, prefers: .last) == .music
+                         && selection.current(available: [], prefers: .last) == nil,
+                     "the activity left standing is what the strip reads, and nothing is left of the reading")
+        // A reading begun again is the newest thing on the island: the song begun
+        // first keeps the strip's leading end, and the reading begun after it
+        // takes the figure, as the order says.
+        _ = ledger.register(["strip.splash", "strip.music"])
+        suite.expect(ledger.order == ["strip.music", "strip.splash"]
+                         && ledger.ordering([.splash, .music]) { stripKey($0) } == [.music, .splash],
+                     "a reading begun after the song is the strip's reading, with the song as its mark")
     }
 
     /// The timer's own marks, and what it shares the strip with: a countdown
