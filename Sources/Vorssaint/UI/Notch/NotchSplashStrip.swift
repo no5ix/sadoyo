@@ -5,8 +5,8 @@ import SwiftUI
 
 /// The closed island while a Splash reading is being watched: on the right the
 /// decode speed the engine is measuring, and on the left the section's mark -
-/// or, when an activity began before this reading did, that activity's own
-/// mark, opening its page. The wings are as wide as the wider side needs, and
+/// or, when a more senior activity is running, that activity's own mark,
+/// opening its page. The wings are as wide as the wider side needs, and
 /// the reading is measured by its widest shape, so the island keeps its size as
 /// the figure gains or loses a digit.
 ///
@@ -22,9 +22,9 @@ struct NotchSplashStrip: View {
     @ObservedObject private var l10n = L10n.shared
 
     private var text: NotchSplashStrings { FeatureStrings.notchSplash(l10n.language) }
-    /// The activity that became active before this reading did, drawn at the
-    /// strip's leading end so the island reads in the order its activities
-    /// started. Without one, the strip leads with the section's own mark.
+    /// The activity drawn at the strip's leading end beside this reading: the
+    /// one of the pair that stands above it, whose page a click opens. Without
+    /// one, the strip leads with the section's own mark.
     private var companion: NotchCompactActivity? { service.compactCompanion }
 
     var body: some View {

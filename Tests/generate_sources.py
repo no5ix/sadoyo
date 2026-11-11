@@ -1326,6 +1326,11 @@ def main():
     # Exercise the capsule's production music branch with the hover fixture.
     # Other activity services are unrelated to this sizing contract.
     capsule_music = declaration(notch, "    private func capsuleStripSize(").replace("    private ", "    ", 1)
+    # The capsule's pair is measured from the countdown's digits, and the mark's
+    # widest form depends on the countdown's mode. This fixture has no timer
+    # service, so the mode is the state's own standing answer.
+    capsule_music = capsule_music.replace("timerCountsUp: NotchTimerService.shared.session.countsUp",
+                                          "timerCountsUp: timerCountsUp")
     prefix, separator, cases = capsule_music.partition("        switch activity {\n")
     music_case, next_case, _ = cases.partition("        case .timer:")
     if not separator or not next_case or not music_case.startswith("        case .music:\n"):
@@ -1385,9 +1390,10 @@ def main():
           + "}\n}\n")
     music_visibility = "".join(declaration(notch, prefix).replace("    private ", "    ", 1) for prefix in [
         "    private var hiddenUntilHover:", "    var fullscreenCompact:", "    var idleContent:", "    var hasMusicActivity:",
-        "    private func musicStripHolds(", "    var compactActivity:", "    private func carriesCompanion(",
+        "    private func musicStripHolds(", "    var compactActivity:",
         "    var compactActivityGeometry:", "    private func compactGeometry(", "    var compactActivities:",
-        "    private var compactActivityCandidates:", "    private var stripInsertion",
+        "    private var compactActivityCandidates:", "    private var stripPair",
+        "    private var stripCandidates",
         "    var compactCompanion:",
         "    var surfaceSize:", "    var surfaceShift:", "    var showsDashboard: Bool {",
         "    func collapse(",
@@ -1401,6 +1407,10 @@ def main():
     music_visibility = music_visibility.replace("UserDefaults.standard", "ReviewDefaults.current!")
     music_visibility = music_visibility.replace("calendar: hasCalendarActivity", "calendar: false")
     music_visibility = music_visibility.replace("splash: hasSplashActivity", "splash: false")
+    # The strip's pair rule asks the countdown's own service whether it is
+    # running; this fixture has no timer, and its answer is a standing yes.
+    music_visibility = music_visibility.replace("timerRunning: NotchTimerService.shared.session.isRunning",
+                                                "timerRunning: timerRunning")
     # The splash strip's wing is measured from the service's speed, which this
     # fixture does not run; the pair's width is the splash suite's to measure.
     music_visibility = music_visibility.replace("wing: splashStripWing(for: companion, in: geometry)", "wing: 44")

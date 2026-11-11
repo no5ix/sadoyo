@@ -8,6 +8,10 @@ import SwiftUI
 /// event's clock or the music playing, each opening its own page. The wings
 /// are as wide as the wider side needs, and both sit at the ends, where the
 /// island shows.
+///
+/// Where the countdown is the mark of a pair - beside a reading it stands above
+/// - its own mark is its remaining time, in the one unit the wing fits, and not
+/// its icon: see `NotchTimerSupport.stripMarkText`.
 struct NotchTimerStrip: View {
     @ObservedObject var service: NotchService
     /// Where the island draws it: its own strip as of the last update, or
@@ -47,6 +51,13 @@ struct NotchTimerStrip: View {
                         if let companion {
                             NotchCompanionMark(companion: companion, geometry: geometry)
                         } else {
+                            // Alone, the strip has its reading of the time on the
+                            // trailing side already, so the leading side is free to
+                            // say what the countdown *is* doing: the paused clock, the
+                            // finished check, the count up. Beside another activity the
+                            // countdown is the mark, and a resting countdown is never
+                            // drawn beside one - the pair gives it the whole strip - so
+                            // there its number stands in the mark's place.
                             Image(systemName: timer.session.completed ? "checkmark.circle"
                                   : timer.session.isPaused ? "pause.circle" : timer.session.countsUp ? "stopwatch" : "timer")
                                 .font(.system(size: iconSize, weight: .medium))
@@ -107,11 +118,12 @@ struct NotchTimerStrip: View {
 }
 
 /// What shares a strip with another activity, drawn at the strip's left end:
-/// a timer's own clock mark, a download's progress, the working agents' marks,
-/// the event's dot and clock, the playing track's cover, the decode speed, the
-/// watch, or the Keep Awake cup. Every activity that is running is drawn, in the
-/// order it became active, and the mark is the activity's own - what its strip
-/// leads with when it owns the island alone.
+/// a countdown's remaining time, a download's progress, the working agents'
+/// marks, the event's dot and clock, the playing track's cover, the decode
+/// speed, the watch, or the Keep Awake cup. Every activity that is running is
+/// drawn, in the order of its standing, and the mark is the activity's own -
+/// what its strip leads with, or, for the countdown and the reading, the number
+/// it is being watched for.
 struct NotchCompanionMark: View {
     let companion: NotchCompactActivity
     let geometry: NotchGeometry
@@ -149,6 +161,13 @@ struct NotchCompanionMark: View {
         case .music:
             NotchMusicCover(artwork: music.artwork, side: geometry.compactMusicArtworkSide,
                             radius: geometry.compactMusicArtworkRadius, source: music.playback?.track)
+        case .timer:
+            // The countdown's own digits, in the place its icon used to hold:
+            // the hours while there are hours, the minutes while there are
+            // minutes, and the seconds, plain, through the last minute. The mark
+            // says what the countdown has left, which is the one question the
+            // island is being asked beside the reading it shares the strip with.
+            timerMark
         case .splash:
             // The speed of a reading in hand, as the strip's own reading of it:
             // the countdown keeps its clock on the other side, and this is the
@@ -226,7 +245,12 @@ struct NotchCompanionMark: View {
             // strip's reading keeps it.
             let size = NotchTimerSupport.stripTextSize(height: geometry.compactActivityContentHeight)
             return geometry.compactActivityEdgeInset(boxHeight: size * 0.72, radius: 0)
-        case .downloads, .timer, .keepAwake, .watch:
+        case .timer:
+            // The mark is the countdown's digits, so its ink is about the cap
+            // height, as a strip's reading and the decode speed's mark keep it.
+            let size = NotchTimerSupport.stripTextSize(height: geometry.compactActivityContentHeight)
+            return geometry.compactActivityEdgeInset(boxHeight: size * 0.72, radius: 0)
+        case .downloads, .keepAwake, .watch:
             let side = min(13, NotchTimerSupport.stripIconSize(height: geometry.compactActivityContentHeight))
             return geometry.compactActivityEdgeInset(boxHeight: side, radius: side / 2)
         }
@@ -252,9 +276,47 @@ struct NotchCompanionMark: View {
                                                           language: language)
                 ?? NotchSplashSupport.placeholder
             return "\(text.decode) \(speed)"
-        case .timer, .keepAwake, .watch:
+        case .timer:
+            // The mark speaks the countdown's number, so the voice says it too.
+            let clock = NotchTimerService.shared
+            let text = NotchTimerSupport.stripMarkText(for: clock.session, at: clock.now,
+                                                       locale: Locale(identifier: language.rawValue))
+            return "\(companion.title(language)) \(text)"
+        case .keepAwake, .watch:
             return companion.title(language)
         }
+    }
+
+    /// The countdown as the strip writes it beside another activity: the same
+    /// reading, the same rounding, and the same ticking schedule the timer's own
+    /// strip keeps, so the last minute counts off one second at a time here as
+    /// it does there. A countdown at rest is not drawn beside another activity
+    /// at all - the strip's pair gives a resting clock the whole strip - so the
+    /// mark is drawn only while the clock runs.
+    private var timerMark: some View {
+        Group {
+            if timer.session.isRunning {
+                TimelineView(.periodic(from: Date(timeIntervalSinceNow: NotchTimerSupport.tickScheduleOffset(
+                    for: timer.session, at: timer.now)), by: 1)) { _ in timerReading }
+            } else {
+                timerReading
+            }
+        }
+    }
+
+    private var timerReading: some View {
+        let text = NotchTimerSupport.stripMarkText(for: timer.session, at: timer.now,
+                                                   locale: Locale(identifier: l10n.language.rawValue))
+        return Text(text)
+            .font(.system(size: NotchTimerSupport.stripTextSize(height: geometry.compactActivityContentHeight),
+                          weight: .medium)).monospacedDigit()
+            .foregroundStyle(.orange)
+            .lineLimit(1).minimumScaleFactor(0.65)
+            // A mark that gains or loses a character, like 2h becoming 59m,
+            // resizes the wings; the service measures the same reading.
+            .onChange(of: NotchAgentSupport.readingShape(text)) { _, _ in
+                DispatchQueue.main.async { service.refreshPresentation() }
+            }
     }
 
     /// The countdown, for the mark of a timer that shares another activity's

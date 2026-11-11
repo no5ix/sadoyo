@@ -378,6 +378,44 @@ enum NotchTimerSupport {
     static func stripAgentMarkSize(height: CGFloat, working: Int) -> CGFloat {
         min(working > 1 ? 11 : 14, max(8, height - NotchLayout.compactEdgeGap * 2 - 4))
     }
+
+    // MARK: A countdown sharing another activity's strip
+
+    /// The countdown as the closed island writes it in the place its icon used
+    /// to hold.
+    ///
+    /// A mark beside another activity's reading has the width of a wing and the
+    /// attention of a glance, so it keeps one unit: the hours while there are
+    /// hours, the minutes while there are minutes, and the seconds plain, with
+    /// no unit to spend the width on, through the last minute. The rounding is
+    /// the clock's own - the minutes are the compact reading the strip has
+    /// always written, and a second is counted up to the next one, so a
+    /// countdown never shows a minute it has not reached and never shows a
+    /// sixty-first second. A stopwatch counts up, and keeps its own compact
+    /// clock, because what it has to say is the time gone by.
+    static func stripMarkText(for session: NotchTimerSession, at now: TimeInterval, locale: Locale) -> String {
+        stripMarkText(session.reading(at: now), countsUp: session.countsUp, locale: locale)
+    }
+
+    static func stripMarkText(_ reading: TimeInterval, countsUp: Bool, locale: Locale) -> String {
+        if countsUp { return compactStopwatchText(reading) }
+        let seconds = wholeSeconds(reading, limit: timerLimit, rounded: .up)
+        // Hours are read as they stand, the way the compact clock reads them: a
+        // countdown of two hours and a half is `2h` to the eye.
+        if seconds >= 3600 { return String(format: "%dh", seconds / 3600) }
+        if seconds >= 60 { return compactText(TimeInterval(seconds), locale: locale) }
+        return String(seconds)
+    }
+
+    /// The widest marks a countdown writes, in the three forms the rule
+    /// answers with. `99m` is wider than the longest hour a countdown reaches
+    /// (`3h`, at the timer's own limit), and wider than the seconds, so the
+    /// island is measured once and keeps its size as the reading crosses an
+    /// hour, a minute, or a second.
+    static let stripMarkShapes = ["99m", "3h", "99"]
+    /// The widest marks a stopwatch writes: its clock's two forms, the
+    /// minutes-and-seconds and the hours-and-minutes.
+    static let stripMarkCountUpShapes = ["99:99", "99h59"]
 }
 
 /// The alarm's choices: the ringtones and alarm tones macOS shares with the

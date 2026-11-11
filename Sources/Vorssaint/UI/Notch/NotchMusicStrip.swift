@@ -17,7 +17,9 @@ struct NotchCompactMusicSnapshot {
 
 /// Compact playback stays beside the camera and never grows a second row.
 /// Resting on the cover names the song beside it, and resting on the bars
-/// turns them into the song's play or pause button.
+/// turns them into the song's play or pause button. Beside a more senior
+/// activity, whose mark takes the strip's leading end, the song shows its
+/// cover at its own end, and the cover carries the button in the bars' place.
 struct NotchMusicStrip: View {
     @ObservedObject var service: NotchService
     var snapshot: NotchCompactMusicSnapshot? = nil
@@ -73,11 +75,11 @@ struct NotchMusicStrip: View {
 
     var body: some View {
         let wing = geometry.compactActivityWingWidth
-        // Beside the activity begun before it, the song keeps its bars at the
-        // trailing end and gives the leading end to that activity's mark, so the
-        // strip reads left to right in the order its activities started. The
-        // name makes room; the strip's click opens the island, where every
-        // activity has its card.
+        // Beside a more senior activity the song keeps its cover at the trailing
+        // end and gives the leading end to that activity's mark, so the strip
+        // reads left to right in the order of their standing. The name makes
+        // room; the strip's click opens the island, where every activity has its
+        // card.
         let companion = live ? service.compactCompanion : nil
         let named: CGFloat? = companion == nil ? namedWing : nil
         Button { live ? service.activateMusicStrip() : service.openActivity(.music) } label: {
@@ -110,10 +112,16 @@ struct NotchMusicStrip: View {
                 .frame(width: geometry.compactActivityCameraGap, height: geometry.compactActivityContentHeight)
                 .clipped()
                 HStack {
-                    if wing > 0 { bars }
+                    if wing > 0 {
+                        // Beside a more senior activity the song shows its cover
+                        // at its own end, and the button the cover becomes under
+                        // the pointer: the artwork is the song's own mark, and it
+                        // carries the play and pause the bars have always carried.
+                        if companion == nil { bars } else { pairedCover }
+                    }
                 }
                 .padding(.leading, innerInset)
-                .padding(.trailing, barsInset)
+                .padding(.trailing, companion == nil ? barsInset : Layout.coverInset(geometry))
                 .frame(width: wing, height: geometry.compactActivityContentHeight, alignment: .trailing)
                 .contentShape(Rectangle())
                 .onHover { if live { service.hoverMusicStrip(.bars, entered: $0) } }
@@ -146,6 +154,27 @@ struct NotchMusicStrip: View {
                                    barWidth: NotchLayout.compactMusicBarWidth,
                                    height: geometry.compactMusicBarHeight,
                                    tint: tint?.color ?? .white)
+                .opacity(showsControl ? 0 : 1)
+            if showsControl {
+                NotchMusicStripButton(playing: playing, tint: tint?.color ?? .white,
+                                      height: geometry.compactMusicBarHeight)
+                    .transition(.opacity)
+            }
+        }
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: showsControl)
+    }
+
+    /// The song's cover at the strip's own end while a more senior activity
+    /// holds the leading end, and the play or pause button the cover becomes
+    /// while the pointer rests on it. The artwork is the song's mark - the record
+    /// it is playing, and not a shape standing in for it - and the control keeps
+    /// the place and the hover the bars' own.
+    private var pairedCover: some View {
+        let side = Layout.pairedCoverSide(geometry)
+        return ZStack {
+            NotchMusicCover(artwork: artwork, side: side,
+                            radius: min(side / 2, geometry.compactMusicArtworkRadius),
+                            source: playback?.track)
                 .opacity(showsControl ? 0 : 1)
             if showsControl {
                 NotchMusicStripButton(playing: playing, tint: tint?.color ?? .white,

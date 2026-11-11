@@ -274,8 +274,8 @@ struct NotchCapsuleMusicStrip: View {
     private var showsControl: Bool { live && service.musicStripShowsControl }
     /// A click's request shows at once, before the player says so.
     private var playing: Bool { (live ? service.musicStripRequest : nil) ?? playback?.isPlaying == true }
-    /// The activity that became active before the song did, drawn at the row's
-    /// leading end so the capsule reads in the order its activities started.
+    /// The activity drawn at the row's leading end beside the song: the one of
+    /// the pair that stands above it, so the capsule reads in their standing.
     private var companion: NotchCompactActivity? { live ? service.compactCompanion : nil }
     /// The working agents, for the mark of agents that shares the row.
     private var agentWorking: Int { Set(AgentUsageService.shared.snapshot.live.map(\.provider)).count }
@@ -295,7 +295,8 @@ struct NotchCapsuleMusicStrip: View {
             && (service.capsuleMusicTitleShown || (live ? service.musicStripNamesSong : snapshot?.namesSong == true))
         let rowSize = size ?? CapsuleLayout.musicSurface(title: named ? title : nil,
                                                         companion: companion, geometry: geometry,
-                                                        language: l10n.language)
+                                                        language: l10n.language,
+                                                        timerCountsUp: NotchTimerService.shared.session.countsUp)
         NotchCapsuleRow(size: rowSize, geometry: geometry, leading: 0, trailing: 0) {
             HStack(spacing: 0) {
                 if let companion {
@@ -525,12 +526,11 @@ private struct NotchCapsuleCompanionMark: View {
                 .foregroundStyle(NotchSplashPalette.purple)
                 .lineLimit(1).fixedSize()
         case .timer:
-            // The countdown's own mark, as the timer strip leads with it: the
-            // finished check, the paused clock, the count up, the countdown.
-            NotchCapsuleSymbol(name: timerService.session.completed ? "checkmark.circle"
-                                 : timerService.session.isPaused ? "pause.circle"
-                                 : timerService.session.countsUp ? "stopwatch" : "timer")
-                .foregroundStyle(.orange)
+            // The countdown's own digits, in the place its icon used to hold:
+            // the hours while there are hours, the minutes while there are
+            // minutes, and the seconds, plain, through the last minute, in the
+            // row's own clock figure and on the clock's own schedule.
+            timerMark
         case .watch:
             NotchCapsuleSymbol(name: NotchModule.watch.symbol)
         case .keepAwake:
@@ -540,6 +540,36 @@ private struct NotchCapsuleCompanionMark: View {
 
     /// The countdown, for the mark of a timer that shares another activity's row.
     @ObservedObject private var timerService = NotchTimerService.shared
+    /// The island, so a mark that gains a character can ask for the row again.
+    @ObservedObject private var service = NotchService.shared
+
+    /// The countdown as the row writes it beside another activity: the reading
+    /// and the ticking schedule the timer's own strip keeps, so the last minute
+    /// counts off one second at a time here as it does there.
+    private var timerMark: some View {
+        Group {
+            if timerService.session.isRunning {
+                TimelineView(.periodic(from: Date(timeIntervalSinceNow: NotchTimerSupport.tickScheduleOffset(
+                    for: timerService.session, at: timerService.now)), by: 1)) { _ in timerReading }
+            } else {
+                timerReading
+            }
+        }
+    }
+
+    private var timerReading: some View {
+        let text = NotchTimerSupport.stripMarkText(for: timerService.session, at: timerService.now,
+                                                   locale: Locale(identifier: l10n.language.rawValue))
+        return Text(text)
+            .font(Font(CapsuleLayout.readingFont as CTFont))
+            .foregroundStyle(.orange)
+            .lineLimit(1).fixedSize()
+            // A mark that gains or loses a character, like 2h becoming 59m,
+            // resizes the row; the service measures the same reading.
+            .onChange(of: NotchAgentSupport.readingShape(text)) { _, _ in
+                DispatchQueue.main.async { service.refreshPresentation() }
+            }
+    }
 }
 
 /// A working agent: its mark and the reading the person chose.
@@ -804,9 +834,9 @@ struct NotchCapsuleKeepAwakeStrip: View {
 
     @ViewBuilder private func row(end: Date?, now: Date) -> some View {
         let geometry = displayGeometry ?? service.geometry
-        // A session begun before another activity keeps the row's leading end as
-        // its cup, and the activity begun after it keeps its reading on the
-        // right, so the row reads in the order its activities started.
+        // A session draws its cup at the row's leading end when it stands above
+        // the activity it shares the row with, which keeps its reading on the
+        // right: the row reads in the order of their standing.
         let companion = service.compactCompanion
         NotchCapsuleRow(size: size, geometry: geometry) {
             HStack(spacing: CapsuleLayout.spacing) {

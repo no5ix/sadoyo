@@ -823,6 +823,19 @@ enum NotchMusicStripLayout {
         !geometry.isNotched && geometry.compactActivityCameraGap >= 56
     }
 
+    /// The cover as the strip draws it at its own end while a more senior
+    /// activity holds the other end: the song's artwork, and not its equalizer.
+    /// The island shows the record the song is on, which is what the song's own
+    /// end of a shared strip is for.
+    static func pairedCoverSide(_ geometry: NotchGeometry) -> CGFloat { coverSide(geometry) }
+
+    /// The room the cover needs at the end of a shared wing, with the air the
+    /// strip keeps at a wing's two ends. The service measures the strip from
+    /// this, so the wings are as wide as the artwork the song draws.
+    static func pairedCoverWing(_ geometry: NotchGeometry) -> CGFloat {
+        coverSide(geometry) + coverInset(geometry) + innerInset(geometry)
+    }
+
     static func showsArtist(_ geometry: NotchGeometry) -> Bool { geometry.compactActivityContentHeight >= 28 }
 
     private static var measuredWords: (title: String, artist: String?, width: CGFloat)?
@@ -899,6 +912,26 @@ enum NotchCompactActivity: String, Identifiable {
     var symbol: String {
         self == .keepAwake ? NotchControlItem.keepAwake.symbol : module.symbol
     }
+}
+
+/// The two activities the closed strip draws: the reading it shows at its
+/// trailing end, and the mark it shows at its leading end beside it.
+///
+/// Named, and equal to another pair, because the strip's two ends are answered
+/// from what is running and asked about a great deal - by the views that draw
+/// them, and by the tests that measure the rule.
+struct NotchStripPair: Equatable {
+    let reading: NotchCompactActivity?
+    let mark: NotchCompactActivity?
+
+    init(reading: NotchCompactActivity? = nil, mark: NotchCompactActivity? = nil) {
+        self.reading = reading
+        self.mark = mark
+    }
+
+    /// The pair as the strip draws it, left to right: the mark at the leading
+    /// end, the reading at the trailing.
+    var ordered: [NotchCompactActivity] { [mark, reading].compactMap { $0 } }
 }
 
 /// Two activities sharing the closed island: the primary keeps its reading
@@ -981,11 +1014,10 @@ struct NotchActivitySelection {
     /// The chosen activity, while it is there to show; otherwise the activity
     /// the `available` list leads with, or the one it ends with.
     ///
-    /// The list's order is the order its activities became active in, so the
-    /// end asked for is the question being put: the page asks for the activity
-    /// begun first, and the closed strip asks for the one begun last, because
-    /// the strip's right-hand reading is the newest of what is running and its
-    /// left-hand mark is the earliest.
+    /// The list's order is the order its activities became active in, which is
+    /// the page's own record, and the end asked for is the question being put:
+    /// the page asks for the activity begun first. The closed strip does not ask
+    /// this question at all - its two activities are answered by `stripPair`.
     func current(available: [NotchCompactActivity], prefers: NotchActivityEnd = .first) -> NotchCompactActivity? {
         if let preferred, available.contains(preferred) { return preferred }
         switch prefers {
@@ -1158,15 +1190,16 @@ enum NotchCapsuleLayout {
     /// Playing music: the cover in the round end, the title and the bars.
     /// Without a title, only the cover and the bars, at the capsule's ends.
     ///
-    /// Beside another activity, the activity that became active first keeps the
+    /// Beside another activity, the one that stands above the song keeps the
     /// capsule's leading end as its mark, and the song's cover and bars follow
-    /// it, so the row reads in the order its activities started.
+    /// it, so the row reads in the order of their standing.
     static func musicSurface(title: String?, companion: NotchCompactActivity? = nil,
-                             geometry: NotchGeometry, language: AppLanguage = .enUS) -> CGSize {
+                             geometry: NotchGeometry, language: AppLanguage = .enUS,
+                             timerCountsUp: Bool = false) -> CGSize {
         let named = title.map { endPadding + width($0, font: titleFont) + endPadding } ?? endPadding
         let mark = companion == nil ? 0
             : timerMarkWidth(companion: companion, workingAgents: 1, downloadPercent: false,
-                             geometry: geometry, language: language) + markGap(companion)
+                             geometry: geometry, language: language, timerCountsUp: timerCountsUp) + markGap(companion)
         let content = mark + artworkSide(geometry) + named + barsWidth
         return surface(content: content, leading: artworkInset(geometry), maximum: Maximum.music, geometry: geometry)
     }
@@ -1174,10 +1207,17 @@ enum NotchCapsuleLayout {
     /// A timer's mark, or the mark of what shares the capsule with a timer, an
     /// event, a reading, a song, the working agents, a download, the watch, or a
     /// Keep Awake session: a download's arrow and percentage, the working
-    /// agents, the cover, the decode speed, or the event's dot and countdown.
+    /// agents, the cover, the decode speed, the countdown's own digits, or the
+    /// event's dot and countdown.
+    ///
+    /// `timerCountsUp` is the countdown's mode, asked for because a stopwatch's
+    /// mark is a clock of five characters and a countdown's is a unit of three:
+    /// the mark is measured by the widest form the rule writes, and the two
+    /// kinds do not share one shape.
     static func timerMarkWidth(companion: NotchCompactActivity?, workingAgents: Int, downloadPercent: Bool,
                                geometry: NotchGeometry, language: AppLanguage,
-                               calendarLeadTime: TimeInterval = NotchCalendarSupport.timeLeftLeadTime) -> CGFloat {
+                               calendarLeadTime: TimeInterval = NotchCalendarSupport.timeLeftLeadTime,
+                               timerCountsUp: Bool = false) -> CGFloat {
         switch companion {
         case .downloads:
             return symbolWidth + (downloadPercent ? markSpacing + downloadPercentWidth(language) : 0)
@@ -1185,6 +1225,7 @@ enum NotchCapsuleLayout {
         case .music: return artworkSide(geometry)
         case .calendar: return calendarClockWidth(leadTime: calendarLeadTime)
         case .splash: return splashSpeedWidth
+        case .timer: return timerMarkWidth(countsUp: timerCountsUp)
         default: return symbolWidth
         }
     }
@@ -1202,9 +1243,11 @@ enum NotchCapsuleLayout {
     /// capsule only moves when a character comes or goes.
     static func timerSurface(reading: String, companion: NotchCompactActivity?, workingAgents: Int,
                              downloadPercent: Bool, geometry: NotchGeometry, language: AppLanguage,
-                             calendarLeadTime: TimeInterval = NotchCalendarSupport.timeLeftLeadTime) -> CGSize {
+                             calendarLeadTime: TimeInterval = NotchCalendarSupport.timeLeftLeadTime,
+                             timerCountsUp: Bool = false) -> CGSize {
         let mark = timerMarkWidth(companion: companion, workingAgents: workingAgents, downloadPercent: downloadPercent,
-                                  geometry: geometry, language: language, calendarLeadTime: calendarLeadTime)
+                                  geometry: geometry, language: language, calendarLeadTime: calendarLeadTime,
+                                  timerCountsUp: timerCountsUp)
         let content = mark + markGap(companion) + width(NotchAgentSupport.readingShape(reading), font: readingFont)
         return surface(content: content, leading: companion == .music ? artworkInset(geometry) : endPadding,
                        maximum: Maximum.activity, geometry: geometry)
@@ -1215,9 +1258,10 @@ enum NotchCapsuleLayout {
     /// tooltip and VoiceOver.
     static func calendarPairSurface(companion: NotchCompactActivity, workingAgents: Int, downloadPercent: Bool,
                                     geometry: NotchGeometry, language: AppLanguage,
-                                    calendarLeadTime: TimeInterval = NotchCalendarSupport.timeLeftLeadTime) -> CGSize {
+                                    calendarLeadTime: TimeInterval = NotchCalendarSupport.timeLeftLeadTime,
+                                    timerCountsUp: Bool = false) -> CGSize {
         let mark = timerMarkWidth(companion: companion, workingAgents: workingAgents, downloadPercent: downloadPercent,
-                                  geometry: geometry, language: language)
+                                  geometry: geometry, language: language, timerCountsUp: timerCountsUp)
         return surface(content: mark + markGap(.calendar) + calendarClockWidth(leadTime: calendarLeadTime),
                        leading: companion == .music ? artworkInset(geometry) : endPadding,
                        maximum: Maximum.activity, geometry: geometry)
@@ -1228,11 +1272,12 @@ enum NotchCapsuleLayout {
     /// an end. Beside another activity, the one begun first keeps the leading
     /// end as its mark and the session's time follows it.
     static func keepAwakeSurface(reading: String?, companion: NotchCompactActivity? = nil,
-                                 geometry: NotchGeometry, language: AppLanguage = .enUS) -> CGSize {
+                                 geometry: NotchGeometry, language: AppLanguage = .enUS,
+                                 timerCountsUp: Bool = false) -> CGSize {
         let cup = NotchKeepAwakeSupport.symbolWidth(NotchKeepAwakeSupport.symbol, size: symbolSize)
         let mark = companion == nil ? cup
             : timerMarkWidth(companion: companion, workingAgents: 1, downloadPercent: false,
-                             geometry: geometry, language: language) + markGap(companion)
+                             geometry: geometry, language: language, timerCountsUp: timerCountsUp) + markGap(companion)
         let right = reading.map { width(NotchAgentSupport.readingShape($0), font: readingFont) }
             ?? NotchKeepAwakeSupport.symbolWidth(NotchKeepAwakeSupport.openSymbol, size: readingFont.pointSize) + air
         return surface(content: mark + spacing + right, maximum: Maximum.activity, geometry: geometry)
@@ -1262,6 +1307,16 @@ enum NotchCapsuleLayout {
     static let splashSpeedShape = "888т/с"
     static var splashSpeedWidth: CGFloat { width(splashSpeedShape, font: readingFont) }
 
+    /// The width of a countdown's mark at its widest: the mark is a reading, not
+    /// a symbol, so it is measured by the widest of the forms the rule writes
+    /// (see `NotchTimerSupport.stripMarkShapes`) in the figure the capsule
+    /// reads a clock in. Measured by its shape, the capsule keeps its size as
+    /// the countdown crosses an hour, a minute, or a second.
+    static func timerMarkWidth(countsUp: Bool, font: NSFont = readingFont) -> CGFloat {
+        let shapes = countsUp ? NotchTimerSupport.stripMarkCountUpShapes : NotchTimerSupport.stripMarkShapes
+        return shapes.map { width($0, font: font) }.max() ?? symbolWidth
+    }
+
     /// A download's arrow and name, then its meter and percentage, or a
     /// spinner until its size is known.
     static func downloadSurface(name: String, hasProgress: Bool, geometry: NotchGeometry, language: AppLanguage) -> CGSize {
@@ -1285,12 +1340,12 @@ enum NotchCapsuleLayout {
     /// the first reading. Beside another activity, the one begun first keeps
     /// the leading end as its mark and the watch's eye follows it.
     static func watchSurface(reading: String, thumbnail: Bool, companion: NotchCompactActivity? = nil,
-                             geometry: NotchGeometry) -> CGSize {
+                             geometry: NotchGeometry, timerCountsUp: Bool = false) -> CGSize {
         let right = thumbnail ? NotchWatchSupport.thumbnailWidth
             : reading.isEmpty ? spinnerWidth : width(reading, font: levelFont)
         let mark = companion == nil ? symbolWidth
             : timerMarkWidth(companion: companion, workingAgents: 1, downloadPercent: false,
-                             geometry: geometry, language: .enUS) + markGap(companion)
+                             geometry: geometry, language: .enUS, timerCountsUp: timerCountsUp) + markGap(companion)
         return surface(content: mark + spacing + right, maximum: Maximum.activity, geometry: geometry)
     }
 
@@ -1892,23 +1947,14 @@ enum NotchSupport {
                           calendar: calendar, music: music, keepAwake: keepAwake).first
     }
 
-    /// The activities running now, in the order the machine began them: the one
-    /// begun first stands first, and every activity begun after it is appended.
+    /// The activities running now, in the order the island asks about them - the
+    /// countdown, the decode speed, the watch, the downloads, the agents, the
+    /// event, the song, keeping the Mac awake.
     ///
-    /// This is the order the closed strip and the page both draw by, and it is
-    /// history and not rank. The candidates are listed in the order the island
-    /// asks about them - the countdown, the decode speed, the watch, the
-    /// downloads, the agents, the event, the song, keeping the Mac awake - and
-    /// the record of which became active when is applied by the service, which
-    /// is the one that sees activities begin and end.
-    ///
-    /// A table of ranks - the countdown above the decode speed above the song -
-    /// cannot say which of two activities a person started first, and it is what
-    /// hides an activity: a song begun while a reading was being watched had
-    /// nothing left to show, and a reading begun over a playing song showed no
-    /// reading. The order the activities arrived in answers the question the
-    /// island is being asked, and everything running is drawn while the strip
-    /// has room for it.
+    /// This is the list of candidates and no more: the closed strip puts it in
+    /// its own order with `stripOrder`, and the page keeps its own record of when
+    /// each activity began. Every activity running is on the list, so nothing is
+    /// dropped for not being asked about.
     static func compactActivities(timer: Bool, splash: Bool = false, watch: Bool = false, downloads: Bool,
                                   agents: Bool, calendar: Bool, music: Bool,
                                   keepAwake: Bool = false) -> [NotchCompactActivity] {
@@ -1919,36 +1965,66 @@ enum NotchSupport {
         return candidates.compactMap { $0.0 ? $0.1 : nil }
     }
 
-    /// What may share the closed strip with the activity that keeps its reading
-    /// right of the camera, in the order the activities became active: the first
-    /// on the list is the one drawn at the strip's left end.
+    /// The closed strip's standing order of the activities: the reading a person
+    /// is most likely to be watching stands first. The decode speed of a task in
+    /// hand is what the island is opened for, the countdown is the promise a
+    /// person set for themselves, and the song is what the machine is playing
+    /// while they are not looking at it.
+    static let stripPriorities: [NotchCompactActivity] = [
+        .splash, .timer, .music, .calendar, .watch, .keepAwake, .downloads, .agents
+    ]
+
+    /// The activities running now, in the order the closed strip draws them:
+    /// highest priority first.
     ///
-    /// There is no table of pairs. Two activities running at once share the
-    /// strip, and which of them keeps the reading on the right is decided by
-    /// which of them the machine began last - the earlier one takes the left -
-    /// so a strip reads left to right in the order its activities started, and
-    /// an activity is never suppressed because another one outranks it.
-    ///
-    /// One rule of the strips is kept: a timer that is not running has its own
-    /// mark to show - the paused clock, the finished checkmark - and so takes no
-    /// companion beside it.
-    static func compactCompanions(of primary: NotchCompactActivity, running: Bool,
-                                  companions: [NotchCompactActivity]) -> [NotchCompactActivity] {
-        if primary == .timer, !running { return [] }
-        return companions.filter { $0 != primary }
+    /// An activity this list does not name - one added after the list was written
+    /// - stands behind every named one, in the order it was asked about.
+    static func stripOrder(_ activities: [NotchCompactActivity]) -> [NotchCompactActivity] {
+        let ranks = Dictionary(uniqueKeysWithValues: stripPriorities.enumerated().map { ($0.element, $0.offset) })
+        return activities.enumerated()
+            .sorted { left, right in
+                let a = ranks[left.element] ?? Int.max
+                let b = ranks[right.element] ?? Int.max
+                return a == b ? left.offset < right.offset : a < b
+            }
+            .map(\.element)
     }
 
-    /// The companion the closed strip takes: the activity that became active
-    /// first, which is the one drawn at the strip's left end. A pair chosen by
-    /// hand wins while it is one the running activities answer to; otherwise the
-    /// strip pairs itself, with the earliest of what is running, so a person
-    /// sees the pair they are most likely using without choosing it.
-    static func defaultCompanion(of primary: NotchCompactActivity?,
-                                 companions: [NotchCompactActivity],
-                                 chosen: NotchCompactActivity?) -> NotchCompactActivity? {
-        guard primary != nil else { return nil }
-        if let chosen, companions.contains(chosen) { return chosen }
-        return companions.first
+    /// Whether an activity's closed strip has room for another activity's mark
+    /// beside its own reading. The download's strip fills both wings with its
+    /// name and its progress, and the agents' with their counts, so neither takes
+    /// the reading side of a pair.
+    static func carriesStripReading(_ activity: NotchCompactActivity) -> Bool {
+        activity != .downloads && activity != .agents
+    }
+
+    /// The closed strip's two activities, from the activities running now: the
+    /// reading it draws at the trailing end, and the mark it draws at the leading
+    /// end beside it.
+    ///
+    /// The two highest-priority activities running are drawn, in that order from
+    /// left to right: the higher stands at the leading end as the mark, the lower
+    /// at the trailing end as the reading. One activity running is the strip's
+    /// whole; an activity below the first two is not drawn while two above it are
+    /// running, and appears as soon as one of those two stops, because the pair
+    /// is recomputed from what is running and nothing is remembered about the
+    /// pair that was drawn before.
+    ///
+    /// `timerRunning` keeps one rule of the countdown's strip: a countdown that
+    /// is not running has its own mark to show - the paused clock, the finished
+    /// checkmark - and its strip takes no companion beside it, so it is drawn
+    /// alone and the activity below it is not drawn next to a resting clock.
+    static func stripPair(_ activities: [NotchCompactActivity],
+                          timerRunning: Bool = true) -> NotchStripPair {
+        let visible = Array(stripOrder(activities).prefix(2))
+        // A countdown that is not running has its own mark to show - the paused
+        // clock, the finished checkmark - and its strip has no room beside it, so
+        // it is drawn alone and the activity below it waits for the countdown's
+        // mark to leave the island.
+        if !timerRunning, visible.contains(.timer) { return NotchStripPair(reading: .timer) }
+        guard visible.count == 2, let reading = visible.reversed().first(where: carriesStripReading)
+        else { return NotchStripPair(reading: visible.first) }
+        return NotchStripPair(reading: reading, mark: visible.first { $0 != reading })
     }
 
     static func gestureIsOverHeader(expanded: Bool, peeking: Bool, fromTop: CGFloat, safeTop: CGFloat,

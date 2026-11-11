@@ -97,6 +97,10 @@ enum NotchHoverTests {
     }
     class State {
         var noticeFitsInPlace = false
+        /// The capsule measures a countdown's mark by the widest form the rule
+        /// writes, and the form depends on the countdown's mode. This fixture has
+        /// no timer service, so its answer is a standing one: a countdown.
+        var timerCountsUp = false
         func schedulePointerFollow() {}
         var hiddenInFullscreen = false
         var fullscreenCompact: Bool { hiddenInFullscreen && !expanded && !peeking }

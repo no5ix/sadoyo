@@ -339,6 +339,44 @@ enum NotchActivityTests {
             suite.expect(NotchTimerSupport.compactText(invalid, locale: locale) == "0s",
                    "invalid or expired compact times remain safe to display")
         }
+        // The mark a countdown wears on another activity's strip is its number,
+        // not its icon: one unit at a glance, the clock's own rounding, and the
+        // seconds plain, with no unit to spend the width on, through the last
+        // minute.
+        let markCases: [(TimeInterval, String)] = [
+            (2 * 3600 + 30 * 60, "2h"), (75 * 60, "1h"), (3600, "1h"),
+            (3599, "59m"), (29 * 60, "29m"), (90, "1m"), (60, "1m"),
+            (59, "59"), (58, "58"), (57, "57"), (1, "1"), (0, "0")
+        ]
+        for (seconds, expected) in markCases {
+            suite.expect(NotchTimerSupport.stripMarkText(seconds, countsUp: false, locale: locale) == expected,
+                   "a countdown sharing a strip says its remaining time in one unit: \(seconds)")
+        }
+        suite.expect(NotchTimerSupport.stripMarkText(59.5, countsUp: false, locale: locale) == "1m"
+               && NotchTimerSupport.stripMarkText(3599.5, countsUp: false, locale: locale) == "1h",
+               "a mark counts a part second up to the next unit, and never shows a sixtieth second")
+        suite.expect((1...59).allSatisfy { seconds in
+                       NotchTimerSupport.stripMarkText(TimeInterval(seconds), countsUp: false, locale: locale)
+                           == String(seconds)
+                     },
+               "the last minute's mark is its seconds, plain, one named at a time")
+        suite.expect(NotchTimerSupport.stripMarkText(3600, countsUp: false, locale: locale) == "1h"
+               && NotchTimerSupport.stripMarkText(3599, countsUp: false, locale: locale) == "59m"
+               && NotchTimerSupport.stripMarkText(60, countsUp: false, locale: locale) == "1m"
+               && NotchTimerSupport.stripMarkText(59, countsUp: false, locale: locale) == "59",
+               "the mark changes its unit as the clock crosses an hour and a minute, and counts seconds after")
+        suite.expect(NotchTimerSupport.stripMarkText(720, countsUp: true, locale: locale) == "12:00"
+               && NotchTimerSupport.stripMarkText(3700, countsUp: true, locale: locale) == "1h01",
+               "a count-up keeps its compact clock as the mark beside another activity")
+        suite.expect(NotchTimerSupport.stripMarkText(.nan, countsUp: false, locale: locale) == "0",
+               "an expired mark reads zero seconds and nothing invented")
+        for language in AppLanguage.allCases {
+            let every = Locale(identifier: language.rawValue)
+            suite.expect(!NotchTimerSupport.stripMarkText(29 * 60, countsUp: false, locale: every).isEmpty
+                   && !NotchTimerSupport.stripMarkText(2 * 3600, countsUp: false, locale: every).isEmpty
+                   && !NotchTimerSupport.stripMarkText(9, countsUp: false, locale: every).isEmpty,
+                   "a shared strip's countdown has a reading in every supported language")
+        }
         suite.expect(NotchTimerSupport.compactText(.greatestFiniteMagnitude, locale: locale) == "3h",
                "compact duration formatting preserves the timer's upper limit")
         let hourCases: [(TimeInterval, String)] = [
@@ -840,94 +878,118 @@ enum NotchActivityTests {
                "invalid or excessive ruler values cannot escape the supported duration range")
     }
 
-    /// The closed strip's order: the activities keep the order they became
-    /// active in, and the strip reads left to right in that order. A table of
-    /// ranks hid an activity - a song begun while a reading was being watched
-    /// had nothing to show, a reading begun over a playing song showed no
-    /// reading - so these are the cases that were hidden, and the order each now
-    /// reads in. The record of when an activity began is kept by the service, and
-    /// applied by `stripInsertion`; what is tested here is the rule the strip
-    /// draws from it: the activity begun last keeps its reading on the trailing
-    /// side, the one begun before it takes the leading side.
+    /// The closed strip's two activities: the two highest-priority activities
+    /// running, the higher drawn at the leading end as its mark and the lower at
+    /// the trailing end as its reading, left to right.
+    ///
+    /// Every row of the table the island is asked to keep is here, with the
+    /// transitions between the rows: a third activity arriving hides the one
+    /// below the pair, and one of the pair leaving lifts the next into it at
+    /// once. The pair is answered from what is running now, and nothing is kept
+    /// of the pair that was drawn a moment ago, which is what makes a hidden
+    /// activity return by itself.
     private static func compactSplashContracts(_ suite: TestSuite) {
-        func companions(_ primary: NotchCompactActivity, running: Bool = true,
-                        _ order: [NotchCompactActivity]) -> [NotchCompactActivity] {
-            NotchSupport.compactCompanions(of: primary, running: running, companions: order)
+        func pair(_ activities: [NotchCompactActivity], timerRunning: Bool = true) -> NotchStripPair {
+            NotchSupport.stripPair(activities, timerRunning: timerRunning)
         }
-        // A reading in hand, then a song begun beside it. The song is the newest,
-        // so it keeps the strip's reading, and the reading begun first is drawn
-        // at its leading end: the two are visible together, in the order they
-        // began, and neither is dropped because of a rank.
-        let splashFirst: [NotchCompactActivity] = [.splash, .music]
-        suite.expect(companions(.music, splashFirst) == [.splash],
-                     "a reading begun before the song is drawn at the strip's leading end, so both are visible")
-        suite.expect(NotchSupport.defaultCompanion(of: .music, companions: splashFirst, chosen: nil) == .splash,
-                     "the strip a reading and a later song share leads with the reading and keeps the song's bars")
-        // A song playing first, then a reading begun over it: the reading is the
-        // newest and keeps its speed, and the song begun first is drawn at the
-        // leading end. This is the case the rank put in the song's notice.
-        let musicFirst: [NotchCompactActivity] = [.music, .splash]
-        suite.expect(companions(.splash, musicFirst) == [.music],
-                     "a song begun before a reading is drawn at the strip's leading end, so both are visible")
-        suite.expect(NotchSupport.defaultCompanion(of: .splash, companions: musicFirst, chosen: nil) == .music,
-                     "the strip a song and a later reading share leads with the song and keeps the reading's speed")
-        // The strip never repeats the activity it is drawing, and it is not
-        // clipped to one companion per rank: the running activities are the list.
-        suite.expect(companions(.music, [.splash, .music, .timer]) == [.splash, .timer],
-                     "a strip's companions are the other activities in the order they began, without repeating itself")
-        suite.expect(NotchSupport.compactActivities(timer: true, splash: true, downloads: true,
-                                                   agents: true, calendar: true, music: true).count == 6,
-                     "every activity running is on the strip's list, not only the highest-ranked of them")
-        // When one activity stops, the other is the whole strip, as it was alone.
-        suite.expect(companions(.music, [.music]).isEmpty,
-                     "a song the reading left behind keeps the strip it had before the reading began")
-        suite.expect(companions(.splash, [.splash]).isEmpty,
-                     "a reading the song stopped beside keeps the strip it had before the song began")
-        suite.expect(NotchSupport.compactActivities(timer: false, splash: true, downloads: false, agents: false,
-                                                   calendar: false, music: false) == [.splash]
-                         && NotchSupport.compactActivities(timer: false, splash: false, downloads: false,
-                                                           agents: false, calendar: false, music: true) == [.music],
-                     "whichever activity is left standing is the strip's own, with nothing left of the other")
-        // A pair the person chose by hand keeps its place while both activities
-        // are running; the chosen companion is not overridden by the order.
-        suite.expect(NotchSupport.defaultCompanion(of: .music, companions: splashFirst, chosen: .music) == .music
-                         || NotchSupport.defaultCompanion(of: .music, companions: splashFirst, chosen: .downloads) == nil,
-                     "a chosen pair counts only while it is one of the activities running")
-        // The page's cards are ordered by the same record: the page asks for the
-        // activity begun first, the closed strip for the one begun last, and the
-        // candidate list is the order the island asks about them.
-        suite.expect(NotchSupport.compactActivities(timer: true, splash: true, downloads: true,
-                                                   agents: true, calendar: true, music: true).first == .timer
-                         && NotchSupport.compactActivities(timer: true, splash: true, downloads: true,
-                                                           agents: true, calendar: true, music: true).last == .music
-                         && NotchSupport.compactActivity(timer: true, downloads: true, agents: true,
-                                                         calendar: true, music: true) == .timer,
-                     "the page and the strip read the same list from its two ends")
-
-        // The record, at the moment a reading ends beside a playing song. Its key
-        // is pruned and the song's own record is not moved: the song takes the
-        // strip whole, in the place its own activation gives it, and no position
-        // is left empty for want of a promotion.
-        func stripKey(_ activity: NotchCompactActivity) -> String { "strip.\(activity.id)" }
-        var ledger = NotchActivityInsertion()
-        _ = ledger.register(["strip.splash", "strip.music"])
-        let song = ledger.entry(for: "strip.music")
-        _ = ledger.register(["strip.music"])
-        let selection = NotchActivitySelection()
-        suite.expect(ledger.order == ["strip.music"]
-                         && ledger.entry(for: "strip.music") == song
-                         && ledger.ordering([.music, .timer]) { stripKey($0) } == [.music, .timer],
-                     "the reading's leaving promotes the song, and the song's record does not move")
-        suite.expect(selection.current(available: ledger.ordering([.music]) { stripKey($0) }, prefers: .last) == .music
-                         && selection.current(available: [], prefers: .last) == nil,
-                     "the activity left standing is what the strip reads, and nothing is left of the reading")
-        // A reading begun again is the newest thing on the island: the song begun
-        // first keeps the strip's leading end, and the reading begun after it
-        // takes the figure, as the order says.
-        _ = ledger.register(["strip.splash", "strip.music"])
-        suite.expect(ledger.order == ["strip.music", "strip.splash"]
-                         && ledger.ordering([.splash, .music]) { stripKey($0) } == [.music, .splash],
-                     "a reading begun after the song is the strip's reading, with the song as its mark")
+        func order(_ activities: [NotchCompactActivity]) -> [NotchCompactActivity] {
+            NotchSupport.stripOrder(activities)
+        }
+        func carriesStripReading(_ activity: NotchCompactActivity) -> Bool {
+            NotchSupport.carriesStripReading(activity)
+        }
+        // The standing order, in every asking.
+        suite.expect(order([.music, .splash, .timer]) == [.splash, .timer, .music]
+                         && order([.timer, .music, .splash]) == [.splash, .timer, .music]
+                         && order([.splash]) == [.splash]
+                         && order([]).isEmpty,
+                     "the decode speed stands above the countdown, and the countdown above the song, in every asking")
+        // The table, row by row: what the strip draws, in the order it draws it.
+        suite.expect(pair([.splash, .timer, .music]) == NotchStripPair(reading: .timer, mark: .splash)
+                         && !Array(order([.splash, .timer, .music]).prefix(2)).contains(.music),
+                     "three activities running draw the decode speed and the countdown, and the song is not drawn")
+        suite.expect(pair([.splash, .timer]) == NotchStripPair(reading: .timer, mark: .splash),
+                     "the decode speed is the strip's leading mark and the countdown its reading")
+        suite.expect(pair([.splash, .music]) == NotchStripPair(reading: .music, mark: .splash),
+                     "a watched reading and a playing song share the strip: the song's bars at the trailing end, the reading's mark at the leading")
+        suite.expect(pair([.timer, .music]) == NotchStripPair(reading: .music, mark: .timer),
+                     "a countdown and a playing song share the strip, the countdown at the leading end")
+        suite.expect(pair([.splash]) == NotchStripPair(reading: .splash, mark: nil)
+                         && pair([.timer]) == NotchStripPair(reading: .timer, mark: nil)
+                         && pair([.music]) == NotchStripPair(reading: .music, mark: nil),
+                     "one activity running is the strip's whole, with no mark beside it")
+        suite.expect(pair([]) == NotchStripPair(reading: nil, mark: nil),
+                     "nothing running leaves the island its resting face")
+        // The transitions, each from what the strip was drawing to what it draws
+        // the moment an activity begins or ends.
+        suite.expect(pair([.timer, .music]) == NotchStripPair(reading: .music, mark: .timer)
+                         && pair([.splash, .timer, .music]) == NotchStripPair(reading: .timer, mark: .splash),
+                     "a reading begun over a visible countdown and song hides the song, which stands below the pair")
+        suite.expect(pair([.splash, .music]) == NotchStripPair(reading: .music, mark: .splash)
+                         && pair([.splash, .timer, .music]) == NotchStripPair(reading: .timer, mark: .splash),
+                     "a countdown begun beside a visible reading and song takes the strip's reading and hides the song")
+        suite.expect(pair([.splash, .timer, .music]) == NotchStripPair(reading: .timer, mark: .splash)
+                         && pair([.timer, .music]) == NotchStripPair(reading: .music, mark: .timer),
+                     "the reading's ending lifts the song back in beside the countdown, unasked")
+        suite.expect(pair([.splash, .timer, .music]) == NotchStripPair(reading: .timer, mark: .splash)
+                         && pair([.splash, .music]) == NotchStripPair(reading: .music, mark: .splash),
+                     "the countdown's ending leaves the reading and lifts the song into the strip's reading")
+        suite.expect(pair([.splash, .timer, .music]) == NotchStripPair(reading: .timer, mark: .splash)
+                         && pair([.splash, .timer]) == NotchStripPair(reading: .timer, mark: .splash),
+                     "the song's ending leaves the pair the island was showing, and nothing else moves")
+        // Two rules of the strips are kept: a countdown that is not running shows
+        // its status mark alone, and a strip that fills both wings with its own
+        // words - the download's name and progress, the agents' counts - does not
+        // take the reading side of a pair.
+        suite.expect(pair([.timer, .music], timerRunning: false) == NotchStripPair(reading: .timer, mark: nil)
+                         && pair([.timer, .music], timerRunning: true) == NotchStripPair(reading: .music, mark: .timer),
+                     "a paused or finished countdown keeps its status mark alone, and a running one pairs with the song")
+        suite.expect(pair([.downloads, .agents]) == NotchStripPair(reading: .downloads, mark: nil)
+                         && pair([.splash, .downloads]) == NotchStripPair(reading: .splash, mark: .downloads)
+                         && pair([.music, .agents]) == NotchStripPair(reading: .music, mark: .agents),
+                     "a strip that fills both wings is drawn alone, or as the mark beside a reading that has room")
+        suite.expect(NotchSupport.carriesStripReading(.splash) && NotchSupport.carriesStripReading(.music)
+                         && !NotchSupport.carriesStripReading(.downloads)
+                         && !NotchSupport.carriesStripReading(.agents),
+                     "which strips have room for a mark beside their reading is one answer, and the pair rule asks it")
+        // The service asks this rule of what is running, at every refresh: no
+        // record of the pair it drew last, and no rank kept beside the pair.
+        let service = (try? String(contentsOfFile: "Sources/Vorssaint/Services/Notch/NotchService.swift",
+                                   encoding: .utf8)) ?? ""
+        suite.expect(service.contains("NotchSupport.stripPair(stripCandidates")
+                         && service.contains("private var stripPair: NotchStripPair")
+                         && service.contains("stripPair.reading")
+                         && service.contains("stripPair.mark"),
+                     "the strip's two ends are the pair the priority rule answers, from what is running now")
+        suite.expect(!service.contains("stripInsertion") && !service.contains("syncStripTimeline"),
+                     "the strip keeps no record of the pair it drew, so a hidden activity returns by itself")
+        // Every combination of the three activities the island names, and the
+        // same asked of a download: the pair drawn is the first two of the
+        // standing order, and where both strips have room for a mark beside
+        // their reading, the higher-priority one stands at the leading end.
+        for mask in 0..<16 {
+            let named: [NotchCompactActivity] = [.splash, .timer, .music, .downloads]
+            let running = named.enumerated().compactMap { mask & (1 << $0.offset) != 0 ? $0.element : nil }
+            let answer = pair(running)
+            let first = Array(NotchSupport.stripOrder(running).prefix(2))
+            let allHaveRoom = running.allSatisfy(carriesStripReading)
+            suite.expect(answer.ordered.count == min(2, running.count)
+                             && Set(answer.ordered) == Set(first)
+                             && (answer.reading == nil || answer.reading == answer.ordered.last)
+                             && (answer.mark == nil || answer.mark == answer.ordered.first)
+                             && (!allHaveRoom || answer.ordered == first),
+                         "\(running.map(\.rawValue)) running: the strip draws \(answer.ordered.map(\.rawValue)), "
+                         + "the two highest of the standing order, mark first at the leading end")
+        }
+        // A pair is named in the order the island shows it: leading mark first.
+        let splashTitle = NotchCompactActivity.splash.title(.enUS)
+        let musicTitle = NotchCompactActivity.music.title(.enUS)
+        let timerTitle = NotchCompactActivity.timer.title(.enUS)
+        suite.expect(NotchActivityCombination(primary: .music, companion: .splash).title(.enUS)
+                         == splashTitle + " + " + musicTitle
+                         && NotchActivityCombination(primary: .timer, companion: .splash).title(.enUS)
+                         == splashTitle + " + " + timerTitle,
+                     "a pair is named left to right, the leading mark before the reading")
     }
 
     /// The timer's own marks, and what it shares the strip with: a countdown
@@ -935,29 +997,23 @@ enum NotchActivityTests {
     /// song keeps its bars, and a timer that is not running shows its status
     /// mark alone.
     private static func compactTimerContracts(_ suite: TestSuite) {
-        func companions(_ primary: NotchCompactActivity, running: Bool = true,
-                        _ order: [NotchCompactActivity]) -> [NotchCompactActivity] {
-            NotchSupport.compactCompanions(of: primary, running: running, companions: order)
-        }
-        suite.expect(companions(.music, [.timer, .music]) == [.timer],
-                     "a countdown begun before the song keeps its clock at the strip's leading end")
-        suite.expect(companions(.timer, [.timer, .music]) == [.music],
-                     "a running timer begun before the song takes the leading end and the song keeps its bars")
-        suite.expect(companions(.timer, running: false, [.timer, .music, .downloads]) == [],
-                     "a paused or finished timer keeps its status mark alone, as it always did")
-        suite.expect(companions(.music, [.timer, .music, .calendar]).count == 2,
-                     "a song begun last shares the strip with every activity begun before it")
-        suite.expect(NotchSupport.defaultCompanion(of: .music, companions: [.timer, .calendar, .music], chosen: nil) == .timer,
-                     "the strip takes the activity begun first, unasked, and the person's own order is kept by the record")
-        suite.expect(companions(.calendar, [.calendar, .music]) == [.music],
-                     "an event's clock shares the strip with a song begun after it, as any other activity does")
-        suite.expect(NotchSupport.defaultCompanion(of: .timer, companions: [.downloads, .music], chosen: .music) == .music
-                         && NotchSupport.defaultCompanion(of: .timer, companions: [.music], chosen: .downloads) == .music,
-                     "a pair chosen by hand wins while it is one the activities answer to")
-        suite.expect(NotchSupport.defaultCompanion(of: nil, companions: [.music], chosen: nil) == nil,
-                     "a strip with no activity pairs with nothing")
-        suite.expect(NotchSupport.defaultCompanion(of: .downloads, companions: [], chosen: nil) == nil,
-                     "an activity running alone shows no companion")
+        // The pair rule, at the countdown's own size: the two above it are drawn
+        // and the song is drawn when one of them leaves. A countdown that is not
+        // running keeps its status mark alone - the paused clock, the finished
+        // checkmark - and takes no mark beside it.
+        suite.expect(NotchSupport.stripPair([.timer, .music], timerRunning: true) == NotchStripPair(reading: .music, mark: .timer)
+                         && NotchSupport.stripPair([.timer, .music], timerRunning: false) == NotchStripPair(reading: .timer, mark: nil),
+                     "a running countdown pairs with the song, and a paused or finished one shows its status mark alone")
+        suite.expect(NotchSupport.stripPair([.calendar, .music]) == NotchStripPair(reading: .calendar, mark: .music)
+                         && NotchSupport.stripOrder([.music, .calendar, .watch]) == [.music, .calendar, .watch],
+                     "an event's clock shares the strip with a playing song: the song's bars at the leading end, the event's figure at the trailing, and the watch below the pair")
+        suite.expect(NotchSupport.stripPair([.keepAwake, .watch, .downloads]) == NotchStripPair(reading: .keepAwake, mark: .watch)
+                         && NotchSupport.stripPair([.keepAwake, .downloads]) == NotchStripPair(reading: .keepAwake, mark: .downloads),
+                     "below the three the island names, the standing order keeps the island's own, and a full strip is a mark")
+        suite.expect(NotchSupport.stripPair([.splash, .timer, .music, .calendar, .watch],
+                                            timerRunning: true) == NotchStripPair(reading: .timer, mark: .splash)
+                         && NotchSupport.stripOrder([.splash, .timer, .music, .calendar, .watch]).count == 5,
+                     "five activities running are listed in full, and only the first two are drawn")
         suite.expect(NotchActivityCombination(primary: .calendar, companion: .music).title(.enUS) == "Music + Calendar"
                      && NotchActivityCombination(primary: .timer, companion: .calendar).title(.enUS) == "Calendar + Timer",
                      "a pair is named in the order the island shows it, the companion left of the camera first")
@@ -1016,6 +1072,62 @@ enum NotchActivityTests {
                         && roomy.compactTimerGeometry(showsDownloads: false, wing: 300).compactActivityWingWidth == 64
                         && roomy.compactTimerGeometry(showsDownloads: true, wing: 30).compactActivityWingWidth == 80,
                      "timer wings take what the reading needs up to their old width; a download keeps its own")
+
+        // The countdown's mark on another activity's strip is its digits, and a
+        // reading is measured by its widest shape, as a strip's own reading is:
+        // the island keeps its size as the mark crosses an hour, a minute, or a
+        // second, and a pair with a countdown in it is sized by the digits and
+        // not by the icon's square.
+        func markCoversItsOwnForms(_ countsUp: Bool) -> Bool {
+            let measured = NotchCapsuleLayout.timerMarkWidth(countsUp: countsUp)
+            let shapes = countsUp ? NotchTimerSupport.stripMarkCountUpShapes : NotchTimerSupport.stripMarkShapes
+            return measured > NotchCapsuleLayout.symbolWidth
+                && shapes.allSatisfy { NotchCapsuleLayout.width($0, font: NotchCapsuleLayout.readingFont) <= measured + 0.5 }
+        }
+        suite.expect(markCoversItsOwnForms(false) && markCoversItsOwnForms(true),
+                     "a countdown's mark is measured by the widest of the forms the rule writes, in both its kinds")
+        suite.expect(NotchCapsuleLayout.timerMarkWidth(companion: .timer, workingAgents: 0, downloadPercent: false,
+                                                       geometry: roomy, language: .enUS)
+                         == NotchCapsuleLayout.timerMarkWidth(countsUp: false)
+                         && NotchCapsuleLayout.timerMarkWidth(companion: .timer, workingAgents: 0, downloadPercent: false,
+                                                              geometry: roomy, language: .enUS, timerCountsUp: true)
+                             == NotchCapsuleLayout.timerMarkWidth(countsUp: true),
+                     "a pair whose mark is the countdown is measured from its digits, and the stopwatch's clock is measured by its own, wider, form")
+        for bar: CGFloat in [22, 24, 32, 40] {
+            for notched in [false, true] {
+                let strip = NotchGeometry(screen: screen, safeAreaTop: notched ? 32 : 0,
+                                          cameraWidth: notched ? 180 : 0, layout: .spacious,
+                                          menuBarHeight: bar, compactSideRoom: 300)
+                    .compactTimerGeometry(showsDownloads: false, wing: NotchTimerSupport.stripWingRange.lowerBound)
+                let size = NotchTimerSupport.stripTextSize(height: strip.compactActivityContentHeight)
+                let widest = NotchCapsuleLayout.timerMarkWidth(
+                    countsUp: true, font: NSFont.monospacedDigitSystemFont(ofSize: size, weight: .medium))
+                // The wing is measured from the mark, and the strip's wings are
+                // bounded: a mark wider than the widest wing is drawn at the
+                // reading's own minimum scale, as the strip's own clock is. What
+                // the measure must never do is treat the mark as a symbol's
+                // sixteen points, which is how an icon was sized and a number is
+                // not.
+                suite.expect(widest > NotchCapsuleLayout.symbolWidth
+                                 && widest * 0.65 <= NotchTimerSupport.stripWingRange.upperBound,
+                             "a countdown's mark is measured as a figure, not a symbol, and is drawn inside the strip's widest wing at a reading's own scale")
+            }
+        }
+
+        // Beside a more senior activity the song shows its cover at its own end
+        // of the strip, and the wings are measured from the artwork: what the
+        // strip draws is what the island is sized by, and the cover fits the wing
+        // it is drawn in, clear of its curve.
+        for shared in [roomy.compactTimerGeometry(showsDownloads: false, wing: 44),
+                       roomy.compactTimerGeometry(showsDownloads: false, wing: 64)] {
+            let side = NotchMusicStripLayout.pairedCoverSide(shared)
+            let inset = NotchMusicStripLayout.coverInset(shared)
+            let air = NotchMusicStripLayout.innerInset(shared)
+            suite.expect(side > 0
+                   && NotchMusicStripLayout.pairedCoverWing(shared) == side + inset + air
+                   && side + inset + air <= shared.compactActivityWingWidth + 0.5,
+                   "a song sharing the strip keeps room for its own artwork at its end, clear of the wing's curve")
+        }
     }
 
     /// Compact strips measure their margins from the silhouette rather than

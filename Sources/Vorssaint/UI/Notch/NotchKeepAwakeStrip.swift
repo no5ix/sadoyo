@@ -37,9 +37,9 @@ struct NotchKeepAwakeStrip: View {
         let wing = geometry.compactActivityWingWidth
         let iconSize = NotchTimerSupport.stripIconSize(height: height)
         let textSize = NotchTimerSupport.stripTextSize(height: height)
-        // A session begun before another activity keeps the strip's leading end
-        // as its cup-shaped mark, and the activity begun after it keeps its
-        // reading on the right, so the strip reads in the order they started.
+        // A session draws its cup-shaped mark at the strip's leading end when it
+        // stands above the activity it shares the strip with, which keeps its
+        // reading on the right: the strip reads in the order of their standing.
         let companion = service.compactCompanion
         return Button {
             // The mark at the strip's leading end is an activity of its own, and a

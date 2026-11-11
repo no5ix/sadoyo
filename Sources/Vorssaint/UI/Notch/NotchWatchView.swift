@@ -403,9 +403,9 @@ struct NotchWatchStrip: View {
     private var textInset: CGFloat { geometry.compactActivityEdgeInset(boxHeight: textSize * 0.72, radius: 0) }
 
     var body: some View {
-        // The activity begun before the watch keeps the strip's leading end as
-        // its mark, and the watch's eye follows it, so the strip reads in the
-        // order its activities started.
+        // The activity that stands above the watch draws its mark at the strip's
+        // leading end, and the watch's eye follows it, so the strip reads in the
+        // order of their standing.
         let companion = service.compactCompanion
         Button {
             // The mark at the strip's leading end is an activity of its own, and a
