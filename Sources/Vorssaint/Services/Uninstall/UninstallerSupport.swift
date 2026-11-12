@@ -187,8 +187,14 @@ enum UninstallerSupport {
         // display name is presentation only and can never claim user data.
         guard let rawBundleID = bundle.bundleIdentifier,
               CleanerSupport.looksLikeBundleID(rawBundleID) else { return .failure(unreadable) }
+        // The app whose data this removal would claim: the running bundle first,
+        // then the Developer identifier this build was compiled with, which is
+        // how a test binary and a command-line run report themselves.
+        func ownerRefusal(_ rawBundleID: String) -> Refusal {
+            isOwnBundleID(rawBundleID) ? .thisApp : .sharedIdentifier
+        }
         guard let bundleID = verifiedBundleID(rawBundleID) else {
-            return .failure(isOwnBundleID(rawBundleID) ? .thisApp : .sharedIdentifier)
+            return .failure(ownerRefusal(rawBundleID))
         }
         let selectedURL = appURL.standardizedFileURL
         guard selectedURL == selectedURL.resolvingSymlinksInPath() else { return .failure(.link) }
@@ -788,15 +794,19 @@ enum UninstallerSupport {
     }
 
     /// This app's own identifiers, among the protected ones: Sadoyo's domains,
-    /// both variants of this install, the identifier a Sadoyo install carried
-    /// before the identity split, and this app's legacy `Vorss…` naming. The
-    /// original Vorssaint installs are protected too (CleanerSupport), but they
-    /// are a neighbour's data, never this app's own.
+    /// both variants of this install, and this app's legacy `Vorss…` naming.
+    ///
+    /// The identifier a Sadoyo install carried before the identity split is
+    /// deliberately NOT one of them. It is the same string as the original
+    /// Vorssaint's release identifier, because the fork shipped under it, so
+    /// the only thing allowed to touch that domain is the preferences migration
+    /// that reads it once and writes the choices into Sadoyo's own. Treating it
+    /// as this app's identity would make the uninstaller, the cleaner and the
+    /// Dock rules claim the neighbour's running app and the neighbour's data.
     private static func isOwnBundleID(_ id: String) -> Bool {
         let lowered = id.lowercased()
         return lowered == "com.sadoyo" || lowered.hasPrefix("com.sadoyo.")
             || AppBundleIdentity.isOwn(lowered)
-            || lowered == AppBundleIdentity.legacyBundleIdentifier
             || lowered.hasPrefix("vorss.")
     }
 

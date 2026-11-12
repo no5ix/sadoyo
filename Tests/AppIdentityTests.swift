@@ -37,8 +37,6 @@ enum AppIdentityTests {
         preferencesCrossTheIdentityOnce(suite)
     }
 
-    // MARK: - Source identity
-
     private static func identityIsThisAppsOwn(_ suite: TestSuite) {
         suite.expect(AppBundleIdentity.bundleIdentifier == "com.sadoyo.app"
                          || AppBundleIdentity.bundleIdentifier == "com.sadoyo.app.dev",
@@ -61,6 +59,13 @@ enum AppIdentityTests {
                          && !AppBundleIdentity.isUpstreamInstall(AppBundleIdentity.bundleIdentifier)
                          && !AppBundleIdentity.isUpstreamInstall(nil),
                      "the original Vorssaint installs are recognised as the neighbour")
+        // The migration's source domain is the neighbour's release identifier.
+        // Nothing that decides what this app IS may accept it, or the uninstaller
+        // and the cleaner would claim the original Vorssaint as their own.
+        suite.expect(!AppBundleIdentity.isOwn(AppBundleIdentity.legacyBundleIdentifier)
+                         || AppBundleIdentity.legacyBundleIdentifier
+                             == AppBundleIdentity.developerBundleIdentifier,
+               "the pre-split domain never makes the neighbour's install this app")
         suite.expect(AppBundleIdentity.legacyBundleIdentifier == "com.vorssaint.utils"
                          || AppBundleIdentity.legacyBundleIdentifier == "com.vorssaint.utils.dev",
                      "the domain this fork used to live in is named for the migration only")

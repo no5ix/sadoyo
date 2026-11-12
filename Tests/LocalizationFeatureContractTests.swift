@@ -471,7 +471,9 @@ enum LocalizationFeatureContractTests {
                              for: AppBundleIdentity.developerBundleIdentifier)
                              == "com.sadoyo.app.dev.fan-control",
                "the shipped helper template is named for the identity the build ships")
-        suite.expect(buildText.contains("FAN_HELPER_ID=\"$BUNDLE_ID.fan-control\""),
+        suite.expect(buildText.contains("FAN_HELPER_ID=\"$APP_BUNDLE_ID.fan-control\"")
+                         && buildText.contains("APP_BUNDLE_ID=\"com.sadoyo.app.dev\"")
+                         && buildText.contains("APP_BUNDLE_ID=\"com.sadoyo.app\""),
                "the Developer build derives the helper service from the developer bundle id")
         // Every shortcut the app ships with is written to disk as a string and
         // read back on the next launch. One that does not survive the trip

@@ -108,11 +108,11 @@ The default expectation is:
    first, then the relevant broader suites, then build and selftest when code
    or bundled resources changed.
 5. Review the complete `git diff` and the staged file list before committing.
-6. Commit the work. When implementation, testing and verification for the task
-   are complete, commit the completed code and documentation changes with a
-   meaningful conventional commit message. Do not leave finished work
-   uncommitted.
-7. Push the task branch to the remote repository after a successful commit.
+- Commit the work. When implementation, testing and verification for the task
+  are complete, commit the completed code and documentation changes with a
+  meaningful conventional commit message. Do not leave finished work
+  uncommitted.
+- Push the task branch to the remote repository after a successful commit.
 8. Verify the push succeeded and that the remote branch contains the commit
    (`git log --oneline -1 origin/<branch>`, `git status -sb`).
 9. Report the delivery: branch name, commit hash, push result, the tests that
