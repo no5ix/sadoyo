@@ -203,7 +203,8 @@ final class DockClickService {
         let hit = dockApplication(at: point)
         guard let app = hit,
               app.processIdentifier != getpid(),
-              !DockClickSupport.isOwnBundleIdentifier(app.bundleIdentifier)
+              !DockClickSupport.isOwnBundleIdentifier(app.bundleIdentifier),
+              !DockClickSupport.isNeighbourInstallBundleIdentifier(app.bundleIdentifier)
         else { return Unmanaged.passUnretained(event) }
 
         let pid = app.processIdentifier

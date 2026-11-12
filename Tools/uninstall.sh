@@ -2,16 +2,22 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Vorssaint
 
-# Cleanly removes Vorssaint and every piece of system state it created:
+# Cleanly removes Sadoyo and every piece of system state it created:
 # the fan helper daemon, the login item, TCC permissions, preferences, saved
 # state, the app's own data folder and (if present) the password-free
 # closed-lid sudoers rule. Leaves no dead entries behind.
-# Also clears the pre-rename "Vorssaint Utils.app" if it is still around.
+# Covers both Sadoyo variants, official and Developer. Every path here is a
+# Sadoyo identifier: the original Vorssaint install on the same Mac keeps its
+# bundle, its permissions and its preferences, and this script never touches
+# them (its retired "Vorssaint Utils.app" is likewise a Vorssaint file, so it
+# is not swept here).
 set -uo pipefail
 
-BUNDLE="com.vorssaint.utils"
-APP="/Applications/Vorssaint.app"
-LEGACY_APP="/Applications/Vorssaint Utils.app"
+# The identity this script owns. Mirrors AppIdentity.swift and build.sh.
+BUNDLE="com.sadoyo.app"
+APP="/Applications/Sadoyo.app"
+BUNDLE_DEV="com.sadoyo.app.dev"
+APP_DEV="/Applications/Sadoyo (Developer).app"
 
 # A readable domain with a missing key is different from a failed read. Export
 # the whole domain first, including an empty dictionary when it does not exist.
@@ -113,24 +119,24 @@ spaces_removal_state() {
 }
 
 echo "▸ Quitting…"
-pkill -x Vorssaint 2>/dev/null || true
-pkill -x VorssaintUtils 2>/dev/null || true
+pkill -x Sadoyo 2>/dev/null || true
+pkill -x SadoyoDeveloper 2>/dev/null || true
 sleep 0.5
 
-# Detach from the system from inside whichever bundle still exists: unregisters
-# the login item (no BTM tombstone), restores normal sleep and puts back Space
-# rearranging.
+# Detach from the system from inside every Sadoyo bundle that still exists:
+# unregisters the login item (no BTM tombstone), restores normal sleep and puts
+# back Space rearranging. Each variant owns its own login item, fan daemon and
+# recovery markers, so each one has to be asked.
 # The fan helper's registration lives in the system, not in the bundle, so
 # deleting the app below cannot reach it. Only the binary can drop it, and the
 # check after the loop settles what its absence or failure left behind.
 detached=1
 ran_app=0
-for candidate in "$APP/Contents/MacOS/Vorssaint" "$LEGACY_APP/Contents/MacOS/VorssaintUtils"; do
+for candidate in "$APP/Contents/MacOS/Sadoyo" "$APP_DEV/Contents/MacOS/SadoyoDeveloper"; do
     if [[ -x "$candidate" ]]; then
         echo "▸ Detaching the fan helper and login item, restoring sleep and Space rearranging…"
         ran_app=1
         if "$candidate" --uninstall; then detached=0; fi
-        break
     fi
 done
 # `detached` cannot tell a failed unregister from no binary having run, and the
@@ -139,19 +145,26 @@ done
 # settles both without sudo, and still finds a registration held back for a
 # pending fan recovery, which is the one case that must keep warning.
 if (( detached )); then
-    launchctl print "system/$BUNDLE.fan-control" >/dev/null 2>&1
     # 113 is "no such service", the only answer that proves absence. Any other
     # failure means launchctl could not tell us, and warning then is the honest
     # side of a check that exists to stop this script claiming what it cannot see.
-    (( $? == 113 )) && detached=0
+    # Each variant registers its own daemon, so the sweep is clean only when
+    # every Sadoyo daemon is proven absent.
+    fan_daemons_absent=1
+    for fan_service in "$BUNDLE.fan-control" "$BUNDLE_DEV.fan-control"; do
+        launchctl print "system/$fan_service" >/dev/null 2>&1
+        (( $? == 113 )) || fan_daemons_absent=0
+    done
+    (( fan_daemons_absent )) && detached=0
 fi
 
 # Whether the closed-lid feature is the reason sleep is off. Read here because
 # the preferences that hold it are deleted a few lines below, and without it a
-# check on the setting alone would blame Vorssaint for a `pmset disablesleep 1`
-# that somebody else, or the user, had set.
+# check on the setting alone would blame Sadoyo for a `pmset disablesleep 1`
+# that somebody else, or the user, had set. Either variant may have set it.
 sleep_was_ours=0
 [[ "$(defaults read "$BUNDLE" vorssDisabledSleep 2>/dev/null)" == "1" ]] && sleep_was_ours=1
+[[ "$(defaults read "$BUNDLE_DEV" vorssDisabledSleep 2>/dev/null)" == "1" ]] && sleep_was_ours=1
 
 # Whether Space rearranging is still owed back. `--uninstall` clears this
 # marker once the setting is back, so one still here means that restore failed
@@ -180,23 +193,28 @@ fi
 
 echo "▸ Resetting permissions (Accessibility, Screen Recording)…"
 tccutil reset All "$BUNDLE" >/dev/null 2>&1 || true
+tccutil reset All "$BUNDLE_DEV" >/dev/null 2>&1 || true
 
 echo "▸ Removing app, preferences, saved state and stored data (clipboard history, shelf files, share links)…"
-rm -rf "$APP" "$LEGACY_APP"
-defaults delete "$BUNDLE" >/dev/null 2>&1 || true
-rm -f "$HOME/Library/Preferences/$BUNDLE.plist"
-rm -rf "$HOME/Library/Saved Application State/$BUNDLE.savedState"
-# Clipboard history, shelf files, captures and the share delete tokens live
-# here; the in-app uninstall takes them, so this path must not keep them.
-rm -rf "$HOME/Library/Application Support/$BUNDLE"
-rm -rf "$HOME/Library/Caches/$BUNDLE"
-# Written by URLSession on the app's behalf, so they exist without the app ever
-# naming the path; `defaults delete` does not reach them either.
-rm -rf "$HOME/Library/HTTPStorages/$BUNDLE" "$HOME/Library/HTTPStorages/$BUNDLE.binarycookies"
-# `defaults delete` does not reach ByHost. The (N) qualifier is load-bearing:
-# without it zsh aborts the command on an unmatched pattern, which is the
-# ordinary case, and prints an error over a successful uninstall.
-rm -f "$HOME/Library/Preferences/ByHost/$BUNDLE".*.plist(N)
+# Only Sadoyo's own bundles and domains. The original Vorssaint keeps every one
+# of these: its identifier is not in this list.
+rm -rf "$APP" "$APP_DEV"
+for BUNDLE_DOMAIN in "$BUNDLE" "$BUNDLE_DEV"; do
+    defaults delete "$BUNDLE_DOMAIN" >/dev/null 2>&1 || true
+    rm -f "$HOME/Library/Preferences/$BUNDLE_DOMAIN.plist"
+    rm -rf "$HOME/Library/Saved Application State/$BUNDLE_DOMAIN.savedState"
+    # Clipboard history, shelf files, captures and the share delete tokens live
+    # here; the in-app uninstall takes them, so this path must not keep them.
+    rm -rf "$HOME/Library/Application Support/$BUNDLE_DOMAIN"
+    rm -rf "$HOME/Library/Caches/$BUNDLE_DOMAIN"
+    # Written by URLSession on the app's behalf, so they exist without the app
+    # ever naming the path; `defaults delete` does not reach them either.
+    rm -rf "$HOME/Library/HTTPStorages/$BUNDLE_DOMAIN" "$HOME/Library/HTTPStorages/$BUNDLE_DOMAIN.binarycookies"
+    # `defaults delete` does not reach ByHost. The (N) qualifier is
+    # load-bearing: without it zsh aborts the command on an unmatched pattern,
+    # which is the ordinary case, and prints an error over a success.
+    rm -f "$HOME/Library/Preferences/ByHost/$BUNDLE_DOMAIN".*.plist(N)
+done
 
 # The closed-lid rule under its current name and the two earlier ones, the
 # same files the app looks for. Each path is checked on its own. zsh passes an
@@ -209,7 +227,7 @@ for rule in "${RULES[@]}"; do
 done
 if (( ${#found_rules} )); then
     echo "▸ Removing closed-lid sudoers rule (asks for your admin password)…"
-    osascript -e "do shell script \"rm -f $found_rules\" with administrator privileges with prompt \"Vorssaint uninstaller\"" || true
+    osascript -e "do shell script \"rm -f $found_rules\" with administrator privileges with prompt \"Sadoyo uninstaller\"" || true
 fi
 
 # `--uninstall` restores sleep, but it runs before the app has an
@@ -246,36 +264,36 @@ case "$(spaces_removal_state "$spaces_owed" "$spaces_journal")" in
 esac
 
 if (( detached == 0 && sleep_stuck == 0 && sleep_unknown == 0 && spaces_stuck == 0 && spaces_unloaded == 0 && spaces_unknown == 0 )); then
-    echo "✓ Vorssaint fully removed."
+    echo "✓ Sadoyo fully removed."
     exit 0
 fi
 if (( detached )); then
-    echo "⚠ Vorssaint removed, but its fan helper is still registered with the system." >&2
-    echo "  Reinstall Vorssaint, then use Settings › Advanced to uninstall from inside the app." >&2
+    echo "⚠ Sadoyo removed, but its fan helper is still registered with the system." >&2
+    echo "  Reinstall Sadoyo, then use Settings › Advanced to uninstall from inside the app." >&2
 fi
 if (( sleep_stuck )); then
-    echo "⚠ Vorssaint removed, but this Mac still has sleep switched off." >&2
+    echo "⚠ Sadoyo removed, but this Mac still has sleep switched off." >&2
     echo "  Closed-lid mode disabled it, and restoring it needed a password this script could not ask for." >&2
     echo "  Put it back with: sudo pmset disablesleep 0" >&2
 fi
 if (( sleep_unknown )); then
-    echo "⚠ Vorssaint removed, but whether sleep came back could not be read." >&2
+    echo "⚠ Sadoyo removed, but whether sleep came back could not be read." >&2
     echo "  Closed-lid mode had switched it off. Check with: pmset -g | grep SleepDisabled" >&2
     echo "  If that reads 1, put it back with: sudo pmset disablesleep 0" >&2
 fi
 if (( spaces_stuck )); then
-    echo "⚠ Vorssaint removed, but Spaces are still kept in a fixed order." >&2
+    echo "⚠ Sadoyo removed, but Spaces are still kept in a fixed order." >&2
     echo "  Fixed Space order had turned rearranging off, and it was not put back." >&2
     echo "  Turn it back on in System Settings › Desktop & Dock with" >&2
     echo "  \"Automatically rearrange Spaces based on most recent use\"." >&2
 fi
 if (( spaces_unloaded )); then
-    echo "⚠ Vorssaint removed, but the Dock still keeps Spaces in a fixed order." >&2
+    echo "⚠ Sadoyo removed, but the Dock still keeps Spaces in a fixed order." >&2
     echo "  Space rearranging was put back on, and the Dock reads it when it restarts." >&2
     echo "  Log out and back in to finish." >&2
 fi
 if (( spaces_unknown )); then
-    print -u2 "Vorssaint removed, but whether Space rearranging was restored could not be confirmed."
+    print -u2 "Sadoyo removed, but whether Space rearranging was restored could not be confirmed."
     print -u2 "Check Automatically rearrange Spaces based on most recent use in System Settings."
 fi
 exit 1

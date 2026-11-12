@@ -409,7 +409,7 @@ enum LocalizationFeatureContractTests {
         suite.expect(bundleLocalizations.contains("tr"), "Info.plist declares Turkish as a bundle localization")
         suite.expect(bundleLocalizations.contains("ko"), "Info.plist declares Korean as a bundle localization")
         let baseAudioPrompt = infoPlist?["NSAudioCaptureUsageDescription"] as? String ?? ""
-        suite.expect(baseAudioPrompt.contains("Vorssaint uses each app's audio"),
+        suite.expect(baseAudioPrompt.contains("Sadoyo uses each app's audio"),
                "base audio permission prompt is an English fallback")
         let organizerFolderPromptKeys = [
             "NSDesktopFolderUsageDescription", "NSDocumentsFolderUsageDescription",
@@ -439,27 +439,40 @@ enum LocalizationFeatureContractTests {
                + "shipped only: \(shippedFolders.subtracting(declared).sorted()))")
         suite.expect(bundleLocalizations.count == AppLanguage.allCases.count,
                "the bundle speaks exactly the languages the app does")
-        // The fan helper's launchd plist ships with the release identifier in
-        // three places, and the Developer build rewrites each one so the two
-        // apps can run side by side. A fourth mention added without a matching
+        // The fan helper's launchd plist ships with Sadoyo's release identifier
+        // in three places, and the Developer build rewrites each one so the two
+        // variants can run side by side, and so neither shares launchd's service
+        // with the original Vorssaint. A fourth mention added without a matching
         // rewrite would leave the Developer build asking launchd for a service
         // that is registered under the other name, and fan control would just
         // never answer.
+        let releaseBundleID = "com.sadoyo.app"
+        let releaseHelperID = AppBundleIdentity.fanControlHelperIdentifier(for: releaseBundleID)
         let helperTemplate = (try? String(
-            contentsOfFile: "Resources/com.vorssaint.utils.fan-control.plist",
+            contentsOfFile: "Resources/\(releaseHelperID).plist",
             encoding: .utf8)) ?? ""
         suite.expect(!helperTemplate.isEmpty, "the helper template reads back")
-        let releaseHelperID = "com.vorssaint.utils.fan-control"
         let mentions = helperTemplate.components(separatedBy: releaseHelperID).count - 1
         suite.expect(mentions == 3,
                "the helper template names the release service exactly where the build rewrites it (\(mentions))")
         let buildText = (try? String(contentsOfFile: "build.sh", encoding: .utf8)) ?? ""
         for key in ["Set :Label $FAN_HELPER_ID",
                     "Set :BundleProgram Contents/Library/LaunchServices/$FAN_HELPER_ID",
-                    "Delete :MachServices:" + releaseHelperID,
-                    "Add :MachServices:$FAN_HELPER_ID"] {
+                    "Delete :MachServices",
+                    "Add :MachServices dict",
+                    "Add :MachServices:$FAN_HELPER_ID bool true"] {
             suite.expect(buildText.contains(key), "the Developer build rewrites \(key)")
         }
+        // The template and the build must agree on the identity the release
+        // bundle ships, and the Developer rewrite must name the developer
+        // service, not the release one.
+        suite.expect(releaseHelperID == "com.sadoyo.app.fan-control"
+                         && AppBundleIdentity.fanControlHelperIdentifier(
+                             for: AppBundleIdentity.developerBundleIdentifier)
+                             == "com.sadoyo.app.dev.fan-control",
+               "the shipped helper template is named for the identity the build ships")
+        suite.expect(buildText.contains("FAN_HELPER_ID=\"$BUNDLE_ID.fan-control\""),
+               "the Developer build derives the helper service from the developer bundle id")
         // Every shortcut the app ships with is written to disk as a string and
         // read back on the next launch. One that does not survive the trip
         // would leave that feature with no shortcut at all, on a fresh install,

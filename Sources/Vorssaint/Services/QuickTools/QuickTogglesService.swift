@@ -172,7 +172,7 @@ final class QuickTogglesService: ObservableObject {
         guard quitAppsAvailable,
               let app = NSRunningApplication(processIdentifier: pid),
               let bundleID = app.bundleIdentifier,
-              !QuickTogglesSupport.vorssaintBundleIdentifiers.contains(bundleID) else { return false }
+              !QuickTogglesSupport.neverQuitBundleIdentifiers.contains(bundleID) else { return false }
         return app.terminate()
     }
 

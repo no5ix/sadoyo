@@ -30,3 +30,11 @@ Name files `NNNN-short-title.md` and use:
 ```
 
 Decisions must reflect an explicit design choice, not a guess about the code. Update status when the decision changes and link superseding records rather than silently rewriting history.
+
+## Records
+
+- 0001. Splash task liveness from status
+- 0002. One island per display, one page
+- 0003. Splash strip throughput only when at work
+- 0004. A page opens on the display whose island was used
+- 0005. Sadoyo owns its bundle identifier

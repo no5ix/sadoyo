@@ -7,15 +7,16 @@ import Foundation
 enum QuickTogglesQuitAllTests {
     static func run(_ suite: TestSuite) {
         let regular = QuickTogglesSupport.regularActivationPolicy
-        let vorssaint = QuickTogglesSupport.vorssaintBundleIdentifiers
+        let own = QuickTogglesSupport.ownBundleIdentifiers
+        let neighbours = QuickTogglesSupport.neighbourBundleIdentifiers
         let (finder, phone) = (Defaults.finderBundleIdentifier, Defaults.phoneBundleIdentifier)
 
         suite.expect(
             QuickTogglesSupport.sanitizedQuitAllExceptions([
                 "  com.apple.Safari  ", "com.apple.Safari", finder, "",
-                "com.vorssaint.utils", "com.example.Keep", "com.vorssaint.utils.dev",
+                "com.sadoyo.app", "com.vorssaint.utils", "com.example.Keep", "com.vorssaint.utils.dev",
             ]) == [finder, phone, "com.apple.Safari", "com.example.Keep"],
-            "quit-all exceptions lead with Finder and Phone, trim, dedupe and drop Vorssaint ids")
+            "quit-all exceptions lead with Finder and Phone, trim, dedupe and drop Sadoyo and neighbour ids")
 
         let exceptions = Set(QuickTogglesSupport.sanitizedQuitAllExceptions(["com.apple.Safari"]))
         func quits(_ id: String?, policy: Int? = nil, terminated: Bool = false) -> Bool {
@@ -25,8 +26,9 @@ enum QuickTogglesQuitAllTests {
         suite.expect(
             quits("com.apple.TextEdit") && !quits("com.apple.Safari") && !quits(finder) && !quits(phone),
             "a regular app outside the list is quit; user exceptions, Finder and Phone are skipped")
-        suite.expect(vorssaint.allSatisfy { !exceptions.contains($0) && !quits($0) },
-                     "Vorssaint never quits itself, even though it is not in the exception list")
+        suite.expect(own.allSatisfy { !exceptions.contains($0) && !quits($0) }
+                   && neighbours.allSatisfy { !exceptions.contains($0) && !quits($0) },
+                     "Sadoyo never quits itself, and never quits the Vorssaint it shares this Mac with")
         suite.expect(
             !quits("com.apple.TextEdit", policy: 1) && !quits("com.apple.TextEdit", policy: 2)
                 && !quits("com.apple.TextEdit", terminated: true) && !quits(nil) && !quits(""),
@@ -38,7 +40,7 @@ enum QuickTogglesQuitAllTests {
         }
         suite.expect(
             lists("com.apple.Safari") && lists(phone) && !lists(finder)
-                && vorssaint.allSatisfy { !lists($0) }
+                && QuickTogglesSupport.neverQuitBundleIdentifiers.allSatisfy { !lists($0) }
                 && !lists("com.apple.TextEdit", policy: 1)
                 && !lists("com.apple.TextEdit", terminated: true) && !lists(nil),
             "the window lists regular apps and kept exceptions, never Finder, Vorssaint or hidden apps")

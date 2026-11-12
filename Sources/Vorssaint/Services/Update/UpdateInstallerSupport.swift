@@ -17,16 +17,47 @@ enum UpdateInstallerSupport {
         return trimmed
     }
 
+    /// The Developer ID team whose certificate a published Sadoyo release must
+    /// carry, for the updater's signature requirement. Empty by default: this
+    /// fork has no Apple-issued identity of its own, so the updater pins the
+    /// bundle identifier (below) and leaves the developer trust to Gatekeeper's
+    /// notarization assessment. A publisher with a Developer ID puts its team id
+    /// here and the requirement tightens to that team as well.
+    static let publishingTeamID = ""
+
+    /// The requirement the downloaded DMG must satisfy. The bundle inside it is
+    /// checked for this app's own identifier below, and Gatekeeper's
+    /// notarization assessment vouches for the publisher, so the team pin is
+    /// optional. Built as one string so the script states it once.
+    static var dmgVerifyRequirement: String {
+        publishingTeamID.isEmpty
+            ? "anchor apple generic"
+            : "anchor apple generic and certificate leaf[subject.OU] = \"\(publishingTeamID)\""
+    }
+
+    /// The requirement the app staged from the DMG must satisfy: this app's own
+    /// identifier, plus the publishing team when this fork has one. A neighbour's
+    /// bundle can never satisfy it, which is what keeps an upstream release from
+    /// being installed over Sadoyo.
+    static func stagedVerifyRequirement(expectedBundleIdentifier: String) -> String {
+        var requirement = "identifier \"\(expectedBundleIdentifier)\" and anchor apple generic"
+        if !publishingTeamID.isEmpty {
+            requirement += " and certificate leaf[subject.OU] = \"\(publishingTeamID)\""
+        }
+        return requirement
+    }
+
     /// The installer: waits for the app to exit, verifies and mounts the DMG,
     /// stages and verifies the new bundle, swaps it in and relaunches.
     /// Arguments: $1 app path, $2 dmg path, $3 pid to wait for,
     /// $4 result marker path, $5 uid to relaunch as (used when running as
     /// root, where a plain `open` could launch the app as root), $6 expected
-    /// version from the trusted release tag.
+    /// version from the trusted release tag, $7 this app's bundle identifier,
+    /// $8 the code requirement the staged bundle has to satisfy.
     static func installerScript() -> String {
         """
         #!/bin/sh
-        APP="$1"; DMG="$2"; PID="$3"; RESULT="$4"; ASUSER="$5"; EXPECTED_VERSION="$6"
+        APP="$1"; DMG="$2"; PID="$3"; RESULT="$4"; ASUSER="$5"; EXPECTED_VERSION="$6"; EXPECTED_ID="$7"; REQUIREMENT="$8"
         SCRIPT="$0"
         # Write-ahead markers go to a progress file; only a FINISHED run
         # promotes it to the real marker. The app may relaunch while this
@@ -63,7 +94,10 @@ enum UpdateInstallerSupport {
         }
         while kill -0 "$PID" 2>/dev/null; do sleep 0.3; done
         note fail-dmg-verify
-        DMG_VERIFY_REQ='anchor apple generic and certificate leaf[subject.OU] = "3D485NHW29"'
+        # The DMG has to be a complete, intact signed bundle. The app inside is
+        # checked for this app's own identifier below, and Gatekeeper's
+        # notarization assessment is what vouches for the publisher.
+        DMG_VERIFY_REQ='\(dmgVerifyRequirement)'
         if ! /usr/bin/codesign -v --strict -R="$DMG_VERIFY_REQ" "$DMG" 2>/dev/null; then
             /bin/rm -f "$DMG"
             finalize
@@ -84,8 +118,17 @@ enum UpdateInstallerSupport {
         fi
         SRC="$(/usr/bin/find "$MNT" -maxdepth 1 -name '*.app' -print -quit)"
         LAUNCH="$APP"
+        STAGED_ID="$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$SRC/Contents/Info.plist" 2>/dev/null)"
         if [ -z "$SRC" ]; then
             note fail-no-app-in-dmg
+        elif [ -z "$EXPECTED_ID" ] || [ "$STAGED_ID" != "$EXPECTED_ID" ]; then
+            # Identity gate. The bundle inside the DMG has to be THIS
+            # application. A neighbour's bundle — the original Vorssaint, whose
+            # releases were published under its own identifier — carries its own
+            # identifier, and swapping it in here would delete Sadoyo,
+            # install the neighbour in its folder and relaunch that. Refuse the
+            # swap, keep the running app, and report the step.
+            note fail-identity
         else
             # Install under the name the DMG ships, in the same folder. A rebrand
             # changes the bundle filename, so this renames it on disk too; a plain
@@ -120,10 +163,10 @@ enum UpdateInstallerSupport {
                     elif /usr/sbin/spctl -a -t exec "$STAGE" >/dev/null 2>&1; then
                         GATEKEEPER_OK=1
                     fi
-                    VERIFY_REQ='identifier "com.vorssaint.utils" and anchor apple generic and certificate leaf[subject.OU] = "3D485NHW29"'
-                    note fail-verify
-                    if /usr/bin/codesign -v --deep --strict -R="$VERIFY_REQ" "$STAGE" 2>/dev/null \
-                        && [ "$GATEKEEPER_OK" = 1 ]; then
+                    # Pinned to this app's own identifier by the caller, so a
+                    # neighbour's bundle can never pass for it.
+                    if /usr/bin/codesign -v --deep --strict -R="$REQUIREMENT" "$STAGE" 2>/dev/null \
+                        && [ "$GATEKEEPER_OK" = 1 ]; then                    note fail-verify
                         note fail-swap
                         # The backup name is unique per run: after an elevated
                         # install the old bundle is root-owned, a later user-run
@@ -182,20 +225,25 @@ enum UpdateInstallerSupport {
                                        pid: Int32,
                                        resultPath: String,
                                        uid: uid_t,
-                                       expectedVersion: String) -> String {
+                                       expectedVersion: String,
+                                       expectedBundleIdentifier: String,
+                                       verifyRequirement: String? = nil) -> String {
         let script = shellSingleQuoted(installerScript())
-        let args = [appPath, dmgPath, "\(pid)", resultPath, "\(uid)", expectedVersion]
+        let args = [appPath, dmgPath, "\(pid)", resultPath, "\(uid)", expectedVersion,
+                    expectedBundleIdentifier,
+                    verifyRequirement ?? stagedVerifyRequirement(expectedBundleIdentifier: expectedBundleIdentifier)]
             .map(shellSingleQuoted)
             .joined(separator: " ")
         return DetachedProcess.detachedShellCommand(
-            quotedArgv: "/bin/sh -c \(script) vorssaint-installer \(args)")
+            quotedArgv: "/bin/sh -c \(script) sadoyo-installer \(args)")
     }
 
     /// Whether the next install attempt should go straight through the admin
     /// prompt: a previous run failed at the copy or swap step, which is what
     /// missing write permission looks like from inside the installer. Other
-    /// codes (bad mount, failed verification) are not permission problems, so
-    /// elevating would just add a password prompt to the same failure.
+    /// codes (bad mount, failed verification, a bundle that is not this app)
+    /// are not permission problems, so elevating would just add a password
+    /// prompt to the same failure.
     static func shouldForceAdminInstall(afterFailureCode code: String?) -> Bool {
         code == "fail-copy" || code == "fail-swap"
     }

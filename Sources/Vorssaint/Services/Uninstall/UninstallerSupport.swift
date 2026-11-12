@@ -787,10 +787,16 @@ enum UninstallerSupport {
         }
     }
 
-    /// Vorssaint's own identifiers, among the protected ones.
+    /// This app's own identifiers, among the protected ones: Sadoyo's domains,
+    /// both variants of this install, the identifier a Sadoyo install carried
+    /// before the identity split, and this app's legacy `Vorss…` naming. The
+    /// original Vorssaint installs are protected too (CleanerSupport), but they
+    /// are a neighbour's data, never this app's own.
     private static func isOwnBundleID(_ id: String) -> Bool {
         let lowered = id.lowercased()
-        return lowered == "com.vorssaint" || lowered.hasPrefix("com.vorssaint.")
+        return lowered == "com.sadoyo" || lowered.hasPrefix("com.sadoyo.")
+            || AppBundleIdentity.isOwn(lowered)
+            || lowered == AppBundleIdentity.legacyBundleIdentifier
             || lowered.hasPrefix("vorss.")
     }
 

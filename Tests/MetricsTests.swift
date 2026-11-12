@@ -14,6 +14,9 @@ struct MetricsTests {
                 TestHarnessTests.run(suite)
                 PreferenceNamespaceTests.run(suite)
             }),
+            ("app-identity", {
+                AppIdentityTests.run(suite)
+            }),
             ("metrics", {
                 MetricsFeatureTests.run(suite)
                 DiskCapacityTests.run(suite)

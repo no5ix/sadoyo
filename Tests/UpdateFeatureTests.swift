@@ -968,7 +968,7 @@ enum UpdateFeatureTests {
                "apps on a writable external volume stay updatable in place")
         let installerScript = UpdateInstallerSupport.installerScript()
         for step in ["fail-dmg-verify", "fail-tempdir", "fail-mount", "fail-no-app-in-dmg",
-                     "fail-copy", "fail-version", "fail-verify", "fail-swap", "note ok"] {
+                     "fail-identity", "fail-copy", "fail-version", "fail-verify", "fail-swap", "note ok"] {
             suite.expect(installerScript.contains(step),
                    "installer script reports the \(step) step")
         }
@@ -982,6 +982,25 @@ enum UpdateFeatureTests {
         suite.expect(installerScript.contains("BUNDLE_VERSION=")
                && installerScript.contains("\"$BUNDLE_VERSION\" = \"$EXPECTED_VERSION\""),
                "installer requires the signed app to match the offered release version")
+        // Identity gate: the fork must never install a neighbour's bundle over
+        // itself, so the bundle inside the DMG has to carry this app's own
+        // identifier, and that has to be settled before anything is copied.
+        let identityGate = installerScript.range(of: "\"$STAGED_ID\" != \"$EXPECTED_ID\"")
+        let swap = installerScript.range(of: "fail-copy")
+        suite.expect(identityGate != nil && swap != nil
+               && identityGate!.lowerBound < swap!.lowerBound,
+               "installer refuses a bundle that is not this app before it stages anything")
+        suite.expect(installerScript.contains("Print CFBundleIdentifier")
+               && installerScript.contains("EXPECTED_ID=\"$7\""),
+               "installer reads the staged bundle identifier and takes the expected one from the caller")
+        suite.expect(installerScript.contains("REQUIREMENT=\"$8\"")
+               && installerScript.components(separatedBy: "REQUIREMENT=").count == 2,
+               "installer pins the staged bundle to the requirement its caller supplied, stated once")
+        suite.expect(UpdateInstallerSupport.stagedVerifyRequirement(expectedBundleIdentifier: "com.sadoyo.app")
+               == "identifier \"com.sadoyo.app\" and anchor apple generic",
+               "the staged requirement is pinned to Sadoyo's own identifier")
+        suite.expect(!installerScript.contains("identifier \"com.vorssaint.utils\""),
+               "installer pins no neighbour identifier")
         suite.expect(installerScript.contains("chown -R"),
                "an elevated install hands the bundle back to the user")
         suite.expect(installerScript.contains("update-old.$PID"),
@@ -1005,7 +1024,8 @@ enum UpdateFeatureTests {
             pid: 123,
             resultPath: "/tmp/result",
             uid: 501,
-            expectedVersion: "3.3.3")
+            expectedVersion: "3.3.3",
+            expectedBundleIdentifier: "com.sadoyo.app")
         suite.expect(elevated.contains("POSIX::setsid()") && elevated.hasSuffix("&"),
                "elevated installer leaves this app's session so it outlives the app it replaces")
         suite.expect(elevated.contains("nohup"),
@@ -1014,6 +1034,8 @@ enum UpdateFeatureTests {
                "elevated installer passes the app path quoted for the shell")
         suite.expect(elevated.contains("'3.3.3'"),
                "elevated installer passes the expected version quoted for the shell")
+        suite.expect(elevated.contains("'com.sadoyo.app'"),
+               "elevated installer passes this app's identifier, so the gate has something to check")
         // The script travels inline and is long; it must be spelled once, with
         // both the setsid attempt and the fallback reusing the same "$@".
         suite.expect(elevated.components(separatedBy: "DMG_VERIFY_REQ=").count == 2

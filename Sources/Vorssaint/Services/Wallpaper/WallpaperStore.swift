@@ -26,8 +26,12 @@ enum WallpaperStore {
 
     // lives with the app, not in the system wallpaper store
     static var backupURL: URL {
+        // The app's own Application Support folder: two installs on one Mac each
+        // keep their own index, so neither rewrites the other's wallpaper list.
         let fallback = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
-            .appendingPathComponent("Library/Application Support/com.vorssaint.utils",
+            .appendingPathComponent("Library/Application Support",
+                                    isDirectory: true)
+            .appendingPathComponent(Bundle.main.bundleIdentifier ?? AppBundleIdentity.bundleIdentifier,
                                     isDirectory: true)
         let container = PrivateFileStore.containerURL ?? fallback
         return container.appendingPathComponent("WallpaperIndex.vorssaint-bak",

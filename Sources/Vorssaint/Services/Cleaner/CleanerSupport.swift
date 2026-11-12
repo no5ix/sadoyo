@@ -54,15 +54,17 @@ enum CleanerSupport {
     /// Bundle identifiers that must never be treated as junk owners, no
     /// matter what the installed-apps oracle says: the operating system's
     /// own domains (in any wrapping, including team prefixed group names
-    /// and systemgroup entries), this very app, and shared infrastructure.
+    /// and systemgroup entries), this very app, the original Vorssaint
+    /// installs that share this Mac with it, and shared infrastructure.
     static func isProtectedBundleID(_ id: String) -> Bool {
+        if AppBundleIdentity.isProtectedDomain(id) { return true }
         let lowered = id.lowercased()
         let wrapped = "." + lowered + "."
-        if wrapped.contains(".com.apple.") || wrapped.contains(".com.vorssaint.")
+        if wrapped.contains(".com.apple.")
             || wrapped.contains(".developer.apple.") || wrapped.contains(".is.workflow.") {
             return true
         }
-        if lowered == "com.apple" || lowered.hasPrefix("vorss.") {
+        if lowered == "com.apple" || lowered.hasPrefix("vorss.") || lowered.hasPrefix("sadoyo.") {
             return true
         }
         // A domain ends at a dot: com.segment covers com.segment.analytics,

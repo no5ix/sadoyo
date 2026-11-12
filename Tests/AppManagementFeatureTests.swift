@@ -597,7 +597,11 @@ enum AppManagementFeatureTests {
             if case let .failure(reason) = UninstallerSupport.evaluate(url) { return reason }
             return nil
         }
-        let ownApp = selectionBundle("Copy.app", bundleID: "com.vorssaint.utils.dev")
+        let ownApp = selectionBundle("Copy.app", bundleID: "com.sadoyo.app.dev")
+        // The original Vorssaint is a protected neighbour: refused as a shared
+        // identifier, and never reported as this app, so its own uninstall
+        // stays the neighbour's business.
+        let neighbourApp = selectionBundle("Neighbour.app", bundleID: "com.vorssaint.utils")
         let plainFolder = selectionFixture.appendingPathComponent("Folder", isDirectory: true)
         try? FileManager.default.createDirectory(at: plainFolder, withIntermediateDirectories: true)
         let document = selectionFixture.appendingPathComponent("Notes.txt")
@@ -607,6 +611,7 @@ enum AppManagementFeatureTests {
                && refusal(plainFolder) == .notAnApp
                && refusal(appleEditorApp) == .sharedIdentifier
                && refusal(ownApp) == .thisApp
+               && refusal(neighbourApp) == .sharedIdentifier
                && refusal(aliasApp) == .link
                && refusal(bareApp) == .unidentified
                && refusal(flatApp) == .unidentified

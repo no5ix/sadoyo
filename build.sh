@@ -2,8 +2,12 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Vorssaint
 
-# Builds Vorssaint, assembles the .app bundle, signs it and (with --install)
-# installs it into /Applications.
+# Builds Sadoyo (a Vorssaint fork), assembles the .app bundle, signs it and
+# (with --install) installs it into /Applications.
+#
+# The identity of the shipped app lives in this file and in Resources/Info.plist:
+# APP_BUNDLE_ID, APP_NAME and EXECUTABLE are Sadoyo's own, so the install
+# coexists with the original Vorssaint. See docs/app-identity.md.
 #
 # The bundle is staged in a temporary directory outside ~/Documents: folders synced
 # by File Provider gain xattrs (com.apple.provenance etc.) that invalidate codesign.
@@ -26,7 +30,7 @@ trap cleanup EXIT
 # into the build sweeps like any other ending.
 trap 'exit 1' INT TERM HUP
 
-# Flags: --dev builds the local-only "Vorssaint (Developer)" variant (its own
+# Flags: --dev builds the local-only "Sadoyo (Developer)" variant (its own
 # bundle id, so it coexists with the official app); --install puts it in /Applications.
 DEV=0
 INSTALL=0
@@ -43,16 +47,16 @@ for arg in "$@"; do
 done
 
 if (( DEV )); then
-    APP_NAME="Vorssaint (Developer)"
-    EXECUTABLE="VorssaintDeveloper"
-    APP_BUNDLE_ID="com.vorssaint.utils.dev"
+    APP_NAME="Sadoyo (Developer)"
+    EXECUTABLE="SadoyoDeveloper"
+    APP_BUNDLE_ID="com.sadoyo.app.dev"
     BUILD_VARIANT_FLAGS=(-D VORSSAINT_DEVELOPMENT)
     APP_OPTIMIZATION_FLAGS=(-Onone)
     BUILD_CONFIGURATION="debug"
 else
-    APP_NAME="Vorssaint"
-    EXECUTABLE="Vorssaint"
-    APP_BUNDLE_ID="com.vorssaint.utils"
+    APP_NAME="Sadoyo"
+    EXECUTABLE="Sadoyo"
+    APP_BUNDLE_ID="com.sadoyo.app"
     BUILD_VARIANT_FLAGS=()
     APP_OPTIMIZATION_FLAGS=(-O)
     BUILD_CONFIGURATION="release"
@@ -599,6 +603,8 @@ if (( TEST )); then
         Sources/Vorssaint/Services/Uninstall/UninstallerSupport.swift
         Sources/Vorssaint/Services/ManagedDownloads/WhatsAppDownloadSupport.swift
         Sources/Vorssaint/Core/SecureInputSupport.swift
+        Sources/Vorssaint/Core/AppIdentity.swift
+        Sources/Vorssaint/Services/Notifier.swift
         Tests/*.swift
         build/generated-tests/*.swift
     )
@@ -645,6 +651,7 @@ swiftc "${APP_OPTIMIZATION_FLAGS[@]}" -incremental -enable-batch-mode -j "$(sysc
 
 echo "▸ Compiling protected fan helper…"
 swiftc -O -target "$TARGET" -sdk "$SDK" "${SDK_COMPAT_FLAGS[@]}" "${BUILD_VARIANT_FLAGS[@]}" \
+    Sources/Vorssaint/Core/AppIdentity.swift \
     Sources/Vorssaint/Services/FanControl/FanControlSupport.swift \
     Sources/Vorssaint/Services/FanControl/FanControlXPC.swift \
     Sources/Vorssaint/Services/SystemMonitor/SMCClient.swift \
@@ -707,7 +714,7 @@ mkdir -p "$STAGE/Contents/Frameworks"
 cp "build/$NOW_PLAYING_ADAPTER" "$STAGE/Contents/Frameworks/$NOW_PLAYING_ADAPTER"
 cp Resources/now-playing.pl "$STAGE/Contents/Resources/now-playing.pl"
 cp Resources/agent-prices.json "$STAGE/Contents/Resources/agent-prices.json"
-cp Resources/com.vorssaint.utils.fan-control.plist \
+cp Resources/com.sadoyo.app.fan-control.plist \
     "$STAGE/Contents/Library/LaunchDaemons/$FAN_HELPER_ID.plist"
 cp Resources/Info.plist "$STAGE/Contents/Info.plist"
 cp CHANGELOG.md "$STAGE/Contents/Resources/CHANGELOG.md"
@@ -722,9 +729,15 @@ if (( DEV )); then
     /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName $APP_NAME" "$STAGE/Contents/Info.plist"
     /usr/libexec/PlistBuddy -c "Set :CFBundleExecutable $EXECUTABLE" "$STAGE/Contents/Info.plist"
     FAN_PLIST="$STAGE/Contents/Library/LaunchDaemons/$FAN_HELPER_ID.plist"
+    # The shipped plist carries the official identifiers; the Developer variant
+    # rewrites every field that launchd keys on (label, program, Mach service)
+    # so the two installs register two separate daemons. The MachServices dict
+    # is rebuilt from scratch: the shipped plist's key is the official one, and
+    # a PlistBuddy Delete of a key that is not there would stop the build.
     /usr/libexec/PlistBuddy -c "Set :Label $FAN_HELPER_ID" "$FAN_PLIST"
     /usr/libexec/PlistBuddy -c "Set :BundleProgram Contents/Library/LaunchServices/$FAN_HELPER_ID" "$FAN_PLIST"
-    /usr/libexec/PlistBuddy -c "Delete :MachServices:com.vorssaint.utils.fan-control" "$FAN_PLIST"
+    /usr/libexec/PlistBuddy -c "Delete :MachServices" "$FAN_PLIST" 2>/dev/null || true
+    /usr/libexec/PlistBuddy -c "Add :MachServices dict" "$FAN_PLIST"
     /usr/libexec/PlistBuddy -c "Add :MachServices:$FAN_HELPER_ID bool true" "$FAN_PLIST"
     # Stamp the source commit + build time so the running dev app shows (in About)
     # exactly which code it was compiled from. Lets you verify it matches HEAD before
@@ -930,12 +943,20 @@ fi
 if (( INSTALL )); then
     echo "▸ Installing into /Applications…"
     stop_process "$EXECUTABLE"
-    # Only an official install replaces the pre-rename official apps. The
-    # Developer variant must coexist with them just as it does with Vorssaint.
+    # Only an official install replaces the pre-rename apps, and only when the
+    # leftover carries THIS build's bundle identifier. A Sadoyo install never
+    # matches a Vorssaint bundle, so the original app, its processes and its
+    # files stay exactly where they are: the two installs coexist.
     if (( ! DEV )); then
         for legacy in "Vorss:Vorss" "Vorssaint Utils:VorssaintUtils"; do
             name="${legacy%%:*}"; proc="${legacy##*:}"
             if [[ -d "/Applications/$name.app" ]]; then
+                legacy_id="$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' \
+                    "/Applications/$name.app/Contents/Info.plist" 2>/dev/null || true)"
+                if [[ "$legacy_id" != "$APP_BUNDLE_ID" ]]; then
+                    echo "  (kept $name.app: it is not this app — $legacy_id)"
+                    continue
+                fi
                 stop_process "$proc"
                 rm -rf "/Applications/$name.app"
                 echo "  (legacy $name.app removed)"

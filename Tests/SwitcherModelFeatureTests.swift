@@ -4425,11 +4425,17 @@ enum SwitcherModelFeatureTests {
                "a click after hiding lets the Dock bring the app back")
         suite.expect(DockClickSupport.repeatDecision(lastAction: .hide, elapsed: 0.1) == .swallow,
                "an accidental double-click never hides and immediately reopens the app")
-        suite.expect(DockClickSupport.isOwnBundleIdentifier("com.vorssaint.utils")
-                && DockClickSupport.isOwnBundleIdentifier("com.vorssaint.utils.dev")
+        suite.expect(DockClickSupport.isOwnBundleIdentifier(AppBundleIdentity.bundleIdentifier)
+                && DockClickSupport.isOwnBundleIdentifier(AppBundleIdentity.developerBundleIdentifier)
                 && !DockClickSupport.isOwnBundleIdentifier("com.example.editor")
-                && !DockClickSupport.isOwnBundleIdentifier(nil),
+                && !DockClickSupport.isOwnBundleIdentifier(nil)
+                && !DockClickSupport.isOwnBundleIdentifier("com.vorssaint.utils"),
                "Dock clicks never target either build of this app")
+        suite.expect(DockClickSupport.isNeighbourInstallBundleIdentifier("com.vorssaint.utils")
+                && DockClickSupport.isNeighbourInstallBundleIdentifier("com.vorssaint.utils.dev")
+                && !DockClickSupport.isNeighbourInstallBundleIdentifier(AppBundleIdentity.bundleIdentifier)
+                && !DockClickSupport.isNeighbourInstallBundleIdentifier(nil),
+               "Dock clicks leave the original Vorssaint's own Dock tile to Vorssaint")
 
         suite.expect(DockClickSupport.repeatDecision(lastAction: nil, elapsed: nil) == .deriveFromState,
                "dock click derives the first click from window state")

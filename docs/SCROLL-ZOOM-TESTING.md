@@ -7,7 +7,7 @@ at the pointer. Use an app or document that supports a real trackpad pinch.
 
 ```sh
 ./build.sh --dev --install
-./build/VorssaintDeveloper --selftest
+./build/SadoyoDeveloper --selftest
 ```
 
 1. Quit other Vorssaint instances. Disable other wheel-modifying utilities for

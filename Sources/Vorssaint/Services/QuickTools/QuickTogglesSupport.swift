@@ -103,23 +103,28 @@ enum QuickTogglesSupport {
 
     // MARK: - Quit all apps
 
-    /// Vorssaint's own identifiers, including the local signing variant. Quitting
+    /// Sadoyo's own identifiers, including the local signing variant. Quitting
     /// ourselves mid-sweep would leave the remaining apps running with no way
     /// to finish the pass from here.
-    static let vorssaintBundleIdentifiers = [
-        "com.vorssaint.utils",
-        "com.vorssaint.utils.dev",
-    ]
+    static let ownBundleIdentifiers = Array(AppBundleIdentity.ownBundleIdentifiers)
+
+    /// The original Vorssaint installs, running beside this app. They quit
+    /// themselves from their own menu; a Sadoyo "Quit all" pass has no business
+    /// closing the neighbour's windows.
+    static let neighbourBundleIdentifiers = Array(AppBundleIdentity.upstreamBundleIdentifiers)
+
+    /// Every identifier the sweep must never target.
+    static let neverQuitBundleIdentifiers = ownBundleIdentifiers + neighbourBundleIdentifiers
 
     /// `NSApplication.ActivationPolicy.regular.rawValue`. Kept as an Int so this
     /// file stays free of AppKit for the unit harness.
     static let regularActivationPolicy = 0
 
     /// Kept apps always start with Auto Quit's locked pair, Finder and Phone.
-    /// Vorssaint is never stored: the quit rules leave it alone by themselves.
+    /// Sadoyo is never stored: the quit rules leave it alone by themselves.
     static func sanitizedQuitAllExceptions(_ bundleIDs: [String]) -> [String] {
         Defaults.sanitizedBundleIdentifierList(Defaults.mandatoryAutoQuitExceptionBundleIDs + bundleIDs)
-            .filter { !vorssaintBundleIdentifiers.contains($0) }
+            .filter { !neverQuitBundleIdentifiers.contains($0) }
     }
 
     /// Whether a running app should receive a soft quit. Only regular GUI apps
@@ -131,7 +136,7 @@ enum QuickTogglesSupport {
         guard !isTerminated else { return false }
         guard activationPolicyRawValue == regularActivationPolicy else { return false }
         guard let bundleIdentifier, !bundleIdentifier.isEmpty,
-              !vorssaintBundleIdentifiers.contains(bundleIdentifier) else { return false }
+              !neverQuitBundleIdentifiers.contains(bundleIdentifier) else { return false }
         return !exceptions.contains(bundleIdentifier)
     }
 
@@ -143,7 +148,7 @@ enum QuickTogglesSupport {
                          isTerminated: Bool) -> Bool {
         guard let bundleIdentifier, !bundleIdentifier.isEmpty else { return false }
         guard bundleIdentifier != Defaults.finderBundleIdentifier,
-              !vorssaintBundleIdentifiers.contains(bundleIdentifier) else { return false }
+              !neverQuitBundleIdentifiers.contains(bundleIdentifier) else { return false }
         return !isTerminated && activationPolicyRawValue == regularActivationPolicy
     }
 

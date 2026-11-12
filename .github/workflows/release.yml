@@ -124,11 +124,14 @@ jobs:
 
       - name: Verify release signature
         run: |
-          REQUIREMENT='identifier "com.vorssaint.utils" and anchor apple generic and certificate leaf[subject.OU] = "3D485NHW29"'
-          codesign --verify --deep --strict -R="$REQUIREMENT" build/stage/Vorssaint.app
+          # The bundle identifier is Sadoyo's own (see docs/app-identity.md); the team OU
+          # is the publisher's own Developer ID, and a fork publishing releases has to
+          # put its own team here and in the signing/notarization secrets below.
+          REQUIREMENT='identifier "com.sadoyo.app" and anchor apple generic and certificate leaf[subject.OU] = "3D485NHW29"'
+          codesign --verify --deep --strict -R="$REQUIREMENT" build/stage/Sadoyo.app
 
       - name: Selftest
-        run: ./build/Vorssaint --selftest
+        run: ./build/Sadoyo --selftest
 
       - name: Notarize app
         env:
@@ -136,7 +139,7 @@ jobs:
           NOTARY_API_KEY_P8: ${{ secrets.NOTARY_API_KEY_P8 }}
           NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
           NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
-        run: ./Tools/notarize.sh build/stage/Vorssaint.app
+        run: ./Tools/notarize.sh build/stage/Sadoyo.app
 
       - name: Package DMG
         run: ./Tools/make-dmg.sh
@@ -170,7 +173,7 @@ jobs:
             fi
             if [[ ! -s "$TARGET" ]]; then
               echo "Missing required showcase media: $TARGET" >&2
-              echo "The app expects https://github.com/vorssaint/vorssaint-utils/releases/download/v3.1.4/$ASSET" >&2
+              echo "The app expects $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/download/v3.1.4/$ASSET" >&2
               exit 1
             fi
           fi
@@ -188,11 +191,11 @@ jobs:
           }
           trap cleanup EXIT
           hdiutil attach -nobrowse -readonly -mountpoint "$MP" "$DMG"
-          spctl -a -t exec -vv "$MP/Vorssaint.app" 2>&1 | tee /tmp/spctl.txt
+          spctl -a -t exec -vv "$MP/Sadoyo.app" 2>&1 | tee /tmp/spctl.txt
           grep -q "source=Notarized Developer ID" /tmp/spctl.txt
-          REQUIREMENT='identifier "com.vorssaint.utils" and anchor apple generic and certificate leaf[subject.OU] = "3D485NHW29"'
-          codesign --verify --deep --strict -R="$REQUIREMENT" "$MP/Vorssaint.app"
-          xcrun stapler validate "$MP/Vorssaint.app"
+          REQUIREMENT='identifier "com.sadoyo.app" and anchor apple generic and certificate leaf[subject.OU] = "3D485NHW29"'
+          codesign --verify --deep --strict -R="$REQUIREMENT" "$MP/Sadoyo.app"
+          xcrun stapler validate "$MP/Sadoyo.app"
 
       - name: Release notes from CHANGELOG
         id: notes
@@ -207,7 +210,7 @@ jobs:
           {
             printf '%s\n' "$NOTES"
             echo ""
-            echo "Signed with an Apple Developer ID and notarized by Apple, so it downloads and opens normally. Requires macOS 14 or later. Open the .dmg below and drag Vorssaint to Applications."
+            echo "Signed with an Apple Developer ID and notarized by Apple, so it downloads and opens normally. Requires macOS 14 or later. Open the .dmg below and drag Sadoyo to Applications."
           } > "$NOTES_FILE"
           {
             echo "file=$NOTES_FILE"

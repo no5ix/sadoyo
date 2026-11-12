@@ -824,6 +824,7 @@ enum DefaultsKey {
     static let notchDefaultProfileInitialized = "notchDefaultProfileInitialized" // local migration marker; never backed up
     static let notchInitialExtensionsInstalled = "notchInitialExtensionsInstalled" // local first-install marker; never backed up
     static let notchAgentsOptInMigrated = "notchAgentsOptInMigrated" // local migration marker; never backed up
+    static let identityPreferencesImported = "identityPreferencesImported" // local migration marker; never backed up
     static let notchIdleContent = "notchIdleContent"
     static let notchHiddenControls = "notchHiddenControls"
     // Travels with the controls so old backups migrate and later choices survive.
@@ -2024,6 +2025,10 @@ enum Defaults {
 
     static func register() {
         let defaults = UserDefaults.standard
+        // First: this install may be a Sadoyo that used to run under the
+        // original bundle identifier. Carry its choices over before anything
+        // reads a preference, so no migration sees a fresh-install domain.
+        migrateIdentityPreferencesDomain(in: defaults)
         migrateClipboardSensitiveTextOptIn(in: defaults)
         migrateNotchAgentsOptIn(in: defaults)
         migrateExistingNotchDefaults(in: defaults)
@@ -2059,6 +2064,38 @@ enum Defaults {
         // The "all apps" output choice now lasts one session; a saved one
         // would move apps that chose their own output after every launch.
         defaults.removeObject(forKey: DefaultsKey.mixerUniversalOutputDevice)
+    }
+
+    /// Carries a Sadoyo install's own settings across the identity split.
+    ///
+    /// macOS keys the standard preferences domain to the bundle identifier, so
+    /// Sadoyo's own identifier opens an empty domain: every shortcut, toggle
+    /// and layout a Sadoyo user had chosen under the old identifier would look
+    /// reset. TCC grants cannot follow (they are bound to the identifier and
+    /// the signature and must be granted again), but the choices can, so copy
+    /// the old domain in — once, and never over anything this install already
+    /// has.
+    ///
+    /// Only the app's own keys travel. The keys macOS injects into a suite
+    /// domain (`Apple…`, `NS…`, `k…`) stay where they are, and the marker makes
+    /// every later launch a no-op, so the neighbour app writing to its own
+    /// domain can never move a Sadoyo choice made after the import.
+    static func migrateIdentityPreferencesDomain(
+        in defaults: UserDefaults,
+        legacyDomainName: String = AppBundleIdentity.legacyBundleIdentifier,
+        domainName: String? = Bundle.main.bundleIdentifier
+    ) {
+        guard let domainName, domainName != legacyDomainName else { return }
+        guard defaults.object(forKey: DefaultsKey.identityPreferencesImported) == nil else { return }
+        let legacy = defaults.persistentDomain(forName: legacyDomainName) ?? [:]
+        let current = defaults.persistentDomain(forName: domainName) ?? [:]
+        for (key, value) in legacy where current[key] == nil {
+            if key.hasPrefix("Apple") || key.hasPrefix("NS") || key.hasPrefix("k") { continue }
+            defaults.set(value, forKey: key)
+        }
+        // Written last, and only when the copy pass is done: a crash halfway
+        // reruns the import instead of stranding the user with half a domain.
+        defaults.set(true, forKey: DefaultsKey.identityPreferencesImported)
     }
 
     /// Start text filtering off for existing installations as well. A distinct

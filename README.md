@@ -1,3 +1,18 @@
+# Sadoyo (a Vorssaint fork)
+
+This repository builds **Sadoyo**, a fork of Vorssaint. The installed app carries
+its own macOS identity — bundle identifier `com.sadoyo.app` (Developer
+`com.sadoyo.app.dev`), display name and executable `Sadoyo` — so it installs and
+runs beside the original Vorssaint (`com.vorssaint.utils`) on the same Mac:
+separate notification banners and click targets, permissions, preferences, login
+item, fan daemon, caches and updater. Nothing here changes the original app.
+[App identity and coexistence](docs/app-identity.md) explains the design,
+[ADR 0005](docs/decisions/0005-sadoyo-owns-its-bundle-identifier.md) the decision
+behind it, and [the testing guide](docs/testing/app-identity.md) how to verify an
+install. The source tree, target and module names keep the upstream naming.
+
+---
+
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/logo-dark.svg">

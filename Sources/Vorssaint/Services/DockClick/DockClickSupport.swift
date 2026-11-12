@@ -47,11 +47,18 @@ struct DockTilePairing<Tile> {
 extension DockTilePairing: Equatable where Tile: Equatable {}
 
 enum DockClickSupport {
-    /// Both local and published builds may be running during development.
-    /// Neither is ever a valid target for the other's global Dock click tap.
+    /// Both Sadoyo variants may be running at once. Neither is ever a valid
+    /// target for the other's global Dock click tap.
     static func isOwnBundleIdentifier(_ bundleIdentifier: String?) -> Bool {
-        bundleIdentifier == "com.vorssaint.utils"
-            || bundleIdentifier == "com.vorssaint.utils.dev"
+        AppBundleIdentity.isOwn(bundleIdentifier)
+    }
+
+    /// The original Vorssaint installs. It ships this same Dock click feature
+    /// and drives its own Dock tile, so tapping that tile from here would
+    /// toggle the neighbour's windows twice over. Coexistence means leaving a
+    /// neighbour install's own tile to the neighbour.
+    static func isNeighbourInstallBundleIdentifier(_ bundleIdentifier: String?) -> Bool {
+        AppBundleIdentity.isUpstreamInstall(bundleIdentifier)
     }
 
     /// The Option-Command-M chord is not unique to Minimize All. Only the

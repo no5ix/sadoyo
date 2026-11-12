@@ -194,6 +194,7 @@ enum SettingsBackupSupport {
         DefaultsKey.restoredScreenCaptureShortcutsMigrated,
         DefaultsKey.orphanedCaptureShortcutMigrated,
         DefaultsKey.notchAgentsOptInMigrated,
+        DefaultsKey.identityPreferencesImported,
         DefaultsKey.settingsWindowWidth,
         DefaultsKey.settingsWindowHeight,
         DefaultsKey.clipboardHistoryWindowWidth,

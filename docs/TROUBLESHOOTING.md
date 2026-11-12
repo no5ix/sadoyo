@@ -2,7 +2,11 @@
 
 A quick guide to the snags people hit most. If none of it helps, jump to [reporting a useful bug](#reporting-a-useful-bug) at the end.
 
-The permission and uninstall commands below all point at Vorssaint's bundle identifier, `com.vorssaint.utils`.
+The permission and uninstall commands below all point at Sadoyo's bundle
+identifier, `com.sadoyo.app` (Developer builds: `com.sadoyo.app.dev`). Sadoyo is
+a fork and owns its own identity, so a command aimed at the original Vorssaint's
+`com.vorssaint.utils` resets that app's grants and does nothing for Sadoyo.
+See [app identity](app-identity.md).
 
 ## The app will not open
 
@@ -83,33 +87,34 @@ To wipe Vorssaint's granted permissions and let macOS ask again from scratch, pi
 - **From Terminal.** Reset all of Vorssaint's privacy permissions at once.
 
   ```sh
-  tccutil reset All com.vorssaint.utils
+  tccutil reset All com.sadoyo.app
   ```
 
   Or reset a single kind, for example.
 
   ```sh
-  tccutil reset Accessibility com.vorssaint.utils
-  tccutil reset ScreenCapture com.vorssaint.utils
+  tccutil reset Accessibility com.sadoyo.app
+  tccutil reset ScreenCapture com.sadoyo.app
   ```
 
   A self-built Developer variant has its own grants under
-  `com.vorssaint.utils.dev`. Resetting is the way out when System Settings
+  `com.sadoyo.app.dev`. Resetting is the way out when System Settings
   shows the permission as granted but the app disagrees — that happens when a
   grant was given to an earlier ad-hoc build whose signature no longer matches.
 
 ## Clean uninstall
 
-The bundled script takes out everything Vorssaint added, the app itself, its preferences and saved state, the login item, its privacy grants, and the optional closed lid `sudoers` rule.
+The bundled script takes out everything Sadoyo added, the app itself (official and Developer), its preferences and saved state, the login item, its privacy grants, and the optional closed lid `sudoers` rule. It never touches the original Vorssaint install.
 
 ```sh
 ./Tools/uninstall.sh
 ```
 
-Run it from a clone of the repository, or download the single script from the repo. Would you rather do it by hand? Quit Vorssaint, drag it from Applications to the Trash, then clear its permissions.
+Run it from a clone of the repository, or download the single script from the repo. Would you rather do it by hand? Quit Sadoyo, drag `Sadoyo.app` from Applications to the Trash, then clear its permissions.
 
 ```sh
-tccutil reset All com.vorssaint.utils
+tccutil reset All com.sadoyo.app
+tccutil reset All com.sadoyo.app.dev
 ```
 
 ## Reporting a useful bug
@@ -124,7 +129,7 @@ A clear report gets fixed faster. Try to include the following.
 If you have a build from source, the self test prints a quick health summary that is handy to paste in.
 
 ```sh
-./build/Vorssaint --selftest
+./build/Sadoyo --selftest
 ```
 
 Open a report from the [new issue](https://github.com/vorssaint/vorssaint-utils/issues/new/choose) page, and see [support](../SUPPORT.md) for every way to get help.

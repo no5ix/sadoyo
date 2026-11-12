@@ -7,6 +7,7 @@ These instructions apply to every AI coding agent working in this repository. Re
 - [Contributing](CONTRIBUTING.md): project conventions, scope, localization, validation, PRs, and release boundaries.
 - [Agent-assisted contributions](docs/AI-CONTRIBUTIONS.md): evidence standards and agent-specific responsibilities.
 - [Architecture guide](ARCHITECTURE.md): source layout, ownership, and major runtime boundaries.
+- [App identity and coexistence](docs/app-identity.md): the bundle identifier this install owns, and how it lives beside the original Vorssaint.
 - [Development guide](DEVELOPMENT.md): build, test, signing, launch, and visual verification.
 - [Permissions](docs/PERMISSIONS.md), [Privacy](docs/PRIVACY.md), and [Troubleshooting](docs/TROUBLESHOOTING.md): consult before changing permission-sensitive or privacy-sensitive behavior.
 - [Design guidelines](docs/design-guidelines/README.md), [Testing guide](docs/testing/README.md), and [Architecture decisions](docs/decisions/README.md): consult for UI, verification, and cross-cutting design changes.
@@ -65,32 +66,87 @@ If documentation conflicts with executable code or build scripts, inspect the cu
 ## macOS Release, Developer, and permissions
 
 - The authoritative app bundle is built by `build.sh`; `Package.swift` supports editor indexing and does not assemble or sign the app bundle.
-- `./build.sh` builds the Release variant at `build/stage/Vorssaint.app`.
+- `./build.sh` builds the Release variant at `build/stage/Sadoyo.app`.
 - `./build.sh --dev` builds a separate Developer variant with a different bundle identifier, preferences, and TCC permissions. Do not assume permissions granted to one bundle apply to the other.
 - For final visual verification, use the Release app unless the task explicitly concerns the Developer variant. Confirm the running process and bundle identity before claiming which build was tested.
 - Preserve stable signing identities. Ad-hoc re-signing/rebuilding can invalidate macOS TCC grants. Read [Contributing](CONTRIBUTING.md) and [Troubleshooting](docs/TROUBLESHOOTING.md) before changing signing or permission behavior.
 
 ## Git and delivery
 
-- Follow the user's requested branch. Do not create, switch, rebase, reset, or force-push branches unless explicitly requested and safe.
+- Follow the Git policy below: a task gets its own branch off `main` unless the
+  maintainer asked for a specific branch. Never rebase, reset, or force-push
+  without being explicitly asked and shown it is safe.
 - Review the full diff and staged file list before committing. Stage only task-related files.
 - Do not change version numbers or `CHANGELOG.md` unless the maintainer explicitly requests it; the contribution guide reserves those changes for the maintainer.
 - Use the repository's conventional commit format: `type(scope): lowercase imperative phrase`.
 - Do not publish a release, create a tag, merge a PR, or post public communication unless explicitly requested.
 - In the final report, list changed files, actual commands and results, visual evidence, limitations, commit SHA, and push status.
 
-## Git workflow for coding agents (mandatory)
+## Git Branch, Commit, and Push Policy
 
-These rules apply to every coding agent working in this repository, on every task, unless the maintainer says otherwise in that task.
+This is the standing workflow for every coding task in this repository, for
+every AI coding agent, unless the maintainer says otherwise in that task. It
+replaces the section this file used to title
+"## Git workflow for coding agents (mandatory)"; the rules in both are the same
+rules.
 
-- Commit the work. When implementation, testing, and verification for the task are complete, commit the completed changes on the task branch. Do not leave finished work uncommitted.
-- Push the task branch. Push the completed branch to the remote repository and confirm the commit exists there (`git log --oneline -1 origin/<branch>` or `git status -sb`).
-- Report the delivery. The final report must include the commit hash and the remote push confirmation.
-- Never push directly to `main` unless the maintainer has explicitly authorized it for that task. Work on a feature branch.
-- Never commit secrets. API keys, credentials, bearer tokens, passwords, cookies, and private keys stay out of commits, tests, fixtures, screenshots, logs, and reports. Keep a locally supplied key in the user's own settings, never in tracked source, and check the staged diff for it before committing.
-- Never commit work that has not passed the required verification. Run the focused suite, the relevant broader suites, the release build, and the app self-test first, and record the actual results.
-- If verification fails, investigate and fix the problem, then re-run the verification. Do not declare completion over a failing check, and do not weaken, skip, or delete an existing test to make a check pass.
-- Preserve unrelated work. Never use `git reset --hard`, `git checkout -- <paths>`, `git clean`, or any other destructive command to obtain a clean working tree. Uncommitted changes that are not yours are left in place, stashed, or committed on a branch so they are not lost.
+The default expectation is:
+**complete the task → test → review the diff → commit → push → report.**
+
+### Default Git workflow
+
+1. Before starting, inspect `git status`, the current branch, the staged,
+   unstaged and untracked files, and the recent commits.
+2. For a new task, create a dedicated `feature/…` or `fix/…` branch from the
+   latest appropriate `main`, unless the maintainer explicitly asked for an
+   existing branch. Confirm the branch really starts at `main` and not at some
+   other task's branch.
+3. Never overwrite or discard the user's changes. If uncommitted work blocks a
+   safe branch switch, preserve it recoverably (a WIP commit on its own branch,
+   or `git stash`, and say so).
+4. Implement the requested work and run the appropriate tests: focused suite
+   first, then the relevant broader suites, then build and selftest when code
+   or bundled resources changed.
+5. Review the complete `git diff` and the staged file list before committing.
+6. Commit the work. When implementation, testing and verification for the task
+   are complete, commit the completed code and documentation changes with a
+   meaningful conventional commit message. Do not leave finished work
+   uncommitted.
+7. Push the task branch to the remote repository after a successful commit.
+8. Verify the push succeeded and that the remote branch contains the commit
+   (`git log --oneline -1 origin/<branch>`, `git status -sb`).
+9. Report the delivery: branch name, commit hash, push result, the tests that
+   ran, and the remaining issues.
+
+### Important exceptions
+
+- If the maintainer says not to commit, or not to push, follow that instruction.
+- If the maintainer asks for an existing branch, use that branch rather than
+  creating a new one.
+- Never force-push, rebase, reset, or rewrite remote history without explicit
+  authorization.
+- Never push directly to `main` unless the maintainer has explicitly authorized
+  it for that task. Work on a task branch and leave the merge to the maintainer.
+- Never commit secrets. API keys, credentials, bearer tokens, passwords, cookies,
+  private keys, personal data, build artifacts, temporary files and unrelated
+  user changes stay out of commits, tests, fixtures, screenshots, logs and
+  reports. Check the staged diff for a locally supplied key before committing;
+  a key belongs in the user's own settings, never in tracked source.
+- Never use `git add -A` or `git add .` without first checking exactly which
+  files it would take.
+- Preserve unrelated work. Never use `git reset --hard`, `git checkout -- <paths>`,
+  `git clean`, or any other destructive command to obtain a clean working tree.
+  Uncommitted changes that are not yours are left in place, stashed, or committed
+  on a branch so they are not lost.
+- If tests fail, investigate the failure. Do not hide, weaken, skip, or delete a
+  test to get a green run, and never commit work that has not passed the required
+  verification.
+- If the remote push is blocked by authentication, network, or permission issues,
+  keep the local commit and report the exact blocker. Never claim a push that did
+  not happen.
+- Do not create unnecessary commits for incomplete work. Commit when the
+  requested implementation is complete and verified as far as the environment
+  allows.
 
 ## Required working style
 

@@ -27,7 +27,12 @@ final class UpdateService: ObservableObject {
     /// preview. Set alongside `.available`; cleared otherwise.
     @Published private(set) var availableNotes: String?
 
-    private let repository = "vorssaint/vorssaint-utils"
+    /// The releases this app updates itself from. They have to be this fork's:
+    /// an upstream Vorssaint release carries the upstream bundle identifier, and
+    /// the installer refuses a bundle that is not this app (see
+    /// UpdateInstallerSupport's identity gate). Kept in step with
+    /// AppInfo.repositoryURL.
+    private let repository = "no5ix/sadoyo"
     private var downloadURL: URL?
     /// Size the release advertises for the asset, used to bound the download.
     private var downloadExpectedBytes: Int64?
@@ -124,7 +129,7 @@ final class UpdateService: ObservableObject {
 
         var request = URLRequest(url: URL(string: endpoint)!)
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-        request.setValue("Vorssaint/\(AppInfo.version)", forHTTPHeaderField: "User-Agent")
+        request.setValue("Sadoyo/\(AppInfo.version)", forHTTPHeaderField: "User-Agent")
         request.cachePolicy = .reloadIgnoringLocalCacheData
 
         URLSession.shared.dataTask(with: request) { [weak self] data, _, error in
@@ -344,7 +349,8 @@ final class UpdateService: ObservableObject {
     private func launchUserInstaller(appPath: String, dmgPath: String, pid: Int32,
                                      resultPath: String, expectedVersion: String) {
         let scriptURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("vorssaint-update-\(pid)-\(UUID().uuidString).sh")
+            .appendingPathComponent("sadoyo-update-\(pid)-\(UUID().uuidString).sh")
+        let ownBundleIdentifier = Bundle.main.bundleIdentifier ?? AppBundleIdentity.bundleIdentifier
         do {
             try UpdateInstallerSupport.installerScript()
                 .write(to: scriptURL, atomically: true, encoding: .utf8)
@@ -358,7 +364,9 @@ final class UpdateService: ObservableObject {
             // app's session and launchd job, before the swap it is here for.
             try DetachedProcess.spawn("/bin/sh",
                                       [scriptURL.path, appPath, dmgPath, "\(pid)", resultPath,
-                                       "\(getuid())", expectedVersion])
+                                       "\(getuid())", expectedVersion, ownBundleIdentifier,
+                                       UpdateInstallerSupport.stagedVerifyRequirement(
+                                        expectedBundleIdentifier: ownBundleIdentifier)])
         } catch {
             try? FileManager.default.removeItem(at: scriptURL)
             failInstall(dmgPath: dmgPath, message: error.localizedDescription)
@@ -383,7 +391,10 @@ final class UpdateService: ObservableObject {
                                                                     pid: pid,
                                                                     resultPath: resultPath,
                                                                     uid: getuid(),
-                                                                    expectedVersion: expectedVersion)
+                                                                    expectedVersion: expectedVersion,
+                                                                    expectedBundleIdentifier: Bundle.main.bundleIdentifier ?? AppBundleIdentity.bundleIdentifier,
+                                                                    verifyRequirement: UpdateInstallerSupport.stagedVerifyRequirement(
+                                                                    expectedBundleIdentifier: Bundle.main.bundleIdentifier ?? AppBundleIdentity.bundleIdentifier))
         // The in-process authorization holds the main thread until it is
         // answered, and the system dialog never appears while the Extra
         // Brightness overlay is on screen (#1917). Once the request waits,

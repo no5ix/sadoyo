@@ -1990,7 +1990,9 @@ enum RepositoryFeatureTests {
         // every agent reads: test, commit, push a branch, never a secret, never
         // the main branch.
         let agentRules = (try? String(contentsOfFile: "AGENTS.md", encoding: .utf8))?.components(separatedBy: "\n") ?? []
-        suite.expect(agentRules.contains { $0.contains("## Git workflow for coding agents (mandatory)") }
+        suite.expect(agentRules.contains { $0.contains("## Git Branch, Commit, and Push Policy") }
+                         && agentRules.contains { $0.contains("## Git and delivery") }
+                         && agentRules.contains { $0.contains("- Commit the work") }
                          && agentRules.contains { $0.contains("Never commit secrets") }
                          && agentRules.contains { $0.contains("- Push the task branch") }
                          && agentRules.contains { $0.contains("Never push directly to `main`") }

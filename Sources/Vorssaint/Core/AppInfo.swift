@@ -4,11 +4,19 @@
 import Foundation
 
 /// Static identity of the app, shared by UI, notifications and tooling.
+///
+/// The user-facing name is Sadoyo's; the bundle identifier that carries it is
+/// `AppBundleIdentity.bundleIdentifier`. The upstream project's community links stay
+/// as attribution for the code this fork is built from.
 enum AppInfo {
-    static let name = "Vorssaint"
-    static let copyright = "© 2026 Vorssaint"
+    static let name = "Sadoyo"
+    static let copyright = "© 2026 Vorssaint · Sadoyo fork"
     static let websiteURL = URL(string: "https://vorssaint.com")!
-    static let repositoryURL = URL(string: "https://github.com/vorssaint/vorssaint-utils")!
+    /// This build's source, and the releases the self-updater installs. They
+    /// have to be this fork's: an upstream Vorssaint bundle carries the
+    /// upstream identifier, and installing it over Sadoyo would replace this
+    /// app with the neighbour. See docs/app-identity.md.
+    static let repositoryURL = URL(string: "https://github.com/no5ix/sadoyo")!
     static let coffeeURL = URL(string: "https://buymeacoffee.com/vorssaint")!
     static let discordURL = URL(string: "https://discord.gg/M6BwWH4BJp")!
     static let socialURL = URL(string: "https://x.com/vorssaint")!
@@ -19,7 +27,7 @@ enum AppInfo {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
     }
 
-    /// True for the local "Vorssaint (Developer)" build (bundle id ends in `.dev`).
+    /// True for the local "Sadoyo (Developer)" build (bundle id ends in `.dev`).
     /// It is never published and never auto-updates; all work is tested here first.
     static var isDeveloperBuild: Bool {
         (Bundle.main.bundleIdentifier ?? "").hasSuffix(".dev")

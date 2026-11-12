@@ -865,12 +865,17 @@ final class AppUpdatesService: ObservableObject {
 
     /// This app never lists itself: it has its own updater, and letting the
     /// package manager replace a running bundle is exactly what that updater
-    /// exists to do safely.
+    /// exists to do safely. The original Vorssaint installs get the same
+    /// treatment — they are running neighbours with their own updaters, and a
+    /// Sadoyo package manager pass has no business replacing them.
     private static func isOwnBundle(_ bundleID: String) -> Bool {
-        bundleID == Bundle.main.bundleIdentifier || bundleID.hasPrefix("com.vorssaint")
+        AppBundleIdentity.isOwn(bundleID) || AppBundleIdentity.isUpstreamInstall(bundleID)
     }
 
-    private static let ownPackageTokens: Set<String> = ["vorssaint", "vorssaint@beta", "vorssaint-beta"]
+    private static let ownPackageTokens: Set<String> = [
+        "sadoyo", "sadoyo@beta", "sadoyo-beta",
+        "vorssaint", "vorssaint@beta", "vorssaint-beta",
+    ]
 
     /// The package manager refreshes its own catalog on the way, which can sit
     /// on a slow network. A ceiling keeps a stalled command from leaving the

@@ -10,13 +10,13 @@ import CryptoKit
 enum FanControlIdentifiers {
     static let teamID = "3D485NHW29"
 
-    #if VORSSAINT_DEVELOPMENT
-    static let appBundleID = "com.vorssaint.utils.dev"
-    #else
-    static let appBundleID = "com.vorssaint.utils"
-    #endif
+    /// The app this helper serves. `AppBundleIdentity` keeps it beside the bundle id
+    /// the build stamps into Info.plist, and it is a compile-time constant on
+    /// purpose: launchd starts this helper as a bare Mach-O, so asking
+    /// `Bundle.main` here would answer with nothing.
+    static let appBundleID = AppBundleIdentity.bundleIdentifier
 
-    static let helperID = "\(appBundleID).fan-control"
+    static let helperID = AppBundleIdentity.fanControlHelperIdentifier(for: appBundleID)
     static let plistName = "\(helperID).plist"
 
     static var appCodeRequirement: String {

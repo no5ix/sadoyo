@@ -6,6 +6,14 @@ This document is a navigation map of the current repository, not a substitute fo
 
 Vorssaint is a native macOS application written primarily in Swift and SwiftUI/AppKit. The project targets macOS 14+ and Apple Silicon. It is organized as a source tree assembled by the repository's shell build system; it does not rely on an Xcode project for the authoritative build.
 
+The installed application is **Sadoyo**, a fork that ships its own macOS
+identity (`com.sadoyo.app`, Developer `com.sadoyo.app.dev`, display name and
+executable `Sadoyo`) and is meant to be installed beside the original Vorssaint
+(`com.vorssaint.utils`). The source tree, target and module names keep the
+upstream naming; only the installed identity is Sadoyo's. See
+[app identity](docs/app-identity.md) and
+[ADR 0005](docs/decisions/0005-sadoyo-owns-its-bundle-identifier.md).
+
 ## Build and composition boundary
 
 - `build.sh` is authoritative for source discovery, compiler flags, generated resources, helper/adapter compilation, app-bundle assembly, signing, staging, installation, and test execution.
@@ -52,6 +60,24 @@ Feature availability, installation/enablement, preferences, and optional backgro
 
 ### Preferences and localization
 Shared defaults and migrations live in Core. User-facing strings use the repository's localization conventions and locale collection. Update every required locale and its tests; do not hardcode visible copy in views.
+
+### Application identity and coexistence
+
+`Sources/Vorssaint/Core/AppIdentity.swift` owns the installed identity: this
+build's bundle identifier, both Sadoyo variants, the neighbour identifiers of
+the original Vorssaint, the protected domains, the notification namespace, and
+the fan daemon identifier derivation. macOS scopes a notification's click
+target, TCC grants, the preferences domain, the login item, a LaunchDaemon label
+and the Launch Services registration to the bundle identifier, so the identity
+is a cross-cutting boundary, not a resource: `Info.plist` and `build.sh` must
+agree with it, and `Tests/AppIdentityTests.swift` fails when they drift. A
+bundle identifier change orphans existing TCC grants.
+
+Every feature that enumerates running apps, cleans Library data, or installs a
+new bundle checks the identity before acting: Dock click taps, Quit all, the
+junk cleaner, the uninstaller, App Updates, the self-updater (which refuses a
+bundle whose `CFBundleIdentifier` is not the running app's) and
+`build.sh --install`.
 
 ### macOS permissions and signing
 Permissions are tied to bundle identity and signing state. Release and Developer variants have different bundle identifiers and separate TCC grants. Consult `docs/PERMISSIONS.md`, `CONTRIBUTING.md`, and `docs/TROUBLESHOOTING.md` before changing entitlements, prompts, signing, or permission detection.
