@@ -67,6 +67,8 @@ The Dynamic Island spans service state, geometry, compact activity selection, da
 
 With the island on every display, each display owns a persistent island window and answers the pointer on its own display, and the open dashboard is one page in the whole system, drawn by the window of the display whose island was opened. Deliberate hover and click open the page on that display and close it where it was; passive pointer-following keeps its own restrictive gate and belongs to the pointer display choice alone. Never move an island window between displays to change the page, and treat a page whose display has no window as closed. See [0002](docs/decisions/0002-one-island-per-display-one-page.md).
 
+The page's display is carried by the window that draws it, not by the pointer. Each island window names its own display to everything it draws - `NotchMirrorModel.displayID`, `NotchView(hostDisplayID:)`, and `EnvironmentValues.notchPageDisplay` - and every page-opening request names the display of the view that started it: the secondary-click menu, the header's way to the gallery, a dashboard card, a gallery tile, a strip, a page's own control, and the wheel. The island's menu is answered by `islandMenuActions(on:)`, which decides the display where the menu is built, so an item chosen after the pointer has travelled to another display still opens its page on the island the menu was opened on. `NotchService.destinationDisplay` resolves a request in one order: the display named, the display already carrying the page, the island's own. A keyboard move, a global shortcut, a service, or a notification that names no display therefore leaves the page where the person left it, and the primary display takes a page only when its own island was used. A new island view that opens a page must pass `on: pageDisplay`. See [0004](docs/decisions/0004-a-page-opens-on-the-display-whose-island-was-used.md).
+
 The Splash strip on the closed island shows only a throughput the engine is measuring in the reading that answers work in hand. A last batch's rate and the lifetime averages are figures of what the engine has done: they belong to the Complete Dashboard, and are never drawn in the closed island. See [0003](docs/decisions/0003-splash-strip-throughput-only-when-at-work.md).
 
 ### Menu bar and app panel
@@ -75,11 +77,11 @@ Status items and AppDelegate coordinate multiple presentation destinations. A me
 ## Change workflow
 
 Before changing a subsystem:
-- Read the object's AOCI Entry for its stated contracts and constraints, then confirm them against the source; the Entries are summaries, not authority.
+- Read the file itself. The source is the record; a path, a comment, or a document is a summary of it, not authority. No index, annotation layer, or generated metadata is consulted, and none is required to build, test, or contribute.
 - Find its owning service and state model.
 - Find all callers and other UI entry points.
 - Find tests and any source-generation/build inclusion rules.
 - Identify permission, lifecycle, preference, localization, and privacy implications.
-- Update architecture decisions when a cross-cutting ownership or data-flow rule changes.
+- Read `docs/decisions/` when the change touches an ownership, navigation, permission, or data-flow boundary, and update it when such a rule changes.
 
 This guide is intentionally high-level. The implementation and feature-specific documentation remain authoritative.

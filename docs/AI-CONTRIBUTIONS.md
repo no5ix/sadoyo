@@ -8,14 +8,15 @@ Give the agent the issue, the intended outcome and the scope. Have it inspect th
 existing implementation and related work before implementing a substantial change.
 Resolve product decisions with the maintainer before building a new subsystem.
 
-Most of this repository is indexed by AOCI, a model-readable cognition layer
-(`aoci.txt`, `.aoci/`, exposed to agents as the `aoci` MCP server in
-`.pi/mcp.json`). Use it to orient before reading code and to pick up a file's
-stated contracts and constraints. Its Entries are summaries to confirm against
-the source, never evidence for a build, permission, hardware, display, or
-visual result. [AGENTS.md](../AGENTS.md) is the authoritative guide for when to
-use AOCI, how to maintain the index, and how to close a task that touched
-managed files.
+Most of the navigation an agent needs is written down:
+[ARCHITECTURE.md](../ARCHITECTURE.md) maps the source layers and their
+ownership, and [docs/decisions/](decisions/README.md) records the cross-cutting
+ownership, navigation, permission, and data-flow rules with their reasons. Read
+the target file, its callers, and its tests before changing behaviour; a
+document summarizes intent and is never evidence for a build, permission,
+hardware, display, or visual result. [AGENTS.md](../AGENTS.md) is the
+authoritative guide for scope, evidence, and the git workflow. There is no
+index, annotation layer, or generated metadata to consult or maintain.
 
 Before submitting, review the diff and the evidence:
 

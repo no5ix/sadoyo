@@ -1,11 +1,3 @@
 {
-  "mcpServers": {
-    "aoci": {
-      "command": "/Users/lynx/Tools/aoci/aoci",
-      "args": ["--repo", "/Users/lynx/Documents/github/sadoyo", "mcp"],
-      "exposure": "direct",
-      "timeout": 120,
-      "description": "AOCI repository cognition index for Sadoyo (aoci.txt + .aoci/): architecture overview, Entry semantics, search, and index maintenance. Bound to this repository root."
-    }
-  }
+  "mcpServers": {}
 }
