@@ -1495,6 +1495,8 @@ def main():
               "    func mirrorHover(", "    private func scheduleMirrorOpen(",
               "    private func scheduleMirrorPeek(", "    private func scheduleMirrorClose(",
               "    private func syncMirrorExitMonitoring(", "    private func removeMirrorExitMonitors(",
+              "    private func sweepPointer(", "    private func syncPointerWatching(",
+              "    private func removePointerWatchMonitors(",
               "    private func carriesPage(", "    private var mirrorHoverExpands:",
               "    private func rearmMirrorHoverOpen(", "    private func mirrorWillPress(",
               "    private func mirrorWasClicked(", "    func expand(on"])

@@ -49,6 +49,16 @@
     under a stationary pointer is the one that reports no leaving: the exit that closes
     the page is the exit least likely to arrive. It stops when there is nothing left to
     close, and one copy's monitors ask about one copy's island only.
+  - The pointer, and not a window's report of an entering, is what every island is read
+    from: `syncPointerWatching` arms one pair of monitors for the island's windows while
+    its copies are drawn, and `sweepPointer` asks the pointer's place of each window, so a
+    pointer reaching an island is that island's entry and leaving its whole region is its
+    exit - answered only when it changes, so no move restarts the delay the person chose,
+    and a pointer that comes back takes the leaving's close back. A copy is a borderless,
+    non-activating window above every other window, on a display of its own, and AppKit can
+    report no entering and no leaving for such a window at all; the island's own window is
+    already read from the pointer wherever its reports are known to fail (out of sight at
+    rest, its page open), so the entry a copy cannot hear is never the door to its island.
   - Leaving is measured against the whole interactive region, not the compact strip:
     `NotchWindowHost.containsHover` asks a window's *destination* bounds, so the open page
     and a peek are part of the region the pointer is inside. A pointer that moves from the
@@ -83,9 +93,11 @@
   `notchDisplay = all` changes for anyone who relied on the island following the pointer
   across displays - that is what `.pointer` is for. The hover lifecycle every island
   answers, and the content every window draws, are one rule each and are tested as such:
-  `hoverLifecycleContracts` and `hoverParityChecks` drive the production bodies through
-  three displays, a pointer that reports only its entry, and an open panel the pointer
-  moves inside. What remains outside the fixtures is the physical interaction on three
+  `hoverLifecycleContracts`, `hoverParityChecks` and `pointerSweepChecks` drive the
+  production bodies through three displays, a pointer that reports only its entry, a copy
+  told by the pointer's moves alone with no report of an entering or a leaving at all, and
+  an open panel the pointer moves inside. What remains outside the fixtures is the physical
+  interaction on three
   displays, which needs the Release app. The same goes for a copy whose surface grows
   under a pointer that has not moved (`rearmMirrorHoverOpen`): no fixture draws a copy at
   a measure that grows under a resting pointer, so the answer it gives to the person's
@@ -96,6 +108,7 @@
   `Sources/Vorssaint/Services/Notch/NotchService.swift`
   (`syncMirrors`, `makeMirror`, `mirrorHover`, `scheduleMirrorOpen`, `scheduleMirrorPeek`,
   `scheduleMirrorClose`, `syncHoverExitMonitoring`, `syncMirrorExitMonitoring`,
+  `sweepPointer`, `syncPointerWatching`, `removePointerWatchMonitors`,
   `removeMirrorExitMonitors`, `carriesPage`, `mirrorHoverExpands`, `rearmMirrorHoverOpen`,
   `stripContent`, `mirrorWillPress`, `mirrorWasClicked`, `expand(on:)`, `presentsExpansion(on:)`,
   `retireExpansion`, `presentationGeometry`, `expansionHost`, `followsPointer`),

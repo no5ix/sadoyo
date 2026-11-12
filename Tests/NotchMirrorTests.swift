@@ -145,6 +145,9 @@ enum NotchMirrorContract {
         var mirrorHeldForArrival: CGDirectDisplayID?
         var displayID: CGDirectDisplayID? = 1
         var mirrors: [CGDirectDisplayID: Mirror] = [:]
+        /// The moves followed for all the island's windows at once, as the service
+        /// arms them: the test reports a move by handing the token's handler its own.
+        var pointerWatchMonitors: [Any] = []
         var fullscreenDisplays: Set<CGDirectDisplayID> = []
         var compactActivity: NotchCompactActivity?
         var compactCompanion: NotchCompactActivity?
@@ -465,6 +468,7 @@ enum NotchMirrorContract {
         ownershipContracts(suite)
         pointerExitContracts(suite)
         hoverLifecycleContracts(suite)
+        pointerSweepChecks(suite)
         stripContentContracts(suite)
     }
 
@@ -953,6 +957,127 @@ enum NotchMirrorContract {
         suite.expect(service.mirrors.isEmpty && service.expansion.owner == nil && !service.expanded,
                      "with the island on one display, no display answers a copy's pointer and none becomes a host")
         service.showsOnAllDisplays = true
+    }
+
+    /// The pointer, and not a window's report of an entering, is what every
+    /// island is read from.
+    ///
+    /// These windows are borderless, non-activating and above every other window,
+    /// and a copy sits on a display of its own: AppKit can report no entering and
+    /// no leaving for it at all. The person sees one island on every display, so
+    /// a move onto a copy is that copy's entry, a move off its whole island is its
+    /// leaving, a move back takes the leaving's close back, and a pointer crossing
+    /// from one display to the next closes the island it leaves and opens the
+    /// island it arrives on - every one of these told by the moves alone, with no
+    /// report of an entering or a leaving in the test at all.
+    private static func pointerSweepChecks(_ suite: TestSuite) {
+        let builtIn = NSScreen(1, CGRect(x: 0, y: 0, width: 1470, height: 956), notched: true)
+        let external = NSScreen(2, CGRect(x: 1470, y: -86, width: 1920, height: 1080))
+        let third = NSScreen(3, CGRect(x: 3390, y: -86, width: 1920, height: 1080))
+        NSScreen.screens = [builtIn, external, third]
+        NSScreen.screensHaveSeparateSpaces = false
+        defer {
+            NSScreen.screens = []
+            NSScreen.screensHaveSeparateSpaces = true
+        }
+
+        func openPages(_ service: Service) -> Int {
+            service.mirrors.values.filter { $0.model.expanded }.count
+                + (service.displayID.map { service.expansion.presents(on: $0) } == true ? 1 : 0)
+        }
+        func wired() -> Service {
+            let service = Service()
+            service.displayID = 1
+            service.syncMirrors()
+            for (id, copy) in service.mirrors {
+                copy.host.setHoverHandler { [weak service] entered in service?.mirrorHover(id, entered: entered) }
+            }
+            return service
+        }
+        /// The pointer's move, as the followed monitors hear it. Nothing else is
+        /// reported: no entering, no leaving.
+        func moved(_ service: Service) { NSEvent.reportMove(to: service.pointerWatchMonitors) }
+
+        let service = wired()
+        suite.expect(service.pointerWatchMonitors.count == 2,
+                     "copies drawn on other displays have their pointer followed from the first, so no display's island waits on a report of an entering")
+
+        // A pointer reaching a copy is that copy's entry: the chosen delay, the
+        // moves followed from it, and the page not opened yet.
+        let two = service.mirrors[2]!
+        two.over = true
+        moved(service)
+        suite.expect(two.inside && two.hoverWork != nil && two.exitMonitors.count == 2
+                         && !two.model.expanded && service.expansion.owner == nil,
+                     "a pointer reaching a copy, told by no report of an entering, is answered as its own entry: the delay chosen, and no page yet")
+        // Out again before the delay is out: nothing opened, nothing to close, and
+        // no moves left to follow.
+        two.over = false
+        moved(service)
+        suite.expect(!two.inside && two.hoverWork == nil && two.exitMonitors.isEmpty
+                         && service.expansion.owner == nil && service.collapses == 0,
+                     "a pointer that reaches a copy and leaves before the delay opens nothing, closes nothing, and is followed no more")
+
+        // In, past the delay, and the page is this display's; out of the whole
+        // island, and the page closes - the moves alone, which is what a copy on a
+        // display of its own can rely on.
+        two.over = true
+        moved(service)
+        two.runHoverWork()
+        service.syncMirrors()
+        suite.expect(service.expansion.owner == 2 && two.model.expanded && openPages(service) == 1,
+                     "precondition: the pointer's arrival opened display 2's page")
+        two.over = false
+        moved(service)
+        suite.expect(two.hoverWork != nil && service.expansion.owner == 2,
+                     "a pointer leaving a copy's whole island asks for its close, with no report of a leaving to wait for")
+        // Back onto the island while that close waits: the close is taken back, as
+        // the island's own return takes its close back.
+        two.over = true
+        moved(service)
+        suite.expect(two.hoverWork == nil && two.inside && service.expansion.owner == 2 && two.model.expanded,
+                     "a pointer that comes back takes the leaving's close back, so the page the display carries stays open under it")
+        two.over = false
+        moved(service)
+        two.runHoverWork()
+        service.syncMirrors()
+        suite.expect(service.expansion.owner == nil && !two.model.expanded && openPages(service) == 0
+                         && two.exitMonitors.isEmpty,
+                     "a pointer that leaves a copy's whole island closes the page that copy carries, told by the moves alone")
+
+        // The crossing: the display left is asked to close, the display arrived on
+        // is asked to open, and the page stays one, on the display that was arrived on.
+        let three = service.mirrors[3]!
+        three.over = true
+        moved(service)
+        suite.expect(three.hoverWork != nil && !three.model.expanded,
+                     "a pointer arriving on the next display is that copy's entry, with no report of an entering")
+        three.runHoverWork()
+        service.syncMirrors()
+        suite.expect(service.expansion.owner == 3 && three.model.expanded && !two.model.expanded
+                         && openPages(service) == 1,
+                     "the page moved to the display the pointer is on, and it is still the one page")
+        two.over = true
+        three.over = false
+        moved(service)
+        suite.expect(two.hoverWork != nil && three.hoverWork != nil,
+                     "a pointer crossing asks the display it leaves to close and the display it arrives on to open, by the moves alone")
+        two.runHoverWork()
+        three.runHoverWork()
+        service.syncMirrors()
+        suite.expect(service.expansion.owner == 2 && two.model.expanded && !three.model.expanded
+                         && openPages(service) == 1,
+                     "the crossing leaves its page on the display the pointer reached, and never two pages")
+
+        // The following goes with the copies: no copies, no followed moves.
+        service.showsOnAllDisplays = false
+        service.syncMirrors()
+        suite.expect(service.mirrors.isEmpty && service.pointerWatchMonitors.isEmpty,
+                     "with the copies gone, no pointer is followed for them")
+        service.showsOnAllDisplays = true
+        service.syncMirrors()
+        suite.expect(service.pointerWatchMonitors.count == 2,
+                     "the copies return, and their pointer is followed again")
     }
 
     /// The closed island's content is one answer for every window of the island.

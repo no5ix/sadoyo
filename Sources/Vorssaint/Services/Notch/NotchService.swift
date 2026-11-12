@@ -205,6 +205,11 @@ final class NotchService: ObservableObject {
     private var captureControlsMonitors: [Any] = []
     private var hiddenHoverMonitors: [Any] = []
     private var hoverExitMonitors: [Any] = []
+    /// The moves followed for every island window at once: the island's own, and
+    /// each copy's. One pair of monitors asks the pointer's question of all of
+    /// them, because the answer is where the pointer is, and each window answers
+    /// for its own display.
+    private var pointerWatchMonitors: [Any] = []
     private var hoverWork: DispatchWorkItem?
     /// Set by a notice that replaces one of its own kind, for the refresh it
     /// triggers, so the island eases to the new width rather than springing.
@@ -4125,6 +4130,10 @@ final class NotchService: ObservableObject {
                 mirror.host.panel.orderFrontRegardless()
             }
         }
+        // The copies are drawn, so their pointer is watched: the window of a copy
+        // on a display of its own can report no entering at all, and the pointer
+        // is the answer every display's island is read from.
+        syncPointerWatching()
     }
 
     /// A copy's closed surface: the strip of what the island shows, drawn
@@ -4167,6 +4176,7 @@ final class NotchService: ObservableObject {
 
     private func closeMirrors() {
         guard !mirrors.isEmpty else { return }
+        removePointerWatchMonitors()
         mirrors.values.forEach {
             $0.cancelHoverWork()
             removeMirrorExitMonitors($0)
@@ -4212,7 +4222,11 @@ final class NotchService: ObservableObject {
         let wasInside = mirror.inside
         mirror.inside = pointerOverMirror(mirror)
         mirror.hover.update(pointerInside: mirror.inside)
-        if !mirror.inside { mirror.cancelHoverWork() }
+        // A pointer that leaves takes the opening it was waiting out back, and a
+        // pointer that comes back takes the leaving's close back - the answer the
+        // island's own return gets. The opening a fresh entry waits out is asked
+        // for again below, so nothing is lost by the taking back.
+        if !mirror.inside || wasInside != mirror.inside { mirror.cancelHoverWork() }
         // The copy's moves are followed from the moment its hover has something
         // to keep open, exactly as the island's own are: AppKit can report no
         // exit at all for these windows, and a pointer on its way to another
@@ -4381,11 +4395,14 @@ final class NotchService: ObservableObject {
         let moves: NSEvent.EventTypeMask = [.mouseMoved, .leftMouseDragged]
         if let token = NSEvent.addGlobalMonitorForEvents(matching: moves, handler: { [weak self, weak mirror] _ in
             guard let self, let mirror else { return }
-            self.mirrorHover(mirror.id, entered: false)
+            // The pointer's own answer, not an assumed leaving: a move that
+            // carries the pointer back onto this copy's island is an entry, and
+            // the copy answers it as it answered its first.
+            self.mirrorHover(mirror.id, entered: self.pointerOverMirror(mirror))
         }) { mirror.exitMonitors.append(token) }
         if let token = NSEvent.addLocalMonitorForEvents(matching: moves, handler: { [weak self, weak mirror] event in
             guard let self, let mirror else { return event }
-            self.mirrorHover(mirror.id, entered: false)
+            self.mirrorHover(mirror.id, entered: self.pointerOverMirror(mirror))
             return event
         }) { mirror.exitMonitors.append(token) }
     }
@@ -4394,6 +4411,54 @@ final class NotchService: ObservableObject {
         guard !mirror.exitMonitors.isEmpty else { return }
         mirror.exitMonitors.forEach(NSEvent.removeMonitor)
         mirror.exitMonitors.removeAll()
+    }
+
+    /// Where the pointer is, asked of every island window: a copy's place is that
+    /// copy's own window's, so a pointer is inside exactly the island it rests on
+    /// and outside every other. A pointer reaching an island is that island's
+    /// entry and leaving it is that island's exit, and the answer is given only
+    /// when it changes, so no move restarts the delay the person chose.
+    ///
+    /// The pointer is asked, and not the window's own report of an entering, for
+    /// the reason the island's own window is watched by the pointer while it is
+    /// out of sight and while its page is open: these windows are borderless,
+    /// non-activating and above every other window, and AppKit can report no
+    /// entering and no leaving for one at all - least of all for a copy on a
+    /// display of its own, whose surface grows under a pointer that has not
+    /// moved. A copy read from the pointer answers by the rule the island's own
+    /// window already answers by, which is the parity the person sees: the same
+    /// delay, the same opening, the same closing, on every display.
+    private func sweepPointer(_ point: CGPoint) {
+        guard running, !suspended, showsOnAllDisplays, windowHost != nil else { return }
+        for (id, mirror) in mirrors {
+            let entered = pointerOverMirror(mirror)
+            if entered != mirror.inside { mirrorHover(id, entered: entered) }
+        }
+    }
+
+    /// The moves followed for the island's windows, armed while the island shows
+    /// on more than one display, and taken back with the copies. A pointer at
+    /// rest sends no move and costs nothing.
+    private func syncPointerWatching() {
+        guard showsOnAllDisplays, running, !suspended, windowHost != nil, !mirrors.isEmpty else {
+            removePointerWatchMonitors()
+            return
+        }
+        guard pointerWatchMonitors.isEmpty else { return }
+        let moves: NSEvent.EventTypeMask = [.mouseMoved, .leftMouseDragged]
+        if let token = NSEvent.addGlobalMonitorForEvents(matching: moves, handler: { [weak self] _ in
+            self?.sweepPointer(NSEvent.mouseLocation)
+        }) { pointerWatchMonitors.append(token) }
+        if let token = NSEvent.addLocalMonitorForEvents(matching: moves, handler: { [weak self] event in
+            self?.sweepPointer(NSEvent.mouseLocation)
+            return event
+        }) { pointerWatchMonitors.append(token) }
+    }
+
+    private func removePointerWatchMonitors() {
+        guard !pointerWatchMonitors.isEmpty else { return }
+        pointerWatchMonitors.forEach(NSEvent.removeMonitor)
+        pointerWatchMonitors.removeAll()
     }
 
     /// A surface that changed under a pointer that has not moved: a page opened

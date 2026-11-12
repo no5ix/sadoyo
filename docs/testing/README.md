@@ -42,7 +42,8 @@ Depending on the change, consider:
 - Dynamic Island on three displays: the same content on every collapsed island, one
   island expanded at a time, a page that opens on the display whose island was used,
   and a hover that expands on entry and collapses when the pointer leaves the whole
-  open panel - on each display, with no report of a leaving in between. The pointer's
+  open panel - on each display, with no report of a leaving in between, and with a copy
+  answered by the pointer's moves alone. The pointer's
   path across display edges, a display unplugged mid-hover, and a display returning
   are part of the same scenario. See
   [0002](../decisions/0002-one-island-per-display-one-page.md).
