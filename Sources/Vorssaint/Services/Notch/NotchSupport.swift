@@ -779,6 +779,16 @@ struct NotchHoverState {
 /// a page that delay opened, and the close the leaving asks for. Nothing here
 /// names a display, and no rule here is answered twice: the window, its
 /// geometry, and where the pointer is on that display belong to the caller.
+///
+/// This answers *which* island follows the pointer's moves. Its companion rule,
+/// answered by the callers (`NotchService.hover(_:inside:)` and
+/// `NotchService.mirrorHover(_:entered:)`), is that a deadline an island started
+/// is kept until the pointer crosses the boundary: a report of a presence the
+/// island already has keeps the work item waiting, and only a crossing takes it
+/// back. A leaving is told by the window's tracking area and then again by the
+/// pointer's moves, so an island that took its waiting work back on each report
+/// cancelled the close its own leaving had asked for, and only the island's own
+/// display ever closed.
 struct NotchIslandHover {
     /// The pointer is over this island, as this window answers it.
     var inside = false

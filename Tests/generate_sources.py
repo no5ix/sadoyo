@@ -1366,8 +1366,11 @@ def main():
               "    private func scheduleMirrorOpen(",
               "    private func scheduleMirrorPeek(",
               "    private func scheduleMirrorClose(",
-              "    private func syncMirrorExitMonitoring(",
-              "    private func removeMirrorExitMonitors(",
+              "    private func mirrorFollowsPointer(",
+              "    private var watchesMirrors:",
+              "    private func sweepPointer(",
+              "    private func syncPointerWatching(",
+              "    private func removePointerWatchMonitors(",
               "    private func carriesPage(",
               "    private var mirrorHoverExpands:",
               "    private func rearmMirrorHoverOpen(",
@@ -1421,11 +1424,11 @@ def main():
         music_visibility = music_visibility.replace(call + "()", call + "(in: ReviewDefaults.current)")
     music_visibility = music_visibility.replace("NotchSupport.routes(.track)",
                                                 "NotchSupport.routes(.track, in: ReviewDefaults.current)")
-    # Closing the page asks each copy to stop following its pointer's moves. This
-    # fixture has no copies: the music strip's visibility is the page's shape, and
-    # the copies are the mirror suite's to test.
+    # Closing the page asks for the pointer's moves no more. This fixture has no
+    # copies: the music strip's visibility is the page's shape, and the copies are
+    # the mirror suite's to test.
     music_visibility = music_visibility.replace(
-        "        mirrors.values.forEach { removeMirrorExitMonitors($0) }\n", "")
+        "        syncPointerWatching()\n", "")
     music_visibility = music_visibility.replace("UserDefaults.standard", "ReviewDefaults.current!")
     music_visibility = music_visibility.replace("calendar: hasCalendarActivity", "calendar: false")
     music_visibility = music_visibility.replace("splash: hasSplashActivity", "splash: false")
@@ -1494,7 +1497,7 @@ def main():
               "    func presentsExpansion(on", "    func retireExpansion()",
               "    func mirrorHover(", "    private func scheduleMirrorOpen(",
               "    private func scheduleMirrorPeek(", "    private func scheduleMirrorClose(",
-              "    private func syncMirrorExitMonitoring(", "    private func removeMirrorExitMonitors(",
+              "    private func mirrorFollowsPointer(", "    private var watchesMirrors:",
               "    private func sweepPointer(", "    private func syncPointerWatching(",
               "    private func removePointerWatchMonitors(",
               "    private func carriesPage(", "    private var mirrorHoverExpands:",

@@ -42,10 +42,17 @@ Depending on the change, consider:
 - Dynamic Island on three displays: the same content on every collapsed island, one
   island expanded at a time, a page that opens on the display whose island was used,
   and a hover that expands on entry and collapses when the pointer leaves the whole
-  open panel - on each display, with no report of a leaving in between, and with a copy
-  answered by the pointer's moves alone. The pointer's
-  path across display edges, a display unplugged mid-hover, and a display returning
-  are part of the same scenario. See
+  open panel - on every display alike, and on every display *automatically*: a page a
+  copy's hover opened closes at the person's close delay when that copy's pointer
+  leaves, with no click and no second hover. Verify the leaving told more than once
+  (the window's own report of the pointer going, then the pointer's moves), the pointer
+  moving from the closed strip into the open panel, a return before the close delay is
+  out, the pointer's path across display edges, a display unplugged mid-hover, and a
+  display returning. The rule under test is the island's own: a deadline an island
+  started is kept until the pointer crosses the boundary, so the reports that follow a
+  leaving must not take that close back. The fixtures report a pointer's move to every
+  monitor watching moves - a move answered by one set only hides the double answer that
+  stopped a copy from ever closing. See
   [0002](../decisions/0002-one-island-per-display-one-page.md).
 - One and multiple media sessions, stale sessions, player termination, and independent command targeting.
 - Dynamic content sizes, localization expansion, minimum window sizes, and scroll boundaries.

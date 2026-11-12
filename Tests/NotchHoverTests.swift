@@ -99,8 +99,6 @@ enum NotchHoverTests {
         var hover = NotchHoverState()
         var hoverWork: DispatchWorkItem?
         var lastSize: CGSize?
-        /// The moves followed while this copy's hover keeps its page or peek open.
-        var exitMonitors: [Any] = []
         init(id: CGDirectDisplayID, geometry: NotchGeometry) {
             self.id = id
             model = NotchMirrorModel(displayID: id, geometry: geometry, size: CGSize(width: 180, height: 32))
@@ -183,6 +181,9 @@ enum NotchHoverTests {
         var hoverState = NotchHoverState()
         var hiddenHoverMonitors: [Any] = []
         var hoverExitMonitors: [Any] = []
+        /// The moves followed for every copy's island at once, as production arms
+        /// one pair of monitors for all of them.
+        var pointerWatchMonitors: [Any] = []
         var hoverWork: DispatchWorkItem?
         var shelfDragExitWork: DispatchWorkItem?
         var captureHover: ((Bool) -> Void)?
@@ -267,12 +268,10 @@ enum NotchHoverTests {
             expansion.closed()
             hoverState.close(pointerInside: windowHost?.containsHover(NSEvent.mouseLocation) == true)
             hoverWork?.cancel(); hoverWork = nil
-            // Production's collapse ends the moves followed for every copy: the
-            // page is closed everywhere, so no copy has a hover left to keep it.
-            mirrors.values.forEach { mirror in
-                mirror.exitMonitors.forEach(NSEvent.removeMonitor)
-                mirror.exitMonitors.removeAll()
-            }
+            // Production's collapse asks for the pointer's moves no more: the page
+            // is closed everywhere, so no copy has a hover left to keep it.
+            pointerWatchMonitors.forEach(NSEvent.removeMonitor)
+            pointerWatchMonitors.removeAll()
             syncExpansion()
             updateBounds()
         }
@@ -599,12 +598,12 @@ enum NotchHoverTests {
             let id = copy.id
             over(copy)
             copy.host.hoverHandler?(true)
-            suite.expect(copy.hoverWork != nil && copy.exitMonitors.count == 2 && !service.expanded,
+            suite.expect(copy.hoverWork != nil && service.pointerWatchMonitors.count == 2 && !service.expanded,
                          "display \(id) follows the pointer's moves from its own entry, at the same delay the island keeps")
             copy.runHoverWork()
             service.syncExpansion()
             suite.expect(service.expanded && service.expansion.owner == id && copy.model.expanded
-                         && pages(service) == 1 && copy.exitMonitors.count == 2,
+                         && pages(service) == 1 && service.pointerWatchMonitors.count == 2,
                          "display \(id) draws the page its pointer opened, and keeps following while it is open")
             // The page is this copy's window grown: the pointer moves down into
             // it, and the moves followed say the pointer is inside the island.
@@ -617,11 +616,20 @@ enum NotchHoverTests {
             away()
             reportMove()
             suite.expect(copy.hoverWork != nil, "a move followed out of display \(id)'s whole island asks for its close")
+            // The same leaving told again, as it is told in the living app: the
+            // copy's own window reports the pointer going, and more moves follow.
+            // The deadline the first report asked for is kept through them, as the
+            // island's own window keeps its close, and the page goes at the pause
+            // the person chose - not never.
+            copy.host.hoverHandler?(false)
+            reportMove()
+            reportMove()
+            suite.expect(copy.hoverWork != nil, "the reports that follow display \(id)'s leaving keep the close it asked for, as the island's own reports keep its close")
             copy.runHoverWork()
             service.syncExpansion()
             suite.expect(!service.expanded && service.expansion.owner == nil && !copy.model.expanded
-                         && pages(service) == 0 && copy.exitMonitors.isEmpty,
-                         "display \(id) collapses on a leaving it was never reported, and follows nothing after")
+                         && pages(service) == 0 && service.pointerWatchMonitors.isEmpty,
+                         "display \(id) collapses on a leaving told by the moves it follows, and follows nothing after")
         }
 
         // The pointer crossing from one display to the next: the page moves, the
@@ -656,10 +664,10 @@ enum NotchHoverTests {
         // A pointer that passes through and is gone leaves no state behind.
         over(second)
         second.host.hoverHandler?(true)
-        suite.expect(second.hoverWork != nil && second.exitMonitors.count == 2, "precondition: display 2 is armed")
+        suite.expect(second.hoverWork != nil && service.pointerWatchMonitors.count == 2, "precondition: display 2 is armed")
         away()
         second.host.hoverHandler?(false)
-        suite.expect(second.hoverWork == nil && !second.inside && second.exitMonitors.isEmpty
+        suite.expect(second.hoverWork == nil && !second.inside && service.pointerWatchMonitors.isEmpty
                          && service.expansion.owner == nil && pages(service) == 0,
                      "a pointer that leaves before the delay opens nothing, closes nothing, and follows nothing after")
     }

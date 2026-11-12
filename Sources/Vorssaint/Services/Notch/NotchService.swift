@@ -2055,8 +2055,8 @@ final class NotchService: ObservableObject {
         clipboardPinnedOnly = false
         hoverWork?.cancel(); hoverWork = nil
         // The page is closed everywhere, so no copy has a hover keeping it open,
-        // and the moves followed for a copy are asked for no more.
-        mirrors.values.forEach { removeMirrorExitMonitors($0) }
+        // and the pointer's moves are asked for no more.
+        syncPointerWatching()
         if noticeExpanded { noticeWork?.cancel(); noticeWork = nil }
         mutatePresentation(transitionContent: expanded || peeking || noticeExpanded ? .dismiss : .none) {
             if noticeExpanded { notice = nil; noticeExpanded = false }
@@ -3992,10 +3992,6 @@ final class NotchService: ObservableObject {
         /// The surface last drawn, so a copy that grew under a pointer that has
         /// not moved is seen as a change, as the island sees the same thing.
         var lastSize: CGSize?
-        /// The moves followed while this copy's hover keeps its page or its peek
-        /// open, so an exit AppKit never reported still closes it. One copy's
-        /// monitors ask about one copy's island.
-        var exitMonitors: [Any] = []
 
         init(id: CGDirectDisplayID, host: NotchWindowHost, model: NotchMirrorModel) {
             self.id = id
@@ -4026,7 +4022,6 @@ final class NotchService: ObservableObject {
             // with its window, so a display that comes back starts from nothing
             // and is not held by a hover that ended at a display no longer there.
             mirror.cancelHoverWork()
-            removeMirrorExitMonitors(mirror)
             mirror.inside = false
             mirror.hover.update(pointerInside: false)
             mirror.model.endPeek()
@@ -4061,7 +4056,6 @@ final class NotchService: ObservableObject {
                 // deadline goes with it, and its hover with that.
                 if let mirror = mirrors[id] {
                     mirror.cancelHoverWork()
-                    removeMirrorExitMonitors(mirror)
                     mirror.inside = false
                     mirror.hover.update(pointerInside: false)
                     mirror.model.endPeek()
@@ -4179,7 +4173,6 @@ final class NotchService: ObservableObject {
         removePointerWatchMonitors()
         mirrors.values.forEach {
             $0.cancelHoverWork()
-            removeMirrorExitMonitors($0)
             $0.host.close()
         }
         mirrors.removeAll()
@@ -4217,34 +4210,45 @@ final class NotchService: ObservableObject {
     /// its own expansion under the pointer. Each display answers for itself: a
     /// pointer on one display is not inside another display's island, and the
     /// suppression one island's resize leaves behind is not carried to a second.
+    ///
+    /// A report is answered by where the pointer is, never by the report's own
+    /// kind: the window's tracking area, the pointer's moves, and a page that grew
+    /// under a resting pointer all tell the same presence, and every one of them
+    /// is answered by the same rule the island's own window answers by.
     func mirrorHover(_ id: CGDirectDisplayID, entered: Bool) {
         guard let mirror = mirrors[id], running, !suspended, showsOnAllDisplays else { return }
         let wasInside = mirror.inside
         mirror.inside = pointerOverMirror(mirror)
         mirror.hover.update(pointerInside: mirror.inside)
-        // A pointer that leaves takes the opening it was waiting out back, and a
-        // pointer that comes back takes the leaving's close back - the answer the
-        // island's own return gets. The opening a fresh entry waits out is asked
-        // for again below, so nothing is lost by the taking back.
-        if !mirror.inside || wasInside != mirror.inside { mirror.cancelHoverWork() }
-        // The copy's moves are followed from the moment its hover has something
-        // to keep open, exactly as the island's own are: AppKit can report no
-        // exit at all for these windows, and a pointer on its way to another
-        // display is the case that needs it most.
-        defer { syncMirrorExitMonitoring(mirror, entered: entered) }
+        // The island's own rule, asked of this copy. Overlapping reports - the
+        // window's tracking area, the pointer's moves followed for every island at
+        // once, a second area over the same surface - tell the presence a copy
+        // already has, and the deadline it is waiting out is kept until the
+        // pointer actually crosses the boundary. Taking the waiting work back on
+        // every report takes the close a leaving asked for back before the pause
+        // the person chose is out, and the page a display's hover opened then never
+        // closes on that display - which is the whole of why a copy on an external
+        // display grew and stayed grown while the island's own window opened and
+        // closed. A pointer that crosses answers instead: an arrival takes the
+        // leaving's close back, and a leaving takes the opening it was waiting out
+        // back, as the island's own return and leaving do.
+        defer { syncPointerWatching() }
+        if wasInside == mirror.inside, let work = mirror.hoverWork, !work.isCancelled { return }
+        mirror.cancelHoverWork()
         if !mirror.inside {
             // Out of a copy, the answer the island's own pointer exit gets: the
             // peek taken back, and the page this copy's hover opened closed. A
             // page this copy's click opened stays, as it stays on the island, and
-            // a page another display carries is not this copy's to close.
-            guard wasInside,
-                  NotchSupport.closesOnPointerExit(expanded: carriesPage(mirror),
+            // a page another display carries is not this copy's to close. Like the
+            // island's own exit, this is asked whenever the pointer is found out of
+            // the island with something to close, so a leaving AppKit dropped is
+            // still closed by the next report of the pointer.
+            guard NotchSupport.closesOnPointerExit(expanded: carriesPage(mirror),
                                                    peeking: mirror.model.peeking,
                                                    openedByHover: openedByHover) else { return }
             scheduleMirrorClose(mirror)
             return
         }
-        guard wasInside != mirror.inside || mirror.hoverWork == nil else { return }
         // A copy whose strip is a control of its own answers the pointer there.
         // The copies draw no controls - the page is opened, the play and pause
         // are the island's own strip's - so nothing here declines the opening.
@@ -4346,7 +4350,7 @@ final class NotchService: ObservableObject {
             if mirror.model.peeking {
                 mirror.model.endPeek()
                 self.syncMirrors()
-                self.removeMirrorExitMonitors(mirror)
+                self.syncPointerWatching()
                 return
             }
             guard self.carriesPage(mirror),
@@ -4359,74 +4363,34 @@ final class NotchService: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
     }
 
-    /// The moves followed for a copy, for that copy alone, by the one rule every
-    /// island answers - `NotchIslandHover`.
-    ///
-    /// AppKit reports hover from the moves a window receives, and those stop when
-    /// the pointer crosses the transparent margin, passes into another display,
-    /// is taken by the page under it, or is delivered to a tracking area that was
-    /// replaced while the pointer rested inside it - which is exactly what a
-    /// copy's window does when its hover opens the page. So a copy follows from
-    /// its own entry and while its page or its peek is open, and a pointer at
-    /// rest costs nothing: a copy the pointer is not on follows nothing.
-    private func syncMirrorExitMonitoring(_ mirror: NotchMirror, entered: Bool) {
-        let closes = NotchSupport.closesOnPointerExit(expanded: carriesPage(mirror),
-                                                      peeking: mirror.model.peeking,
-                                                      openedByHover: openedByHover)
-        // The island's own answer, asked of this copy: the same facts, the same
-        // rule, and the copy's own pointer. The following starts at the copy's
-        // entry, where a page is not open yet and an exit report is not needed
-        // to start, because the opening that entry waits out grows the copy's
-        // surface under a pointer that has not moved - the one moment a leaving
-        // is least likely to be reported, and the moment a copy on a display of
-        // its own needs the following most.
-        let hover = NotchIslandHover(inside: mirror.inside, showsPage: carriesPage(mirror),
-                                     peeking: mirror.model.peeking,
-                                     deadlinePending: mirror.hoverWork?.isCancelled == false,
-                                     suppressed: mirror.hover.suppressed, opensOnHover: hoverOpeningEnabled,
-                                     closesOnExit: closes)
-        let watching = hover.followsPointer && !hiddenUntilHover && captureControls == nil && !pinned && !heldDrag
-            && !keepsWorkingSurface
-            // One copy's monitors ask about one copy's island: a pointer that
-            // is not on this copy's display is no pointer to follow here.
-            && (!mirror.exitMonitors.isEmpty || pointerOverMirror(mirror))
-        guard watching else { removeMirrorExitMonitors(mirror); return }
-        guard mirror.exitMonitors.isEmpty else { return }
-        let moves: NSEvent.EventTypeMask = [.mouseMoved, .leftMouseDragged]
-        if let token = NSEvent.addGlobalMonitorForEvents(matching: moves, handler: { [weak self, weak mirror] _ in
-            guard let self, let mirror else { return }
-            // The pointer's own answer, not an assumed leaving: a move that
-            // carries the pointer back onto this copy's island is an entry, and
-            // the copy answers it as it answered its first.
-            self.mirrorHover(mirror.id, entered: self.pointerOverMirror(mirror))
-        }) { mirror.exitMonitors.append(token) }
-        if let token = NSEvent.addLocalMonitorForEvents(matching: moves, handler: { [weak self, weak mirror] event in
-            guard let self, let mirror else { return event }
-            self.mirrorHover(mirror.id, entered: self.pointerOverMirror(mirror))
-            return event
-        }) { mirror.exitMonitors.append(token) }
-    }
-
-    private func removeMirrorExitMonitors(_ mirror: NotchMirror) {
-        guard !mirror.exitMonitors.isEmpty else { return }
-        mirror.exitMonitors.forEach(NSEvent.removeMonitor)
-        mirror.exitMonitors.removeAll()
+    /// Whether a copy's hover has something the pointer's moves must settle: an
+    /// opening it is waiting out, a page or a peek the pointer's staying keeps, or
+    /// a press's suppression that a leaving ends. The island's own answer, asked of
+    /// this copy by the same rule every island answers by.
+    private func mirrorFollowsPointer(_ mirror: NotchMirror) -> Bool {
+        NotchIslandHover(inside: mirror.inside, showsPage: carriesPage(mirror),
+                         peeking: mirror.model.peeking,
+                         deadlinePending: mirror.hoverWork?.isCancelled == false,
+                         suppressed: mirror.hover.suppressed, opensOnHover: hoverOpeningEnabled,
+                         closesOnExit: NotchSupport.closesOnPointerExit(expanded: carriesPage(mirror),
+                                                                        peeking: mirror.model.peeking,
+                                                                        openedByHover: openedByHover))
+            .followsPointer
     }
 
     /// Where the pointer is, asked of every island window: a copy's place is that
     /// copy's own window's, so a pointer is inside exactly the island it rests on
     /// and outside every other. A pointer reaching an island is that island's
     /// entry and leaving it is that island's exit, and the answer is given only
-    /// when it changes, so no move restarts the delay the person chose.
+    /// when it changes, so a move never restarts a deadline already waiting.
     ///
-    /// The pointer is asked, and not the window's own report of an entering, for
-    /// the reason the island's own window is watched by the pointer while it is
-    /// out of sight and while its page is open: these windows are borderless,
-    /// non-activating and above every other window, and AppKit can report no
-    /// entering and no leaving for one at all - least of all for a copy on a
-    /// display of its own, whose surface grows under a pointer that has not
-    /// moved. A copy read from the pointer answers by the rule the island's own
-    /// window already answers by, which is the parity the person sees: the same
+    /// The pointer is asked, and not a window's report, because a report is the
+    /// cheap thing to lose: the moves a window receives stop when the pointer
+    /// crosses the transparent margin, passes into another display, or is handed to
+    /// a tracking area replaced under it - which is what an island's own window
+    /// does when its hover grows the surface under a pointer that has not moved.
+    /// A pointer read of the whole system loses none of those, and answers every
+    /// island by the same rule, which is the parity the person sees: the same
     /// delay, the same opening, the same closing, on every display.
     private func sweepPointer(_ point: CGPoint) {
         guard running, !suspended, showsOnAllDisplays, windowHost != nil else { return }
@@ -4436,14 +4400,29 @@ final class NotchService: ObservableObject {
         }
     }
 
-    /// The moves followed for the island's windows, armed while the island shows
-    /// on more than one display, and taken back with the copies. A pointer at
-    /// rest sends no move and costs nothing.
+    /// Whether the pointer's moves are followed for the copies: for a copy whose
+    /// hover has something to settle, from the moment that copy's own pointer is on
+    /// its island. A pointer at rest sends no move and costs nothing, and a pointer
+    /// that is on no island of its own starts no watching: the island's own window
+    /// is followed by its own monitors, and its page is not a copy's to close.
+    private var watchesMirrors: Bool {
+        mirrors.values.contains { mirrorFollowsPointer($0) && (!pointerWatchMonitors.isEmpty || pointerOverMirror($0)) }
+    }
+
+    /// The moves followed for every island window at once - one pair of monitors,
+    /// for all the copies, as the island's own window has its own pair. A copy's
+    /// answer is asked of that copy's window on its own display, so the pair is
+    /// shared and no move is answered twice for the same island.
+    ///
+    /// Armed while a copy has something for the pointer to settle, and taken back
+    /// when none has: with the copies, when a page closes, when a peek is taken
+    /// back, when a display goes away, and whenever the island stops answering the
+    /// pointer at all.
     private func syncPointerWatching() {
-        guard showsOnAllDisplays, running, !suspended, windowHost != nil, !mirrors.isEmpty else {
-            removePointerWatchMonitors()
-            return
-        }
+        guard showsOnAllDisplays, running, !suspended, windowHost != nil, !mirrors.isEmpty,
+              !hiddenUntilHover, captureControls == nil, !pinned, !heldDrag, !keepsWorkingSurface,
+              watchesMirrors
+        else { removePointerWatchMonitors(); return }
         guard pointerWatchMonitors.isEmpty else { return }
         let moves: NSEvent.EventTypeMask = [.mouseMoved, .leftMouseDragged]
         if let token = NSEvent.addGlobalMonitorForEvents(matching: moves, handler: { [weak self] _ in
@@ -4471,16 +4450,15 @@ final class NotchService: ObservableObject {
             mirror.hover.update(pointerInside: false)
             mirror.cancelHoverWork()
             if mirror.model.peeking { mirror.model.endPeek() }
-            syncMirrorExitMonitoring(mirror, entered: false)
+            syncPointerWatching()
             return
         }
         mirror.inside = true
         // A page opened where the pointer already rests grew under it, so the
         // leaving that closes it is the one least likely to be reported. The
-        // copy follows its own pointer's moves from here, as it did from its
-        // entry, and asks the same questions of its own window on its own
-        // display.
-        syncMirrorExitMonitoring(mirror, entered: true)
+        // pointer's moves are followed from here, as they are from a copy's own
+        // entry, and ask the same questions of its window on its own display.
+        syncPointerWatching()
         guard surfaceChanged, mirror.hoverWork == nil, !mirror.model.expanded, !mirror.model.peeking,
               !mirror.hover.suppressed, hoverOpeningEnabled,
               hoverOpensThroughNotice || notice == nil || hiddenUntilHover else { return }
@@ -4496,6 +4474,9 @@ final class NotchService: ObservableObject {
     private func mirrorWillPress(_ mirror: NotchMirror) {
         mirror.cancelHoverWork()
         mirror.hover.close(pointerInside: pointerOverMirror(mirror))
+        // The suppression ends at a leaving, so the pointer's moves are followed
+        // from here, as they are for the opening an entry waits out.
+        syncPointerWatching()
     }
 
     /// A click on a copy's island opens the dashboard there, closing the display
