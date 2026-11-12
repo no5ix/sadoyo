@@ -204,12 +204,7 @@ struct NotchView: View {
                 .transition(.opacity)
             }
         } else if service.peeking {
-            HStack {
-                navigation
-                Spacer(minLength: 8)
-                NotchIconButton(symbol: "chevron.down", title: text.open) { service.open(on: hostDisplay) }
-            }
-            .padding(.horizontal, NotchLayout.horizontalInset).padding(.top, service.geometry.safeContentTop)
+            NotchPeekSurface(service: service, hostDisplayID: hostDisplayID)
         } else if let activity = service.compactActivity {
             // Hover grows the capsule around its strip, as it grows the
             // notch around its wings. Drawn at the grown size, a song's
@@ -560,33 +555,6 @@ struct NotchView: View {
         return notice
     }
 
-    private var navigationTitle: String {
-        let destination = service.reopeningDestination
-        return destination.appPanel || destination.sections
-            ? text.sectionsTitle : destination.module.title(l10n.language)
-    }
-
-    private var navigation: some View {
-        Button(action: { islandActions.openSections() }) {
-            HStack(spacing: 9) {
-                Image(systemName: "square.grid.2x2")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.7))
-                Text(navigationTitle)
-                    .font(.system(size: 16, weight: .semibold))
-                    .lineLimit(1)
-            }
-            .padding(.horizontal, 10)
-            .frame(height: NotchLayout.navigationHeight)
-            .contentShape(RoundedRectangle(cornerRadius: 12))
-        }
-        .buttonStyle(NotchButtonStyle(cornerRadius: 12, lifts: false))
-        .accessibilityLabel(text.switchSection)
-        .accessibilityValue(navigationTitle)
-        .accessibilityIdentifier("notch.navigation")
-        .help(text.switchSection + "  ⌘K")
-    }
-
     @ViewBuilder private var content: some View {
         // A reading's detail page is the page the island draws, with the panel
         // open behind it or not: the menu bar's indicator of a reading and the
@@ -892,5 +860,67 @@ private struct NotchPageClip: Shape {
         Path(CGRect(x: rect.minX - NotchLayout.horizontalInset, y: rect.minY - top,
                     width: rect.width + NotchLayout.horizontalInset * 2,
                     height: rect.height + top + NotchLayout.bottomInset))
+    }
+}
+
+/// The peek a hover asks for: the page the pointer is reaching for, named, with
+/// the one control that opens it.
+///
+/// The island's own window and a copy's window draw the same peek, because a
+/// copy is an island of its own on its own display. The display is named by the
+/// window that draws the peek, so a copy's peek opens its sections and its page
+/// on that copy's display, as every other page that window opens does. The
+/// geometry is the display's own too: a copy on a display with no camera, and
+/// its own menu bar, sits at that display's top and not at the island's.
+struct NotchPeekSurface: View {
+    @ObservedObject var service: NotchService
+    /// The display whose island peeks, and the display every page this peek
+    /// opens belongs to. Nil is the island's own window.
+    var hostDisplayID: CGDirectDisplayID? = nil
+    /// The surface this peek is drawn in: the island's own geometry, and the
+    /// display whose copy peeks.
+    var surfaceGeometry: NotchGeometry? = nil
+    @ObservedObject private var l10n = L10n.shared
+    private var text: NotchStrings { FeatureStrings.notch(l10n.language) }
+    private var hostDisplay: CGDirectDisplayID { hostDisplayID ?? service.displayID ?? 0 }
+    private var geometry: NotchGeometry { surfaceGeometry ?? service.geometry }
+
+    private var navigationTitle: String {
+        let destination = service.reopeningDestination
+        return destination.appPanel || destination.sections
+            ? text.sectionsTitle : destination.module.title(l10n.language)
+    }
+
+    /// The page's name and the way to its gallery. The menu is built for this
+    /// window's display, where that answer is known, so a peek on a copy keeps
+    /// its display after the pointer has travelled.
+    private var navigation: some View {
+        Button(action: { service.islandMenuActions(on: hostDisplay).openSections() }) {
+            HStack(spacing: 9) {
+                Image(systemName: "square.grid.2x2")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.7))
+                Text(navigationTitle)
+                    .font(.system(size: 16, weight: .semibold))
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 10)
+            .frame(height: NotchLayout.navigationHeight)
+            .contentShape(RoundedRectangle(cornerRadius: 12))
+        }
+        .buttonStyle(NotchButtonStyle(cornerRadius: 12, lifts: false))
+        .accessibilityLabel(text.switchSection)
+        .accessibilityValue(navigationTitle)
+        .accessibilityIdentifier("notch.navigation")
+        .help(text.switchSection + "  ⌘K")
+    }
+
+    var body: some View {
+        HStack {
+            navigation
+            Spacer(minLength: 8)
+            NotchIconButton(symbol: "chevron.down", title: text.open) { service.open(on: hostDisplay) }
+        }
+        .padding(.horizontal, NotchLayout.horizontalInset).padding(.top, geometry.safeContentTop)
     }
 }

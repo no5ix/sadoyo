@@ -95,6 +95,8 @@ enum NotchHoverTests {
         var hover = NotchHoverState()
         var hoverWork: DispatchWorkItem?
         var lastSize: CGSize?
+        /// The moves followed while this copy's hover keeps its page or peek open.
+        var exitMonitors: [Any] = []
         init(id: CGDirectDisplayID, geometry: NotchGeometry) {
             self.id = id
             model = NotchMirrorModel(displayID: id, geometry: geometry, size: CGSize(width: 180, height: 32))
@@ -181,6 +183,10 @@ enum NotchHoverTests {
         var shelfDragExitWork: DispatchWorkItem?
         var captureHover: ((Bool) -> Void)?
         func updateCaptureControlsHover(wasInside: Bool) {}
+        /// A copy's peek is drawn by its own window, whose size the test does not
+        /// lay out: the fixture only counts that the copy was asked to redraw.
+        var mirrorSyncs = 0
+        func syncMirrors() { mirrorSyncs += 1 }
         func updateCaptureControlsClickThrough() {}
         var childWindowFrames: [CGRect] = []
         func pointerOverChildWindow(_ point: CGPoint) -> Bool { childWindowFrames.contains { $0.contains(point) } }
