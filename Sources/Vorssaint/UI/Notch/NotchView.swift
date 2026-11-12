@@ -14,6 +14,12 @@ struct NotchView: View {
     /// The size a copy's window draws the page at, and nil for the island's own
     /// window, which measures its own surface.
     var pageSurfaceSize: CGSize? = nil
+    /// The display whose window draws this view: the island's own window, and a
+    /// copy's window on the display it was built for. A window never moves, so
+    /// this answer is fixed for everything this window draws. Every page this
+    /// view opens names it, and a secondary-click menu built here keeps naming
+    /// it after the pointer has moved to another display.
+    var hostDisplayID: CGDirectDisplayID? = nil
     @ObservedObject private var l10n = L10n.shared
     @ObservedObject private var music = NotchMusicService.shared
     @ObservedObject private var launcher = QuickLauncherService.shared
@@ -66,6 +72,7 @@ struct NotchView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .environment(\.colorScheme, .dark)
             .environment(\.notchPresentation, true)
+            .environment(\.notchPageDisplay, hostDisplay)
             .environment(\.notchGlassSurface, usesGlassSurface)
             .tint(.white)
             .accessibilityIdentifier("notch.surface")
@@ -85,6 +92,17 @@ struct NotchView: View {
     /// The surface this window draws: the island measures its own, and a copy is
     /// drawn at the size its host presents it at.
     private var surfaceSize: CGSize { pageSurfaceSize ?? service.surfaceSize }
+
+    /// The display this window stands on, and the display every page this view
+    /// opens belongs to. A window is built for one display and never moves, so
+    /// the answer is this view's own and never the primary display, the key
+    /// window, or where the pointer happens to be.
+    private var hostDisplay: CGDirectDisplayID { hostDisplayID ?? service.displayID ?? 0 }
+
+    /// The island's menu, answered by this window's display. Built once per draw
+    /// of the surface, so the items of a menu opened on this island keep this
+    /// display for as long as that menu lives.
+    private var islandActions: NotchIslandMenu { service.islandMenuActions(on: hostDisplay) }
 
     /// Whether this window draws the open page: the island's own window while the
     /// page belongs to its display, and a copy's window where the pointer opened
@@ -189,7 +207,7 @@ struct NotchView: View {
             HStack {
                 navigation
                 Spacer(minLength: 8)
-                NotchIconButton(symbol: "chevron.down", title: text.open) { service.open() }
+                NotchIconButton(symbol: "chevron.down", title: text.open) { service.open(on: hostDisplay) }
             }
             .padding(.horizontal, NotchLayout.horizontalInset).padding(.top, service.geometry.safeContentTop)
         } else if let activity = service.compactActivity {
@@ -287,9 +305,9 @@ struct NotchView: View {
             .accessibilityLabel(pageName)
             // The island's own actions sit in its secondary-click menu, with
             // no button of their own in the row; VoiceOver lists them here.
-            .accessibilityAction(named: service.pinned ? text.unpin : text.pin) { service.pinned.toggle() }
-            .accessibilityAction(named: l10n.s.menuSettings) { service.openSettings() }
-            .accessibilityAction(named: text.collapse) { service.collapse() }
+            .accessibilityAction(named: service.pinned ? text.unpin : text.pin) { islandActions.togglePin() }
+            .accessibilityAction(named: l10n.s.menuSettings) { islandActions.openSettings() }
+            .accessibilityAction(named: text.collapse) { islandActions.collapse() }
             .padding(.top, geometry.pageTopInset - geometry.headerTopInset)
             .overlayPreferenceValue(NotchBandKey.self, alignment: .top) { items in
                 if geometry.headerRowHeight > 0 {
@@ -400,7 +418,7 @@ struct NotchView: View {
                     HStack(spacing: 6) { items.trailing; trailingSections(band); updateControl(band); pinMark }
                     HStack(spacing: 6) {
                         items.trailing; trailingSections(band)
-                        NotchUpdateControl(action: service.showUpdate, compact: true); pinMark
+                        NotchUpdateControl(action: islandActions.showUpdate, compact: true); pinMark
                     }
                     HStack(spacing: 6) { items.trailing; trailingSections(band); pinMark }
                     HStack(spacing: 6) { items.trailing; trailingSections(band) }
@@ -426,11 +444,11 @@ struct NotchView: View {
     /// A page that lays out its leading side itself ends its row with the
     /// way to the sections, after its own controls, where they fit together.
     @ViewBuilder private func trailingSections(_ band: NotchBand) -> some View {
-        if band.trailingSectionsButton { NotchSectionsButton(action: service.toggleSections) }
+        if band.trailingSectionsButton { NotchSectionsButton(action: { islandActions.openSections() }) }
     }
 
     private func updateControl(_ band: NotchBand) -> some View {
-        NotchUpdateControl(action: service.showUpdate, compact: band.besideCamera)
+        NotchUpdateControl(action: islandActions.showUpdate, compact: band.besideCamera)
     }
 
     /// A kept-open island says so on the pages that carry the island's own
@@ -455,7 +473,7 @@ struct NotchView: View {
 
     @ViewBuilder private func bandLeading(_ band: NotchBand) -> some View {
         if service.showingSections {
-            NotchIconButton(symbol: "chevron.left", title: l10n.s.obBack, action: service.toggleSections)
+            NotchIconButton(symbol: "chevron.left", title: l10n.s.obBack, action: { islandActions.openSections() })
             // Beside the camera the field takes the rest of its side.
             NotchSectionSearch(service: service, maximumFieldWidth: band.besideCamera ? .infinity : 150)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -469,34 +487,38 @@ struct NotchView: View {
         } else if band.sectionsButton {
             // Without the floating button, the sections stay one click away;
             // the row keeps it room before the page's own controls.
-            NotchSectionsButton(action: service.toggleSections)
+            NotchSectionsButton(action: { islandActions.openSections() })
         }
     }
 
     /// The island's own actions, on a secondary click anywhere a page has no
     /// menu of its own. The floating buttons and the keys reach them too.
+    ///
+    /// The actions are answered by the display whose island was clicked, named
+    /// once when this menu is built. A menu outlives the pointer that opened it,
+    /// so an item chosen after the pointer travelled to another display still
+    /// opens its page here, on the island the menu was opened on.
     @ViewBuilder private var islandMenu: some View {
+        let actions = islandActions
         if !service.modules.isEmpty {
-            Button(action: service.toggleSections) {
+            Button(action: actions.openSections) {
                 Label(service.showingSections ? l10n.s.obBack : text.sectionsTitle, systemImage: "square.grid.2x2")
             }
         }
-        Button {
-            service.pinned.toggle()
-        } label: {
+        Button(action: actions.togglePin) {
             Label(service.pinned ? text.unpin : text.pin, systemImage: service.pinned ? "pin.slash" : "pin")
         }
-        Button(action: service.openSettings) {
+        Button(action: actions.openSettings) {
             Label(l10n.s.menuSettings, systemImage: "gearshape")
         }
         // An offer the row has no room for still reaches the island.
         if updateOffered {
-            Button(action: service.showUpdate) {
+            Button(action: actions.showUpdate) {
                 Label(l10n.s.updateBannerAction, systemImage: "arrow.down.circle")
             }
         }
         Divider()
-        Button(action: service.collapse) {
+        Button(action: actions.collapse) {
             Label(text.collapse, systemImage: "chevron.up")
         }
     }
@@ -545,7 +567,7 @@ struct NotchView: View {
     }
 
     private var navigation: some View {
-        Button(action: service.toggleSections) {
+        Button(action: { islandActions.openSections() }) {
             HStack(spacing: 9) {
                 Image(systemName: "square.grid.2x2")
                     .font(.system(size: 14, weight: .medium))
@@ -583,7 +605,7 @@ struct NotchView: View {
             MenuPanelView(notchSize: pageSize)
         } else if service.modules.isEmpty {
             NotchEmptyView(symbol: "slider.horizontal.3", message: text.empty) {
-                NotchPillButton(title: l10n.s.menuSettings, prominent: true, action: service.openSettings)
+                NotchPillButton(title: l10n.s.menuSettings, prominent: true, action: islandActions.openSettings)
             }
         } else {
             switch service.selected {
@@ -611,7 +633,7 @@ struct NotchView: View {
                 }
             case .files: NotchFilesView(service: service)
             case .system:
-                NotchSystemView(size: pageSize) { service.showMetric($0) }
+                NotchSystemView(size: pageSize) { service.showMetric($0, on: hostDisplay) }
             // The launcher hands the row its own controls, which a row set
             // here would replace.
             case .tools: QuickLauncherView(notchSize: pageSize)

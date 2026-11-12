@@ -4,6 +4,9 @@
 import SwiftUI
 
 struct NotchMusicView: View {
+    /// The display whose island window draws this view. Every page opened
+    /// from here names it, so the page opens on the island it was asked on.
+    @Environment(\.notchPageDisplay) private var pageDisplay: CGDirectDisplayID?
     let size: CGSize
     /// Room lyrics or the queue may add below the player.
     let extrasHeight: CGFloat
@@ -225,7 +228,7 @@ struct NotchMusicView: View {
 
     /// The island's way to its sections where its row does not hold it.
     @ViewBuilder private var sectionsButton: some View {
-        if band.pageSectionsButton { NotchSectionsButton(action: NotchService.shared.toggleSections) }
+        if band.pageSectionsButton { NotchSectionsButton(action: { NotchService.shared.toggleSections(on: pageDisplay) }) }
     }
 
     private func extraButton(_ target: MusicExtra, title: String, symbol: String) -> some View {
@@ -437,6 +440,7 @@ private enum NotchPlayerApps {
 /// The output the island plays to, at the end of the player's row as on a
 /// phone's island: its glyph opens the list of outputs, and the mixer.
 private struct NotchMusicOutputButton: View {
+    @Environment(\.notchPageDisplay) private var pageDisplay: CGDirectDisplayID?
     @ObservedObject private var notch = NotchService.shared
     @ObservedObject private var mixer = AppVolumeMixer.shared
     @ObservedObject private var l10n = L10n.shared
@@ -468,7 +472,7 @@ private struct NotchMusicOutputButton: View {
         .accessibilityValue(deviceName)
     }
 
-    private var items: [NotchMenuItem] { NotchAudioControls.outputItems(mixer: mixer, notch: notch, l10n: l10n) }
+    private var items: [NotchMenuItem] { NotchAudioControls.outputItems(mixer: mixer, notch: notch, l10n: l10n, on: pageDisplay) }
 }
 
 /// The transport as it looks with nothing playing. Every button opens the
@@ -742,6 +746,9 @@ struct NotchMusicTimeline: View {
 /// transport at the end of their line, or under the title where a level card
 /// shares the row.
 struct NotchMusicControlsView: View {
+    /// The display whose island window draws this view. Every page opened
+    /// from here names it, so the page opens on the island it was asked on.
+    @Environment(\.notchPageDisplay) private var pageDisplay: CGDirectDisplayID?
     @ObservedObject var notch: NotchService
     var height: CGFloat = NotchLayout.cardHeight
     @ObservedObject private var music = NotchMusicService.shared
@@ -760,7 +767,7 @@ struct NotchMusicControlsView: View {
             // With nothing playing, the cover opens the music app instead.
             Button {
                 if isIdle, NotchPreferredPlayer.open() { return }
-                notch.select(.music)
+                notch.select(.music, on: pageDisplay)
             } label: {
                 NotchArtwork(image: music.artwork, size: max(40, height - 24), source: music.playback?.track)
             }
@@ -791,7 +798,7 @@ struct NotchMusicControlsView: View {
     }
 
     private func titles(artist: Bool) -> some View {
-        Button { notch.select(.music) } label: {
+        Button { notch.select(.music, on: pageDisplay) } label: {
             VStack(alignment: .leading, spacing: 2) {
                 Text(music.playback?.track.title ?? (music.awaitingPlayback ? text.mediaNowPlaying : text.mediaNothingPlaying))
                     .font(.system(size: 13, weight: .semibold)).lineLimit(1)

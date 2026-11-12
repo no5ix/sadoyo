@@ -232,6 +232,9 @@ struct NotchDownloadsView: View {
 }
 
 struct NotchDownloadStrip: View {
+    /// The display whose island window draws this view. Every page opened
+    /// from here names it, so the page opens on the island it was asked on.
+    @Environment(\.notchPageDisplay) private var pageDisplay: CGDirectDisplayID?
     @ObservedObject var service: NotchService
     /// Where the island draws it: its own strip as of the last update, or
     /// another display's when the island shows on every display.
@@ -250,7 +253,7 @@ struct NotchDownloadStrip: View {
 
     var body: some View {
         let item = downloads.items.first { $0.active && !$0.completed }
-        Button { service.openActivity(.downloads) } label: {
+        Button { service.openActivity(.downloads, on: pageDisplay) } label: {
             HStack(spacing: 0) {
                 HStack(spacing: 6) {
                     if geometry.compactActivityWingWidth >= 40 {

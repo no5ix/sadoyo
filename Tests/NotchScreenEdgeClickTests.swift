@@ -54,7 +54,11 @@ enum NotchScreenEdgeClickTests {
         var hoverState = NotchHoverState()
         var compactActivity: NotchCompactActivity?
         var openings = 0, countdownOpenings = 0
-        func openCountdownEvent() { countdownOpenings += 1; expanded = true }
+        var askedDisplay: CGDirectDisplayID?
+        var displayID: CGDirectDisplayID? = 1
+        func openCountdownEvent(on display: CGDirectDisplayID? = nil) {
+            countdownOpenings += 1; askedDisplay = display; expanded = true
+        }
     }
 
     static func run(_ suite: TestSuite) {

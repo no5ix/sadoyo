@@ -1443,7 +1443,7 @@ def main():
           + "func forgetDetailHeight() {}\n"
           + music_visibility + "}\n}\n")
     write("NotchScreenEdgeClicks.swift", "import AppKit\nextension NotchScreenEdgeClickTests {\nfinal class Service: State {\n"
-          + "func open() { openings += 1; expanded = true; syncScreenEdgeClicks() }\n"
+          + "func open(on display: CGDirectDisplayID? = nil) { openings += 1; expanded = true; syncScreenEdgeClicks() }\n"
           + "".join(declaration(notch, prefix).replace("    private ", "    ", 1) for prefix in [
               "    private var screenEdgeClickArea:", "    private func syncScreenEdgeClicks(",
               "    private func handleScreenEdgeEvent(", "    private func handleScreenEdgeClick(",
@@ -1635,7 +1635,10 @@ def main():
           + declaration(notch, "    func openShelf(")
               .replace("NotchSupport.routesShelf()", "NotchSupport.routesShelf(in: ReviewDefaults.current)")
           + declaration(notch, "    func resignPanelKey()")
-          + declaration(notch, "    func toggleSections()")
+          + declaration(notch, "    private func destinationDisplay(").replace("private func", "func", 1)
+          + declaration(notch, "    func toggleSections(")
+          + declaration(notch, "    func select(")
+          + declaration(notch, "    func islandMenuActions(on")
           + declaration(notch, "    func goBack()")
           + "func forgetDetailHeight() { detailHeightCleared += 1 }\nvar detailHeightCleared = 0\n"
           + declaration(notch, "    private func stepBack()").replace("private func", "func", 1)

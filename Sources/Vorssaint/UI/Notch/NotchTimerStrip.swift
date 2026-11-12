@@ -13,6 +13,9 @@ import SwiftUI
 /// - its own mark is its remaining time, in the one unit the wing fits, and not
 /// its icon: see `NotchTimerSupport.stripMarkText`.
 struct NotchTimerStrip: View {
+    /// The display whose island window draws this view. Every page opened
+    /// from here names it, so the page opens on the island it was asked on.
+    @Environment(\.notchPageDisplay) private var pageDisplay: CGDirectDisplayID?
     @ObservedObject var service: NotchService
     /// Where the island draws it: its own strip as of the last update, or
     /// another display's when the island shows on every display.
@@ -43,8 +46,8 @@ struct NotchTimerStrip: View {
     var body: some View {
         HStack(spacing: 0) {
             Button {
-                if companion == .calendar { service.openCountdownEvent() }
-                else { service.openActivity(companion?.module ?? .timer) }
+                if companion == .calendar { service.openCountdownEvent(on: pageDisplay) }
+                else { service.openActivity(companion?.module ?? .timer, on: pageDisplay) }
             } label: {
                 Group {
                     if geometry.compactActivityWingWidth >= 28 {
@@ -91,7 +94,7 @@ struct NotchTimerStrip: View {
         let now = timer.now
         let text = NotchTimerSupport.compactText(for: timer.session, at: now,
                                                  locale: Locale(identifier: l10n.language.rawValue))
-        return Button { service.openActivity(.timer) } label: {
+        return Button { service.openActivity(.timer, on: pageDisplay) } label: {
             Group {
                 if geometry.compactActivityWingWidth >= 42 {
                     Text(text)

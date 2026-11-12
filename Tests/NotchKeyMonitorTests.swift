@@ -196,11 +196,11 @@ enum NotchKeyMonitorTests {
         let islandSource = ((try? String(contentsOfFile: "Sources/Vorssaint/UI/Notch/NotchView.swift",
                                          encoding: .utf8)) ?? "")
             .filter { !$0.isWhitespace }
-        suite.expect([".accessibilityAction(named:service.pinned?text.unpin:text.pin){service.pinned.toggle()}",
-                      ".accessibilityAction(named:l10n.s.menuSettings){service.openSettings()}",
-                      ".accessibilityAction(named:text.collapse){service.collapse()}"]
+        suite.expect([".accessibilityAction(named:service.pinned?text.unpin:text.pin){islandActions.togglePin()}",
+                      ".accessibilityAction(named:l10n.s.menuSettings){islandActions.openSettings()}",
+                      ".accessibilityAction(named:text.collapse){islandActions.collapse()}"]
                         .allSatisfy(islandSource.contains),
-                     "the open island names Keep open, Settings and Collapse as accessibility actions")
+                     "the open island names Keep open, Settings and Collapse, as its own menu answers them, as accessibility actions")
         // A top row that cannot wrap the camera takes a row below it, so a
         // custom island leaves the Tools rail fewer rows than the island
         // without its page would. The arrows walk the rail the page draws.

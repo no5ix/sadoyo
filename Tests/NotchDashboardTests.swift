@@ -116,9 +116,9 @@ enum NotchDashboardTests {
                              && header.contains("notch.dashboard.calendar.mark"),
                          "the section's mark, at the header's leading edge, is the card's way to the Calendar page")
             suite.expect(section.contains("onOpen: openPage")
-                             && section.contains("service.select(.calendar)")
+                             && section.contains("service.select(.calendar, on: pageDisplay)")
                              && section.components(separatedBy: "service.select(").count - 1 == 1,
-                         "that way is the Calendar page, and it is the card's only one")
+                         "that way is the Calendar page, on this display, and it is the card's only one")
             // The days, the months and the corner mark keep the clicks they had.
             suite.expect(section.contains("display.select(date)")
                              && section.contains("onPrevious: { display.moveMonth(-1) }")
@@ -207,11 +207,12 @@ enum NotchDashboardTests {
             // The keeping itself is untouched: the island is kept open by the
             // menu's action, on every page, and the mark's one click lets go.
             let island = source("Sources/Vorssaint/UI/Notch/NotchView.swift")
-            suite.expect(island.contains("Button {\n            service.pinned.toggle()")
+            suite.expect(island.contains("Button(action: actions.togglePin)")
+                             && island.contains("let actions = islandActions")
                              && island.contains("service.pinned ? text.unpin : text.pin")
                              && island.contains("service.pinned ? \"pin.slash\" : \"pin\""),
-                         "the island's menu asks for keeping open and for letting go, on every page the dashboard is not")
-            suite.expect(island.contains(".accessibilityAction(named: service.pinned ? text.unpin : text.pin) { service.pinned.toggle() }"),
+                         "the island's menu asks for keeping open and for letting go, on the display whose island was clicked, on every page the dashboard is not")
+            suite.expect(island.contains(".accessibilityAction(named: service.pinned ? text.unpin : text.pin) { islandActions.togglePin() }"),
                          "the screen reader is offered the same keeping and letting go on the page it stands on")
             let mark = island.components(separatedBy: "private var pinMark: some View {").dropFirst().first
                 .map { $0.components(separatedBy: "private var updateOffered").first ?? $0 } ?? ""

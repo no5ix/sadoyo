@@ -27,6 +27,10 @@ struct NotchMirrorView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .environment(\.colorScheme, .dark)
             .environment(\.notchPresentation, true)
+            // This window is on one display and never moves: everything drawn in
+            // it names this display for the pages it opens, so a page asked for
+            // here - a strip, a card, a secondary-click menu - opens here.
+            .environment(\.notchPageDisplay, mirror.displayID)
             .tint(.white)
             .accessibilityHidden(!mirror.expanded)
     }
@@ -35,8 +39,11 @@ struct NotchMirrorView: View {
         if mirror.expanded {
             // The page, at the size this display's window presents it, with none
             // of the island's own rest, notice, capture controls, or fullscreen
-            // state: this window draws the page, and only the page.
-            NotchView(service: service, presentsPage: true, pageSurfaceSize: mirror.size)
+            // state: this window draws the page, and only the page. It is drawn
+            // for this display, and says so: the page's own actions open on this
+            // display, and never on the island's own.
+            NotchView(service: service, presentsPage: true, pageSurfaceSize: mirror.size,
+                      hostDisplayID: mirror.displayID)
         } else {
             let geometry = mirror.geometry
             let size = mirror.size

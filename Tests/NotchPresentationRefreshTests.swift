@@ -194,10 +194,12 @@ enum NotchPresentationRefreshContract {
         var captureClosesOnCollapse = false
         var routesCaptures = true
         var openedPages: [(module: NotchModule, takeFocus: Bool, wholeDashboard: Bool)] = []
-        func open(_ module: NotchModule? = nil, takeFocus: Bool = true, wholeDashboard: Bool = false) {
+        func open(_ module: NotchModule? = nil, takeFocus: Bool = true, wholeDashboard: Bool = false,
+                  on display: CGDirectDisplayID? = nil) {
             openedPages.append((module ?? .controls, takeFocus, wholeDashboard))
         }
-        func open(_ module: NotchModule, pinned: Bool, takeFocus: Bool, feedback: Bool) {
+        func open(_ module: NotchModule, pinned: Bool, takeFocus: Bool, feedback: Bool,
+                  on display: CGDirectDisplayID? = nil) {
             openedPages.append((module, takeFocus, false))
         }
         var pinned = false
@@ -354,9 +356,9 @@ enum NotchPresentationRefreshContract {
             windowHost?.finishDeparture()
         }
         func removeHiddenHoverMonitors() {}
-        func toggle() { expanded.toggle() }
+        func toggle(on display: CGDirectDisplayID? = nil) { expanded.toggle() }
         var countdownOpenings = 0
-        func openCountdownEvent() { countdownOpenings += 1; expanded = true }
+        func openCountdownEvent(on display: CGDirectDisplayID? = nil) { countdownOpenings += 1; expanded = true }
         func collapse() { expanded = false }
         var edgeClicksEnabled = false
         func syncScreenEdgeClicks() { edgeClicksEnabled = true }

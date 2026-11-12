@@ -97,7 +97,7 @@ enum NotchHoverTests {
         var lastSize: CGSize?
         init(id: CGDirectDisplayID, geometry: NotchGeometry) {
             self.id = id
-            model = NotchMirrorModel(geometry: geometry, size: CGSize(width: 180, height: 32))
+            model = NotchMirrorModel(displayID: id, geometry: geometry, size: CGSize(width: 180, height: 32))
         }
         func cancelHoverWork() { hoverWork?.cancel(); hoverWork = nil }
         /// The pointer's deadline for this display, run when the test says it is up.
@@ -162,7 +162,9 @@ enum NotchHoverTests {
         var musicRequestWork: DispatchWorkItem?
         var musicStripFitsInPlace = false
         var openedActivities: [NotchModule] = []
-        func openActivity(_ module: NotchModule) { openedActivities.append(module) }
+        func openActivity(_ module: NotchModule, on display: CGDirectDisplayID? = nil) {
+            openedActivities.append(module)
+        }
         var compactMusicIsVisible: Bool {
             !fullscreenCompact && !expanded && !peeking && !dragPlaceholder && notice == nil && captureControls == nil
                 && compactActivity == .music

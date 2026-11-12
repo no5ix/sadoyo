@@ -5,6 +5,9 @@ import SwiftUI
 import EventKit
 
 struct NotchCalendarView: View {
+    /// The display whose island window draws this view. Every page opened
+    /// from here names it, so the page opens on the island it was asked on.
+    @Environment(\.notchPageDisplay) private var pageDisplay: CGDirectDisplayID?
     let size: CGSize
     @Environment(\.notchSettingsPreview) private var preview
     @ObservedObject private var l10n = L10n.shared
@@ -305,7 +308,7 @@ struct NotchCalendarView: View {
                     Button(text.settings) { permissions.openCalendarSettings() }
                 } else {
                     Button(text.allow) {
-                        NotchService.shared.open(.calendar)
+                        NotchService.shared.open(.calendar, on: pageDisplay)
                         permissions.requestCalendar()
                     }
                     .disabled(permissions.requestingCalendar)

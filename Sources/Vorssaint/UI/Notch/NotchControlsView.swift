@@ -5,6 +5,9 @@ import AppKit
 import SwiftUI
 
 struct NotchControlsView: View {
+    /// The display whose island window draws this view. Every page opened
+    /// from here names it, so the page opens on the island it was asked on.
+    @Environment(\.notchPageDisplay) private var pageDisplay: CGDirectDisplayID?
     @ObservedObject var service: NotchService
     let size: CGSize
     @ObservedObject private var l10n = L10n.shared
@@ -63,15 +66,15 @@ struct NotchControlsView: View {
             }
         case .recording: NotchRecorderButton(service: service)
         case .speedTest:
-            NotchActionTile(symbol: item.symbol, title: item.title(l10n)) { service.showMetric(.network) }
+            NotchActionTile(symbol: item.symbol, title: item.title(l10n)) { service.showMetric(.network, on: pageDisplay) }
         case .panel:
-            NotchActionTile(symbol: item.symbol, title: item.title(l10n)) { service.openAppPanel() }
+            NotchActionTile(symbol: item.symbol, title: item.title(l10n)) { service.openAppPanel(on: pageDisplay) }
         case .mixer:
-            NotchActionTile(symbol: item.symbol, title: item.title(l10n)) { service.select(.mixer) }
+            NotchActionTile(symbol: item.symbol, title: item.title(l10n)) { service.select(.mixer, on: pageDisplay) }
         case .commandBar:
             NotchActionTile(symbol: item.symbol, title: item.title(l10n)) { service.perform { CommandBarService.shared.show() } }
         case .scratchpad:
-            NotchActionTile(symbol: item.symbol, title: item.title(l10n), action: service.openScratchpad)
+            NotchActionTile(symbol: item.symbol, title: item.title(l10n), action: { service.openScratchpad(on: pageDisplay) })
         case .timer: NotchTimerTile(service: service)
         case .calendar: NotchCalendarTile(service: service)
         case .volume, .brightness, .keyboardLight, .music: EmptyView()
@@ -158,6 +161,9 @@ extension NotchControlItem {
 }
 
 struct NotchAudioControls: View {
+    /// The display whose island window draws this view. Every page opened
+    /// from here names it, so the page opens on the island it was asked on.
+    @Environment(\.notchPageDisplay) private var pageDisplay: CGDirectDisplayID?
     @ObservedObject var notch: NotchService = .shared
     /// The dashboard's row is a control, not the Controls page: the bar is as
     /// narrow as the layout's mark and bar, and narrows further in a tight row.
@@ -223,11 +229,13 @@ struct NotchAudioControls: View {
         }
     }
 
-    private var outputItems: [NotchMenuItem] { Self.outputItems(mixer: mixer, notch: notch, l10n: l10n) }
+    private var outputItems: [NotchMenuItem] { Self.outputItems(mixer: mixer, notch: notch, l10n: l10n, on: pageDisplay) }
 
     /// The outputs to choose from, and the mixer where the island has its
-    /// page; the player's output button lists the same.
-    static func outputItems(mixer: AppVolumeMixer, notch: NotchService, l10n: L10n) -> [NotchMenuItem] {
+    /// page; the player's output button lists the same. The display is named by the
+    /// surface that asks, so the mixer page opens where the menu was opened.
+    static func outputItems(mixer: AppVolumeMixer, notch: NotchService, l10n: L10n,
+                            on display: CGDirectDisplayID?) -> [NotchMenuItem] {
         var items = mixer.outputDevices.filter(\.canBeDefaultOutput).map { device in
             NotchMenuItem(title: device.name, checked: device.uid == mixer.currentOutputDeviceUID) {
                 _ = mixer.setUniversalOutputDeviceUID(device.uid)
@@ -235,7 +243,7 @@ struct NotchAudioControls: View {
         }
         if notch.modules.contains(.mixer) {
             items.append(.separator)
-            items.append(NotchMenuItem(title: l10n.s.mixerSection, symbol: NotchModule.mixer.symbol) { notch.select(.mixer) })
+            items.append(NotchMenuItem(title: l10n.s.mixerSection, symbol: NotchModule.mixer.symbol) { notch.select(.mixer, on: display) })
         }
         return items
     }
@@ -516,6 +524,9 @@ struct NotchActionTile: View {
 /// opening the island covers the reading the closed island showed, and a
 /// countdown hidden from the closed island can still be read here.
 private struct NotchTimerTile: View {
+    /// The display whose island window draws this view. Every page opened
+    /// from here names it, so the page opens on the island it was asked on.
+    @Environment(\.notchPageDisplay) private var pageDisplay: CGDirectDisplayID?
     let service: NotchService
     @ObservedObject private var timer = NotchTimerService.shared
     @ObservedObject private var l10n = L10n.shared
@@ -541,7 +552,7 @@ private struct NotchTimerTile: View {
             // A long phase name, such as a Russian short break, would be cut
             // off on a narrow tile; the module's own title stands in.
             compactTitle: active ? NotchControlItem.timer.title(l10n) : nil,
-            active: active, accent: .timer) { service.select(.timer) }
+            active: active, accent: .timer) { service.select(.timer, on: pageDisplay) }
     }
 
     /// The compact strip's marks, without the circle the tile already draws.
@@ -555,6 +566,9 @@ private struct NotchTimerTile: View {
 /// The next appointment's start and title, so the week's agenda is a click
 /// away rather than the only way to see what comes next.
 private struct NotchCalendarTile: View {
+    /// The display whose island window draws this view. Every page opened
+    /// from here names it, so the page opens on the island it was asked on.
+    @Environment(\.notchPageDisplay) private var pageDisplay: CGDirectDisplayID?
     let service: NotchService
     @ObservedObject private var calendar = NotchCalendarService.shared
     @ObservedObject private var l10n = L10n.shared
@@ -572,7 +586,7 @@ private struct NotchCalendarTile: View {
                 ?? NotchControlItem.calendar.title(l10n),
             reading: event.map {
                 NotchCalendarSupport.tileStartText($0.start, now: now, locale: l10n.language.formattingLocale())
-            }) { service.select(.calendar) }
+            }) { service.select(.calendar, on: pageDisplay) }
     }
 }
 

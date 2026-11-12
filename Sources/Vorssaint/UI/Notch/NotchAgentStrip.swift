@@ -7,6 +7,9 @@ import SwiftUI
 /// camera, one reading the person chose on the other. The wings are as wide
 /// as the reading, and both sit at the ends, where the island shows.
 struct NotchAgentStrip: View {
+    /// The display whose island window draws this view. Every page opened
+    /// from here names it, so the page opens on the island it was asked on.
+    @Environment(\.notchPageDisplay) private var pageDisplay: CGDirectDisplayID?
     @ObservedObject var service: NotchService
     /// Where the island draws it: its own strip as of the last update, or
     /// another display's when the island shows on every display.
@@ -41,7 +44,7 @@ struct NotchAgentStrip: View {
         let textInset = !geometry.compactActivityUsesFooter
             ? geometry.compactActivityEdgeInset(boxHeight: textSize * 0.72, radius: 0) : 0
         HStack(spacing: 0) {
-            Button { service.openActivity(.agents) } label: {
+            Button { service.openActivity(.agents, on: pageDisplay) } label: {
                 HStack(spacing: 1) {
                     if geometry.compactActivityWingWidth >= 28 {
                         ForEach(working) { NotchAgentGlyph(provider: $0, size: iconSize) }
@@ -53,7 +56,7 @@ struct NotchAgentStrip: View {
                 .contentShape(Rectangle())
             }
             Color.clear.frame(width: geometry.compactActivityCameraGap)
-            Button { service.openActivity(.agents) } label: {
+            Button { service.openActivity(.agents, on: pageDisplay) } label: {
                 Group {
                     if geometry.compactActivityWingWidth >= 42 {
                         NotchAgentReadoutTimeline(readout: NotchAgentReadout(rawValue: readout) ?? .elapsed) { date in
@@ -87,7 +90,7 @@ struct NotchAgentStrip: View {
         .accessibilityLabel(working.map(\.displayName).joined(separator: ", "))
         .accessibilityValue(reading(at: Date(), live: live))
         .accessibilityAddTraits(.isButton)
-        .accessibilityAction { service.openActivity(.agents) }
+        .accessibilityAction { service.openActivity(.agents, on: pageDisplay) }
         .accessibilityHint(FeatureStrings.notch(l10n.language).open)
     }
 

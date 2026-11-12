@@ -247,6 +247,9 @@ struct NotchCapsuleRestingView: View {
 /// Playing music: the cover in the round end, concentric with it, the title
 /// in the middle and the bars at the other end.
 struct NotchCapsuleMusicStrip: View {
+    /// The display whose island window draws this view. Every page opened
+    /// from here names it, so the page opens on the island it was asked on.
+    @Environment(\.notchPageDisplay) private var pageDisplay: CGDirectDisplayID?
     @ObservedObject var service: NotchService
     var snapshot: NotchCompactMusicSnapshot? = nil
     /// The surface the strip fills; a departing strip keeps its own.
@@ -302,7 +305,7 @@ struct NotchCapsuleMusicStrip: View {
                 if let companion {
                     // The click opens the activity drawn at this end, as the
                     // countdown strip's own mark does.
-                    Button { service.openActivity(companion.module) } label: {
+                    Button { service.openActivity(companion.module, on: pageDisplay) } label: {
                         NotchCapsuleCompanionMark(companion: companion, geometry: geometry)
                             .frame(width: markWidth ?? CapsuleLayout.symbolWidth, alignment: .leading)
                             .padding(.leading, CapsuleLayout.endPadding)
@@ -349,7 +352,7 @@ struct NotchCapsuleMusicStrip: View {
                             [title, playback?.track.artist].compactMap { $0 }.joined(separator: ", ")]
             .compactMap { $0 }.joined(separator: ", "))
         .accessibilityAction(named: Text(FeatureStrings.radialMenu(l10n.language).mediaPlayPause)) {
-            if !service.toggleMusicStripSong() { service.openActivity(.music) }
+            if !service.toggleMusicStripSong() { service.openActivity(.music, on: pageDisplay) }
         }
         .help(title)
     }
@@ -666,6 +669,9 @@ struct NotchCapsuleDownloadStrip: View {
 /// A watched area: the eye, then what the area reads now, or the area
 /// itself when it holds no text.
 struct NotchCapsuleWatchStrip: View {
+    /// The display whose island window draws this view. Every page opened
+    /// from here names it, so the page opens on the island it was asked on.
+    @Environment(\.notchPageDisplay) private var pageDisplay: CGDirectDisplayID?
     @ObservedObject var service: NotchService
     let size: CGSize
     /// Another display's capsule, when the island shows on every display.
@@ -681,7 +687,7 @@ struct NotchCapsuleWatchStrip: View {
         NotchCapsuleRow(size: size, geometry: geometry) {
             HStack(spacing: CapsuleLayout.spacing) {
                 if let companion {
-                    Button { service.openActivity(companion.module) } label: {
+                    Button { service.openActivity(companion.module, on: pageDisplay) } label: {
                         NotchCapsuleCompanionMark(companion: companion, geometry: geometry)
                             .frame(width: CapsuleLayout.timerMarkWidth(companion: companion, workingAgents: 0,
                                                                       downloadPercent: false, geometry: geometry,
@@ -810,6 +816,9 @@ struct NotchCapsuleCalendarStrip: View {
 /// left, or infinity for a session without an end. The reading changes once
 /// a minute, so the clock wakes only then.
 struct NotchCapsuleKeepAwakeStrip: View {
+    /// The display whose island window draws this view. Every page opened
+    /// from here names it, so the page opens on the island it was asked on.
+    @Environment(\.notchPageDisplay) private var pageDisplay: CGDirectDisplayID?
     @ObservedObject var service: NotchService
     let size: CGSize
     /// Another display's capsule, when the island shows on every display.
@@ -841,7 +850,7 @@ struct NotchCapsuleKeepAwakeStrip: View {
         NotchCapsuleRow(size: size, geometry: geometry) {
             HStack(spacing: CapsuleLayout.spacing) {
                 if let companion {
-                    Button { service.openActivity(companion.module) } label: {
+                    Button { service.openActivity(companion.module, on: pageDisplay) } label: {
                         NotchCapsuleCompanionMark(companion: companion, geometry: geometry)
                             .frame(width: CapsuleLayout.timerMarkWidth(companion: companion, workingAgents: 0,
                                                                       downloadPercent: false, geometry: geometry,

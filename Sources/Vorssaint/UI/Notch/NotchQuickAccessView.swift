@@ -61,6 +61,9 @@ final class NotchQuickAccessMotion: ObservableObject {
 }
 
 struct NotchQuickAccessView: View {
+    /// The display whose island window draws this view. Every page opened
+    /// from here names it, so the page opens on the island it was asked on.
+    @Environment(\.notchPageDisplay) private var pageDisplay: CGDirectDisplayID?
     @ObservedObject var service: NotchService
     @ObservedObject var motion: NotchQuickAccessMotion
     /// Only the glass surface below follows it; it changes every frame of a resize.
@@ -137,7 +140,7 @@ struct NotchQuickAccessView: View {
         }
         let title = isBack ? l10n.s.obBack : button.label.isEmpty ? actionTitle : button.label
         return Button {
-            service.activateQuickAction(action)
+            service.activateQuickAction(action, on: pageDisplay)
         } label: {
             Image(systemName: symbol)
                 .font(.system(size: 17, weight: .medium))

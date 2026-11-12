@@ -21,6 +21,9 @@ struct NotchCompactMusicSnapshot {
 /// activity, whose mark takes the strip's leading end, the song shows its
 /// cover at its own end, and the cover carries the button in the bars' place.
 struct NotchMusicStrip: View {
+    /// The display whose island window draws this view. Every page opened
+    /// from here names it, so the page opens on the island it was asked on.
+    @Environment(\.notchPageDisplay) private var pageDisplay: CGDirectDisplayID?
     @ObservedObject var service: NotchService
     var snapshot: NotchCompactMusicSnapshot? = nil
     /// Where the island draws it: its own strip as of the last update, or
@@ -82,7 +85,7 @@ struct NotchMusicStrip: View {
         // card.
         let companion = live ? service.compactCompanion : nil
         let named: CGFloat? = companion == nil ? namedWing : nil
-        Button { live ? service.activateMusicStrip() : service.openActivity(.music) } label: {
+        Button { live ? service.activateMusicStrip() : service.openActivity(.music, on: pageDisplay) } label: {
             HStack(spacing: 0) {
                 HStack(spacing: Layout.spacing) {
                     // The words grow out from behind the cover, which keeps its place.
@@ -136,7 +139,7 @@ struct NotchMusicStrip: View {
             .compactMap { $0 }.joined(separator: ", "))
         .accessibilityHint(FeatureStrings.notch(l10n.language).open)
         .accessibilityAction(named: Text(FeatureStrings.radialMenu(l10n.language).mediaPlayPause)) {
-            if !service.toggleMusicStripSong() { service.openActivity(.music) }
+            if !service.toggleMusicStripSong() { service.openActivity(.music, on: pageDisplay) }
         }
         .help(title)
         // Named, the strip reaches further left. Laid out as wide on both

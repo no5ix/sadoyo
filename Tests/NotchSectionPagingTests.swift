@@ -100,7 +100,7 @@ enum NotchSectionPagingTests {
         var sectionScroll = NotchSectionScroll()
         var movedRows = 0, gestureCalls = 0
         func scrollSections(by rows: Int) { movedRows += rows }
-        func handleGesture(_ event: NSEvent) -> Bool { gestureCalls += 1; return false }
+        func handleGesture(_ event: NSEvent, on display: CGDirectDisplayID? = nil) -> Bool { gestureCalls += 1; return false }
     }
 
     private static func routing(_ suite: TestSuite) {

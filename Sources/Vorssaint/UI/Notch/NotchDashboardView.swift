@@ -21,6 +21,9 @@ import SwiftUI
 /// which the island's own size is measured from too, so the page and the shape
 /// around it agree before either is drawn.
 struct NotchDashboardView: View {
+    /// The display whose island window draws this view. Every page opened
+    /// from here names it, so the page opens on the island it was asked on.
+    @Environment(\.notchPageDisplay) private var pageDisplay: CGDirectDisplayID?
     @ObservedObject var service: NotchService
     @ObservedObject private var l10n = L10n.shared
     @ObservedObject private var music = NotchMusicService.shared
@@ -533,7 +536,7 @@ struct NotchDashboardView: View {
                     ForEach(Array(readings[row])) { reading in
                         NotchSystemMetricTile(reading: reading, title: title(for: reading.metric),
                                               selected: service.selectedMetric == reading.metric.detailKind,
-                                              select: { service.showMetric(reading.metric.detailKind) })
+                                              select: { service.showMetric(reading.metric.detailKind, on: pageDisplay) })
                     }
                     // An unfilled row keeps its cards at the width of the
                     // others, so the grid stays a grid.
@@ -699,6 +702,9 @@ private struct NotchDashboardCard<Content: View>: View {
 /// the corner mark opens Calendar itself. An appointment is not a control: it
 /// says what is on that day, lights with nothing, and asks nothing of the page.
 private struct NotchDashboardCalendarCard: View {
+    /// The display whose island window draws this view. Every page opened
+    /// from here names it, so the page opens on the island it was asked on.
+    @Environment(\.notchPageDisplay) private var pageDisplay: CGDirectDisplayID?
     @ObservedObject var service: NotchService
     @ObservedObject private var calendar = NotchCalendarService.shared
     /// The month the grid is built around and the day the appointments are read
@@ -803,7 +809,7 @@ private struct NotchDashboardCalendarCard: View {
     /// The page's own way: the mark at the header's leading edge is the only
     /// click in the card that opens the Calendar page.
     private func openPage() {
-        service.select(.calendar)
+        service.select(.calendar, on: pageDisplay)
     }
 
     /// The chosen day's appointments, in the page's order, with the page's
@@ -897,7 +903,7 @@ private struct NotchDashboardCalendarCard: View {
                         .buttonStyle(.borderless).font(.system(size: 10, weight: .medium))
                 } else {
                     Button(text.allow) {
-                        NotchService.shared.open(.calendar)
+                        NotchService.shared.open(.calendar, on: pageDisplay)
                         Permissions.shared.requestCalendar()
                     }
                     .buttonStyle(.borderless).font(.system(size: 10, weight: .medium))

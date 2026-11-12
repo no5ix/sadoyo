@@ -149,6 +149,9 @@ struct NotchSplashSettingsControls: View {
 /// lights its surface, as it lights the players' and the timer's cards, and a
 /// click on it opens the section's page.
 struct NotchSplashDashboardCard: View {
+    /// The display whose island window draws this view. Every page opened
+    /// from here names it, so the page opens on the island it was asked on.
+    @Environment(\.notchPageDisplay) private var pageDisplay: CGDirectDisplayID?
     let snapshot: NotchSplashSnapshot?
     let phase: NotchSplashTaskTracker.Phase
     /// The clock's value at the moment the card is drawn.
@@ -223,7 +226,7 @@ struct NotchSplashDashboardCard: View {
                                       fillOpacity: NotchDashboardLayout.fillOpacity))
         .contentShape(RoundedRectangle(cornerRadius: NotchSplashLayout.cornerRadius, style: .continuous))
         .onHover { hovered = $0 }
-        .modifier(NotchSplashCardTap(enabled: canOpenSection) { notch.select(.splash) })
+        .modifier(NotchSplashCardTap(enabled: canOpenSection) { notch.select(.splash, on: pageDisplay) })
         .accessibilityElement(children: .contain)
         .accessibilityLabel(text.title)
         .accessibilityIdentifier("notch.splash.card")

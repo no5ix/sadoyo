@@ -14,6 +14,9 @@ import SwiftUI
 /// figure with no space in it: the strip is a glance, and the card of four
 /// readings is the page's answer to anyone who wants the figures to two decimals.
 struct NotchSplashStrip: View {
+    /// The display whose island window draws this view. Every page opened
+    /// from here names it, so the page opens on the island it was asked on.
+    @Environment(\.notchPageDisplay) private var pageDisplay: CGDirectDisplayID?
     @ObservedObject var service: NotchService
     /// Where the island draws it: its own strip as of the last update, or
     /// another display's when the island shows on every display.
@@ -43,8 +46,8 @@ struct NotchSplashStrip: View {
             // The mark at the strip's leading end is an activity of its own, and a
             // click on the strip goes to it, as it does on the timer's strip; the
             // reading's page is reached by opening the island.
-            if let companion { service.openActivity(companion.module) }
-            else { service.openActivity(NotchCompactActivity.splash.module) }
+            if let companion { service.openActivity(companion.module, on: pageDisplay) }
+            else { service.openActivity(NotchCompactActivity.splash.module, on: pageDisplay) }
         } label: {
             HStack(spacing: 0) {
                 Group {

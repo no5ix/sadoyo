@@ -8,6 +8,9 @@ import SwiftUI
 /// two useful wings. Paired with another activity, that activity's mark
 /// takes the title's side and the event keeps its dot and clock.
 struct NotchCalendarStrip: View {
+    /// The display whose island window draws this view. Every page opened
+    /// from here names it, so the page opens on the island it was asked on.
+    @Environment(\.notchPageDisplay) private var pageDisplay: CGDirectDisplayID?
     @ObservedObject var service: NotchService
     /// Where the island draws it: its own strip as of the last update, or
     /// another display's when the island shows on every display.
@@ -35,7 +38,7 @@ struct NotchCalendarStrip: View {
                         paired(countdown, companion: companion, title: displayTitle, remaining: remaining,
                                now: context.date)
                     } else {
-                        Button { service.openCountdownEvent() } label: {
+                        Button { service.openCountdownEvent(on: pageDisplay) } label: {
                             Group {
                                 if usesFullRow {
                                     fullRow(countdown, title: displayTitle, remaining: remaining)
@@ -119,7 +122,7 @@ struct NotchCalendarStrip: View {
         let footer = geometry.compactActivityUsesFooter
         let markInset = NotchCompanionMark.inset(companion, geometry: geometry)
         return HStack(spacing: 0) {
-            Button { service.openActivity(companion.module) } label: {
+            Button { service.openActivity(companion.module, on: pageDisplay) } label: {
                 Group {
                     if geometry.compactActivityWingWidth >= 28 {
                         NotchCompanionMark(companion: companion, geometry: geometry)
@@ -133,7 +136,7 @@ struct NotchCalendarStrip: View {
             .accessibilityLabel(NotchCompanionMark.label(companion, language: l10n.language))
             .accessibilityHint(FeatureStrings.notch(l10n.language).open)
             Color.clear.frame(width: geometry.compactActivityCameraGap)
-            Button { service.openCountdownEvent() } label: {
+            Button { service.openCountdownEvent(on: pageDisplay) } label: {
                 Self.clockMark(countdown, remaining: remaining)
                     .padding(.trailing, footer ? rowInset : geometry.compactActivityEdgeInset(boxHeight: 9, radius: 0))
                     .frame(width: geometry.compactActivityWingWidth, height: geometry.compactActivityContentHeight,

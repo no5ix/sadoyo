@@ -10,6 +10,9 @@ import SwiftUI
 /// resting position shows where it is and that more rows follow. Rows that
 /// have stepped away keep their place for the motion but take no clicks.
 struct NotchSectionsView: View {
+    /// The display whose island window draws this view. Every page opened
+    /// from here names it, so the page opens on the island it was asked on.
+    @Environment(\.notchPageDisplay) private var pageDisplay: CGDirectDisplayID?
     @ObservedObject var service: NotchService
     @ObservedObject private var l10n = L10n.shared
     @Environment(\.colorSchemeContrast) private var contrast
@@ -101,7 +104,7 @@ struct NotchSectionsView: View {
         let highlighted = service.highlightedSection == module
         let current = service.selected == module
         let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
-        return Button { service.select(module) } label: {
+        return Button { service.select(module, on: pageDisplay) } label: {
             VStack(spacing: NotchSectionMark.titleGap) {
                 // The section's own mark, at the tile's size: the Codex knot
                 // for the section that reads that engine, the section's symbol

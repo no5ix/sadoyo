@@ -382,6 +382,9 @@ private struct NotchWatchEyeBridge: NSViewRepresentable {
 /// The eye at the left end and what the area reads at the right, each
 /// anchored to its own edge so the silhouette's curve decides the margin.
 struct NotchWatchStrip: View {
+    /// The display whose island window draws this view. Every page opened
+    /// from here names it, so the page opens on the island it was asked on.
+    @Environment(\.notchPageDisplay) private var pageDisplay: CGDirectDisplayID?
     static let tint = Color.purple
     /// Softer than the reading, so the mark does not outshine it.
     static let eyeTint = NSColor.systemPurple.withAlphaComponent(0.75)
@@ -410,8 +413,8 @@ struct NotchWatchStrip: View {
         Button {
             // The mark at the strip's leading end is an activity of its own, and a
             // click on the strip goes to it, as it does on the timer's strip.
-            if let companion { service.openActivity(companion.module) }
-            else { service.openActivity(.watch) }
+            if let companion { service.openActivity(companion.module, on: pageDisplay) }
+            else { service.openActivity(.watch, on: pageDisplay) }
         } label: {
             HStack(spacing: 0) {
                 Group {

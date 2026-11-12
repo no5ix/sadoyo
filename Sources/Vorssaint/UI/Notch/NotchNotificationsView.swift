@@ -128,6 +128,9 @@ private struct NotchNotificationRow: View {
 /// A banner held open under the pointer: the whole message with its actions,
 /// laid out with the fonts and limits the service measured it with.
 struct NotchNotificationPreviewView: View {
+    /// The display whose island window draws this view. Every page opened
+    /// from here names it, so the page opens on the island it was asked on.
+    @Environment(\.notchPageDisplay) private var pageDisplay: CGDirectDisplayID?
     let notice: NotchNotice
     let content: NotchNotificationContent
     @ObservedObject var service: NotchService
@@ -182,7 +185,7 @@ struct NotchNotificationPreviewView: View {
                 if notifications.openingID == notice.notificationID { ProgressView().controlSize(.small) }
                 Spacer(minLength: 8)
                 if notifications.items.count > 1 {
-                    Button { service.open(.notifications) } label: {
+                    Button { service.open(.notifications, on: pageDisplay) } label: {
                         HStack(spacing: 5) {
                             Image(systemName: "tray.full").font(.system(size: 11, weight: .medium))
                             Text(notifications.items.count, format: .number)

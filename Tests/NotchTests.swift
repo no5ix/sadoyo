@@ -675,14 +675,14 @@ enum NotchTests {
         let fallbacks = row.components(separatedBy: "HStack(spacing: 6) {").count - 1
         let ends = row.components(separatedBy: "items.trailing; trailingSections(band)").count - 1
         suite.expect(fallbacks == 4 && ends == fallbacks
-                     && row.contains("if band.trailingSectionsButton { NotchSectionsButton(action: service.toggleSections) }"),
+                     && row.contains("if band.trailingSectionsButton { NotchSectionsButton(action: { islandActions.openSections() }) }"),
                      "every fallback of the row's trailing side ends a wrapping page's controls with the sections button")
         let player = source("Sources/Vorssaint/UI/Notch/NotchMusicView.swift")
         let corners = player.components(separatedBy: "} corner: {").dropFirst().map { $0.components(separatedBy: "}").first ?? "" }
         let cornersShowIt = corners.count == 2 && corners.allSatisfy { $0.contains("sectionsButton") }
         let rowItems = (player.components(separatedBy: ".notchBand(trailing: {").dropFirst().first ?? "")
             .components(separatedBy: "})").first ?? ""
-        suite.expect(player.contains("if band.pageSectionsButton { NotchSectionsButton(action: NotchService.shared.toggleSections) }")
+        suite.expect(player.contains("if band.pageSectionsButton { NotchSectionsButton(action: { NotchService.shared.toggleSections(on: pageDisplay) }) }")
                      && cornersShowIt && player.contains("extraButtons; sectionsButton }")
                      && player.contains("if band.besideCamera { sectionsButton }") && !rowItems.contains("sectionsButton")
                      && player.contains(".overlay(alignment: .topLeading) { sectionsButton.frame(height: band.height) }"),

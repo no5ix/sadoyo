@@ -808,6 +808,28 @@ struct NotchDisplayExpansion: Equatable {
     mutating func closed() { owner = nil }
 }
 
+/// The island's menu, answered by the display whose island was clicked.
+///
+/// A menu outlives the pointer that opened it: the pointer can travel to
+/// another display, and the window the app has focused can change, before an
+/// item is chosen. So the display is answered once, where the menu is built for
+/// a display's island, and every item carries that answer into the page it
+/// opens. Nothing here reads the pointer's place, the key window, the primary
+/// display, or any "display the island is on now": the page an item opens
+/// belongs to the island the menu was opened on, and to no other.
+struct NotchIslandMenu {
+    /// Explorer, opened on the display whose island was clicked.
+    let openSections: () -> Void
+    /// The pin, which belongs to the open page and so to its display.
+    let togglePin: () -> Void
+    /// Settings, reached from the island's own menu.
+    let openSettings: () -> Void
+    /// The update the island is offering.
+    let showUpdate: () -> Void
+    /// The page, closed where it is open.
+    let collapse: () -> Void
+}
+
 enum NotchHoverEmphasis {
     /// `reach` is how much further than half the width one side goes, as a
     /// strip naming its song does on its cover's side.
@@ -991,6 +1013,11 @@ struct NotchActivityCombination: Hashable, Identifiable {
 /// display: that display's geometry, and what the island shows closed at
 /// the size it takes there. The service updates it as the island changes.
 final class NotchMirrorModel: ObservableObject {
+    /// The display this copy's window was built for and stays on. Its view
+    /// names this display for every page action it starts, so a page opened
+    /// from this copy - by a click, a hover, a context menu, or a card inside
+    /// its own page - belongs to this display and not to the island's own.
+    let displayID: CGDirectDisplayID
     @Published private(set) var geometry: NotchGeometry
     /// A strip beside a camera has its own geometry around it, as the island's does.
     @Published private(set) var strip: NotchGeometry
@@ -1005,7 +1032,8 @@ final class NotchMirrorModel: ObservableObject {
     var outline: Bool?
     var timerOutline = false
 
-    init(geometry: NotchGeometry, size: CGSize) {
+    init(displayID: CGDirectDisplayID, geometry: NotchGeometry, size: CGSize) {
+        self.displayID = displayID
         self.geometry = geometry
         strip = geometry
         self.size = size

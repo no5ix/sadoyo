@@ -8,6 +8,9 @@ import SwiftUI
 /// has left, or infinity for one without an end. Both open Controls, where
 /// the tile is. The wings are as wide as the wider side needs.
 struct NotchKeepAwakeStrip: View {
+    /// The display whose island window draws this view. Every page opened
+    /// from here names it, so the page opens on the island it was asked on.
+    @Environment(\.notchPageDisplay) private var pageDisplay: CGDirectDisplayID?
     @ObservedObject var service: NotchService
     /// Where the island draws it: its own strip as of the last update, or
     /// another display's when the island shows on every display.
@@ -44,8 +47,8 @@ struct NotchKeepAwakeStrip: View {
         return Button {
             // The mark at the strip's leading end is an activity of its own, and a
             // click on the strip goes to it, as it does on the timer's strip.
-            if let companion { service.openActivity(companion.module) }
-            else { service.openActivity(NotchCompactActivity.keepAwake.module) }
+            if let companion { service.openActivity(companion.module, on: pageDisplay) }
+            else { service.openActivity(NotchCompactActivity.keepAwake.module, on: pageDisplay) }
         } label: {
             HStack(spacing: 0) {
                 Group {

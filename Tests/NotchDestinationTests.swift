@@ -98,7 +98,15 @@ enum NotchDestinationContract {
 
     class State {
         var acceptsUserInteraction = true
-        func collapse() { expanded = false }
+        /// Closing is the island closing everywhere: no display carries the page, so
+        /// every window of the island goes back to its own closed strip.
+        func collapse() { expanded = false; expansion.closed() }
+        var settingsOpens = 0
+        /// Settings is a window of the app, not a page of the island: reaching it from the
+        /// island closes the page and asks for the settings window.
+        func openSettings() { settingsOpens += 1; collapse() }
+        var updateOpens = 0
+        func showUpdate() { updateOpens += 1; collapse() }
         var hiddenInFullscreen = false
         var running = true
         var session = NotchSessionState()
@@ -209,6 +217,7 @@ enum NotchDestinationContract {
         countdownContracts(defaults: defaults, suite: suite)
         menuBarMetricContracts(suite)
         stepBackContracts(suite)
+        pageDisplayContracts(suite)
         // A page opened while the Command Bar is in the island takes its place.
         let barHost = Service()
         barHost.expanded = true
@@ -988,5 +997,133 @@ enum NotchDestinationContract {
         refused.syncShortcut()
         suite.expect(failed && !refused.shortcutRegistrationFailed && refused.shortcutFailureWrites == 2,
                      "a refused island shortcut reports the failure and its end once each, not on every sync")
+    }
+
+    /// Which display a page belongs to. The island's secondary-click menu, a page's
+    /// own controls, and a request that names no display each answer the display
+    /// whose island was used, and the island's own display is never the answer
+    /// merely because that is where the menu bar and the app's windows are.
+    private static func pageDisplayContracts(_ suite: TestSuite) {
+        let prepared = Service()
+        prepared.syncWithPreferences()
+        suite.expect(prepared.modules.contains(.music) && prepared.modules.contains(.system)
+                         && prepared.modules.contains(.calendar),
+                     "the pages this contract drives are among the island's own modules")
+
+        /// The island on its own display, with a copy's window on each of two others.
+        func island(_ opening: CGDirectDisplayID) -> Service {
+            let service = Service()
+            service.displayID = 1
+            service.mirrors = [2: Service.Copy(), 3: Service.Copy()]
+            service.open(on: opening)
+            return service
+        }
+        /// The windows that draw a page now. One page in the whole system, so this
+        /// is the whole of the rule: the display whose island was opened.
+        func drawing(_ service: Service) -> [CGDirectDisplayID] {
+            [1, 2, 3].filter { service.presentsExpansion(on: $0) }
+        }
+
+        // The bug this contract keeps: the secondary click on a copy's island asked
+        // for Explorer, and the island's own - primary - display took the page while
+        // the copy that was opened collapsed.
+        let explorer = island(2)
+        explorer.islandMenuActions(on: 2).openSections()
+        suite.expect(explorer.expanded && explorer.showingSections && explorer.expansion.owner == 2
+                         && drawing(explorer) == [2],
+                     "Explorer opened from the menu of a copy's island stays on that copy's display")
+
+        let third = island(3)
+        third.islandMenuActions(on: 3).openSections()
+        suite.expect(third.expansion.owner == 3 && third.showingSections
+                         && drawing(third) == [3] && !third.presentsExpansion(on: 1),
+                     "Explorer opened from a third display's island stays on the third display")
+
+        // A menu outlives the pointer that opened it. The pointer left the island
+        // for the primary display before the item was chosen, and the page still
+        // belongs to the island the menu was opened on.
+        let travelled = island(2)
+        let travelledMenu = travelled.islandMenuActions(on: 2)
+        travelled.inside = false
+        travelled.displayID = 1
+        travelledMenu.openSections()
+        suite.expect(travelled.showingSections && travelled.expansion.owner == 2 && drawing(travelled) == [2],
+                     "choosing Explorer after the pointer has travelled to the primary display opens it on the display the menu was opened on")
+
+        // Every page, not one page: a section, the app panel, a reading's detail,
+        // and the gallery, each asked from a copy's page.
+        let pages = island(3)
+        pages.select(.music, on: 3)
+        suite.expect(pages.expansion.owner == 3 && pages.selected == .music && drawing(pages) == [3],
+                     "a section opened from a copy's page opens on that copy's display")
+        pages.openAppPanel(on: 3)
+        suite.expect(pages.expansion.owner == 3 && pages.showingAppPanel && drawing(pages) == [3],
+                     "the app panel opened inside a copy's page opens on that copy's display")
+        pages.showMetric(.cpu, on: 3)
+        suite.expect(pages.expansion.owner == 3 && pages.selectedMetric == .cpu && drawing(pages) == [3],
+                     "a reading's detail opened from a copy's page opens on that copy's display")
+        pages.toggleSections(on: 3)
+        suite.expect(pages.expansion.owner == 3 && pages.showingSections && drawing(pages) == [3],
+                     "the gallery opened from a copy's page opens on that copy's display")
+
+        // One page in the whole system: a page opened on a third display closes the
+        // second, and no two windows ever draw a page.
+        let handed = island(2)
+        handed.open(sections: true, on: 3)
+        suite.expect(handed.expansion.owner == 3 && drawing(handed) == [3] && !handed.presentsExpansion(on: 2),
+                     "a page opened on a third display closes the page the second display carried")
+        for display: CGDirectDisplayID in [1, 3, 2, 1, 2] {
+            handed.open(appPanel: true, on: display)
+            suite.expect(drawing(handed) == [display],
+                         "the page is on display \(display) alone, and on no other, at every step")
+        }
+
+        // The island's own display is never the answer to a request that names no
+        // display while a copy carries the page: a keyboard move, a global shortcut,
+        // a service, and a menu bar item each land on the page where it was left.
+        let unnamed = island(2)
+        unnamed.select(.music)
+        suite.expect(unnamed.expansion.owner == 2 && unnamed.selected == .music && drawing(unnamed) == [2],
+                     "a page opened with no display named stays on the display that carries it")
+        unnamed.toggleSections()
+        suite.expect(unnamed.expansion.owner == 2 && unnamed.showingSections && drawing(unnamed) == [2],
+                     "the gallery opened with no display named stays on the display that carries the page")
+        unnamed.showMetric(.cpu, toggle: true)
+        suite.expect(unnamed.expansion.owner == 2 && unnamed.selectedMetric == .cpu && drawing(unnamed) == [2],
+                     "a reading opened from the menu bar with no display named stays on the display that carries the page")
+
+        // A strip is a door on the display it stands on.
+        let strip = island(1)
+        strip.openActivity(.music, on: 3)
+        suite.expect(strip.expansion.owner == 3 && strip.selected == .music && drawing(strip) == [3],
+                     "a copy's strip opens its page on its own display")
+        strip.openCountdownEvent(on: 2)
+        suite.expect(strip.expansion.owner == 2 && strip.selected == .calendar && drawing(strip) == [2],
+                     "a copy's countdown opens its page on its own display")
+
+        // The menu's other items, and the pages the island closes.
+        let closed = island(2)
+        closed.islandMenuActions(on: 2).collapse()
+        suite.expect(!closed.expanded && closed.expansion.owner == nil && drawing(closed).isEmpty,
+                     "the island's menu closes the page and leaves no display expanded")
+        let settings = island(2)
+        settings.islandMenuActions(on: 2).openSettings()
+        suite.expect(settings.settingsOpens == 1 && !settings.expanded && settings.expansion.owner == nil
+                         && drawing(settings).isEmpty,
+                     "the island's menu opens Settings with no display left expanded")
+        let update = island(3)
+        update.islandMenuActions(on: 3).showUpdate()
+        suite.expect(update.updateOpens == 1 && update.expansion.owner == nil && drawing(update).isEmpty,
+                     "the island's menu opens the update with no display left expanded")
+        let pinning = island(2)
+        pinning.islandMenuActions(on: 2).togglePin()
+        suite.expect(pinning.pinned && pinning.expansion.owner == 2 && drawing(pinning) == [2],
+                     "the island's menu pins the page on the display that carries it")
+        let dismissed = island(2)
+        let dismissedMenu = dismissed.islandMenuActions(on: 2)
+        suite.expect(dismissed.expansion.owner == 2 && drawing(dismissed) == [2]
+                         && !dismissed.showingSections && !dismissed.showingAppPanel,
+                     "a menu opened on a copy and dismissed with nothing chosen leaves the page on that copy and opens nothing elsewhere")
+        _ = dismissedMenu
     }
 }

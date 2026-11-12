@@ -313,7 +313,13 @@ final class NotchService: ObservableObject {
     private var relocationTicket = 0
     /// The display the island is on. The pointer choice keeps it there until
     /// the island rests, so a preference sync never moves an open island.
-    private var displayID: CGDirectDisplayID?
+    ///
+    /// Readable outside the service because a window's view must name the
+    /// display it is drawn on for every page action it starts. It is the island's
+    /// own display and never the page's: a page opened on another display names
+    /// that display, and the island's own is only the last answer, for a request
+    /// that came from nowhere in particular.
+    private(set) var displayID: CGDirectDisplayID?
     private var followsPointer = false
     /// Every other display has its own island window: it answers the pointer on
     /// its own display, and draws the open page where that display was opened.
@@ -1916,6 +1922,22 @@ final class NotchService: ObservableObject {
         if !expanded || selected != .calendar || showingSections || showingAppPanel { calendar.revealing = nil }
     }
 
+    /// The display a page request belongs to.
+    ///
+    /// The request's own display wins: a click, a hover, a menu item, a card, or
+    /// a tile names the display its window is on, and the page opens there. With
+    /// no display named - a keyboard shortcut, a global shortcut, a service, a
+    /// notification - the page stays on the display already carrying it, because
+    /// moving a page to the island's own display is never what an action that
+    /// names no display asked for. Only a request that names no display, with no
+    /// page open anywhere, falls to the island's own display, which is where the
+    /// island lives when it is not on any other.
+    private func destinationDisplay(_ display: CGDirectDisplayID?) -> CGDirectDisplayID? {
+        if let display { return display }
+        if let owner = expansion.owner, mirrors[owner] != nil { return owner }
+        return displayID
+    }
+
     func open(_ module: NotchModule? = nil, pinned: Bool = false, takeFocus: Bool = true,
               appPanel: Bool = false, metric: MetricDetailKind? = nil, feedback: Bool = true, sections: Bool = false,
               wholeDashboard: Bool = false, on display: CGDirectDisplayID? = nil) {
@@ -1932,7 +1954,7 @@ final class NotchService: ObservableObject {
         // the page closes there as it opens here, and two of them are never open
         // at once. No window moves, and no display ownership changes: a copy keeps
         // its own display and draws the page at the size that display measures.
-        if let asked = display ?? displayID {
+        if let asked = destinationDisplay(display) {
             _ = expansion.asking(toOpen: asked)
             mirrors[asked]?.hover.open()
             if asked == displayID { hoverState.open() }
@@ -2043,8 +2065,10 @@ final class NotchService: ObservableObject {
     /// The island's own door, and a copy's: the page is closed where it is open,
     /// and opened - on the asking display - where it is not. A page open on
     /// another display is not this island's, so a click here opens it here, and
-    /// the page that was open closes.
-    func toggle() { expanded && presentsExpansion(on: displayID) ? collapse() : open() }
+    /// the page that was open closes. This is the island's own window's door, so
+    /// the page it opens belongs to this window's display, named here: the
+    /// island's own display is a stated answer, never a fallback.
+    func toggle() { expanded && presentsExpansion(on: displayID) ? collapse() : open(on: displayID) }
 
     /// The island stays on screen, so only a manual resign takes its keyboard.
     /// While Vorssaint stays the active app (its Settings window is open, for
@@ -2083,10 +2107,10 @@ final class NotchService: ObservableObject {
     }
 
     @discardableResult
-    func showClipboard(toggle: Bool = false) -> Bool {
+    func showClipboard(toggle: Bool = false, on display: CGDirectDisplayID? = nil) -> Bool {
         guard acceptsUserInteraction, NotchSupport.routesClipboardWindow() else { return false }
         if toggle, expanded, selected == .clipboard, !showingAppPanel, !showingSections, !showingCommandBar { collapse() }
-        else { open(.clipboard) }
+        else { open(.clipboard, on: display) }
         return true
     }
 
@@ -2300,17 +2324,21 @@ final class NotchService: ObservableObject {
         }
     }
 
-    func toggleSections() {
+    /// Explorer, the gallery of sections, opened on the display whose island
+    /// asked for it. A page's own button, the island's menu, and Command-K each
+    /// name the display they were reached from; a keyboard move inside an open
+    /// page names none, and the gallery opens on the page's own display.
+    func toggleSections(on display: CGDirectDisplayID? = nil) {
         guard captureControls == nil, !heldDrag else { return }
         if showingSections {
-            open(appPanel: showingAppPanel, metric: selectedMetric)
+            open(appPanel: showingAppPanel, metric: selectedMetric, on: display)
         } else {
             sectionQuery = ""
             // The gallery opens from its top, stepping only as far as the
             // current section's row.
             sectionRow = 0
             highlightedSection = selected
-            open(appPanel: showingAppPanel, metric: selectedMetric, sections: true)
+            open(appPanel: showingAppPanel, metric: selectedMetric, sections: true, on: display)
         }
     }
 
@@ -2420,52 +2448,56 @@ final class NotchService: ObservableObject {
         return true
     }
 
-    func activateQuickAction(_ action: NotchQuickAction) {
+    func activateQuickAction(_ action: NotchQuickAction, on display: CGDirectDisplayID? = nil) {
         guard NotchSupport.isEnabled(), action.isAvailable() else { return }
         switch action {
-        case .explore: toggleSections()
+        case .explore: toggleSections(on: display)
         case .settings: openSettings()
         case .pin: pinned.toggle()
-        case .module(let module): select(module)
+        case .module(let module): select(module, on: display)
         case .control(let item):
             switch item {
             case .keepAwake: KeepAwakeManager.shared.toggle()
             case .microphone: MicMuteService.shared.toggle()
             case .screenshot: perform { ScreenshotService.shared.capture() }
             case .recording: perform { ScreenRecorderService.shared.toggle() }
-            case .speedTest: showMetric(.network)
-            case .panel: openAppPanel()
-            case .mixer: select(.mixer)
-            case .music: select(.music)
-            case .timer: select(.timer)
-            case .calendar: select(.calendar)
+            case .speedTest: showMetric(.network, on: display)
+            case .panel: openAppPanel(on: display)
+            case .mixer: select(.mixer, on: display)
+            case .music: select(.music, on: display)
+            case .timer: select(.timer, on: display)
+            case .calendar: select(.calendar, on: display)
             case .commandBar: perform { CommandBarService.shared.show() }
-            case .scratchpad: openScratchpad()
-            case .volume, .brightness, .keyboardLight: select(.controls)
+            case .scratchpad: openScratchpad(on: display)
+            case .volume, .brightness, .keyboardLight: select(.controls, on: display)
             }
         }
     }
 
-    func select(_ module: NotchModule) {
+    /// One section's page, opened on the display that asked: the tile in the
+    /// gallery, the card on the dashboard, and the section's own controls each
+    /// name the display whose window they are drawn on, so tapping a card on a
+    /// copy's page opens that copy and not the island's own display.
+    func select(_ module: NotchModule, on display: CGDirectDisplayID? = nil) {
         guard modules.contains(module) else { return }
-        open(module)
+        open(module, on: display)
     }
 
     /// The pad lives in the island when its page is on; otherwise the
     /// shortcut opens the floating pad as it always did.
-    func openScratchpad() {
-        if !showScratchpad() { perform { ScratchpadService.shared.show() } }
+    func openScratchpad(on display: CGDirectDisplayID? = nil) {
+        if !showScratchpad(on: display) { perform { ScratchpadService.shared.show() } }
     }
 
     @discardableResult
-    func showScratchpad(toggle: Bool = false) -> Bool {
+    func showScratchpad(toggle: Bool = false, on display: CGDirectDisplayID? = nil) -> Bool {
         guard NotchSupport.routesScratchpad(), acceptsUserInteraction else { return false }
         // Without a regular window to take the keyboard back, resignPanelKey()
         // leaves AppKit keeping the island as its key window while the panel's
         // own flag is clear. AppKit's record still means the island has the keyboard.
         if toggle, expanded, selected == .scratchpad, !showingAppPanel, !showingSections, !showingCommandBar,
            selectedMetric == nil, let panel, panel.isKeyWindow || NSApp.keyWindow === panel { collapse() }
-        else { open(.scratchpad) }
+        else { open(.scratchpad, on: display) }
         return true
     }
 
@@ -2473,7 +2505,8 @@ final class NotchService: ObservableObject {
     /// at a reading, the panel is asked for that detail: the panel reads the
     /// focus and shows the reading as a page of its own, so a click on a
     /// reading never lands on the section the reading sits in.
-    func openAppPanel(toggle: Bool = false, metric: MetricDetailKind? = nil) {
+    func openAppPanel(toggle: Bool = false, metric: MetricDetailKind? = nil,
+                      on display: CGDirectDisplayID? = nil) {
         // A reading's own click is never the click that closes the panel: the
         // indicator opens that reading's page, and Back is the way out of it.
         if toggle, metric == nil, expanded, showingAppPanel, !showingSections, !showingCommandBar {
@@ -2481,28 +2514,28 @@ final class NotchService: ObservableObject {
         }
         if let metric {
             MenuPanelFocus.shared.focus(metric)
-            open(.system, appPanel: true, metric: metric)
+            open(.system, appPanel: true, metric: metric, on: display)
             if toggle { detailHasPage = false }
             return
         }
         MenuPanelFocus.shared.showNormalPanel()
-        open(.controls, appPanel: true)
+        open(.controls, appPanel: true, on: display)
         // The toggling route is the menu bar's. Opened from there, the panel
         // has nothing behind it and closes on Escape, like the menu panel.
         if toggle { detailHasPage = false }
     }
 
-    func openQuickPanel(toggle: Bool = false) -> Bool {
+    func openQuickPanel(toggle: Bool = false, on display: CGDirectDisplayID? = nil) -> Bool {
         guard NotchSupport.routesQuickPanel(), acceptsUserInteraction else { return false }
         if toggle, expanded, selected == .tools, !showingSections, !showingCommandBar { collapse() }
-        else { open(.tools) }
+        else { open(.tools, on: display) }
         return true
     }
 
-    func openShelf(toggle: Bool = false) -> Bool {
+    func openShelf(toggle: Bool = false, on display: CGDirectDisplayID? = nil) -> Bool {
         guard NotchSupport.routesShelf(), acceptsUserInteraction else { return false }
         if toggle, expanded, selected == .files, !showingSections, !showingCommandBar { collapse() }
-        else { open(.files) }
+        else { open(.files, on: display) }
         return true
     }
 
@@ -2511,11 +2544,11 @@ final class NotchService: ObservableObject {
     /// closes an open detail are each told to the caller, so a menu bar
     /// indicator's click always lands on a detail page somewhere.
     @discardableResult
-    func showMetric(_ metric: MetricDetailKind, toggle: Bool = false) -> Bool {
+    func showMetric(_ metric: MetricDetailKind, toggle: Bool = false, on display: CGDirectDisplayID? = nil) -> Bool {
         guard metricIsAvailable(metric) else { return false }
         if metric != selectedMetric { forgetDetailHeight() }
         if toggle, expanded, selectedMetric == metric, !showingSections, !showingCommandBar { collapse(); return true }
-        open(.system, metric: metric)
+        open(.system, metric: metric, on: display)
         // A metric opened from its menu bar item closes on Escape, like the popover.
         if toggle { detailHasPage = false }
         // The answer is what the island did: `open` keeps its own guards, and a
@@ -2898,6 +2931,23 @@ final class NotchService: ObservableObject {
         openSettings()
     }
 
+    /// The island's menu, built for the display whose island was clicked, and
+    /// answered by that display for as long as the menu lives.
+    ///
+    /// The display is named once, here, and every item carries it: the menu's
+    /// Explorer opens on the island the menu was opened on, and the page an item
+    /// opens never moves to the island's own display because that is where the
+    /// primary menu bar is, where the app's key window is, or where the pointer
+    /// has travelled in the meantime.
+    func islandMenuActions(on display: CGDirectDisplayID) -> NotchIslandMenu {
+        NotchIslandMenu(
+            openSections: { [weak self] in self?.toggleSections(on: display) },
+            togglePin: { [weak self] in self?.pinned.toggle() },
+            openSettings: { [weak self] in self?.openSettings() },
+            showUpdate: { [weak self] in self?.showUpdate() },
+            collapse: { [weak self] in self?.collapse() })
+    }
+
     func perform(_ action: @escaping () -> Void) {
         collapse()
         if let windowHost { windowHost.whenSettled(action) }
@@ -3000,7 +3050,7 @@ final class NotchService: ObservableObject {
             NotchNotificationService.shared.open(id) { [weak self] result in
                 guard let self else { return }
                 if self.notice?.notificationID == id { self.dismissNotice() }
-                if result == .unavailable || result == .uncertain { self.open(.notifications) }
+                if result == .unavailable || result == .uncertain { self.open(.notifications, on: self.displayID) }
             }
             return
         }
@@ -3008,7 +3058,7 @@ final class NotchService: ObservableObject {
              : selectedNotice.event == .accessory ? .system : selectedNotice.event == .systemNotification ? .notifications
              : selectedNotice.event == .clipboard ? .clipboard : selectedNotice.event == .agents ? .agents
              : selectedNotice.event == .track ? .music : selectedNotice.event == .microphone ? .mixer
-             : selectedNotice.event == .watch ? .watch : .controls)
+             : selectedNotice.event == .watch ? .watch : .controls, on: displayID)
     }
 
     /// Skipping through songs, or a title that lands before its artist, shows
@@ -3159,7 +3209,7 @@ final class NotchService: ObservableObject {
         captureHover = hover
         captureClosesOnCollapse = closeOnCollapse
         open(.captures, pinned: keepOpen,
-             takeFocus: takeFocus, feedback: false)
+             takeFocus: takeFocus, feedback: false, on: displayID)
         captureHover?(inside)
         return true
     }
@@ -3417,11 +3467,13 @@ final class NotchService: ObservableObject {
                 if self.captureControls != nil { self.expandCaptureControls() }
                 // Over the island's own banner the strip has nothing of its own
                 // on screen, so the click asks for the page, as a hover does.
-                else if self.islandAreaUnderNotice != nil { self.open(takeFocus: true, wholeDashboard: true) }
+                else if self.islandAreaUnderNotice != nil {
+                    self.open(takeFocus: true, wholeDashboard: true, on: self.displayID)
+                }
                 // The capsule's button covers its music bars too, which play or pause there.
                 else if self.geometry.floats, self.musicStripShowsControl { self.toggleMusicStripSong() }
                 else if !self.expanded, self.compactActivity == .calendar {
-                    self.openCountdownEvent()
+                    self.openCountdownEvent(on: self.displayID)
                 } else { self.toggle() }
             })
         // A move between displays brings the window back on the next turn, once
@@ -3834,7 +3886,7 @@ final class NotchService: ObservableObject {
     /// A click on the strip's bars while they show the button plays or pauses
     /// the song in place. Anywhere else it opens the island on the song.
     func activateMusicStrip() {
-        guard musicStripShowsControl else { openActivity(.music); return }
+        guard musicStripShowsControl else { openActivity(.music, on: displayID); return }
         toggleMusicStripSong()
     }
 
@@ -4051,12 +4103,14 @@ final class NotchService: ObservableObject {
     }
 
     private func makeMirror(id: CGDirectDisplayID, geometry: NotchGeometry, size: CGSize) -> NotchMirror {
-        let model = NotchMirrorModel(geometry: geometry, size: size)
+        let model = NotchMirrorModel(displayID: id, geometry: geometry, size: size)
         let host = NotchWindowHost(content: AnyView(NotchMirrorView(service: self, mirror: model)),
                                    geometry: geometry, size: size,
                                    background: { AnyView(NotchWindowBackground(presentation: $0)) })
         host.panel.title = FeatureStrings.notch(L10n.shared.language).title
-        host.panel.handleScroll = { [weak self] event in self?.handleScroll(event) ?? false }
+        // The copy's own wheel: a gesture on this display opens this display's
+        // island, as this copy's hover and button do.
+        host.panel.handleScroll = { [weak self] event in self?.handleScroll(event, on: id) ?? false }
         let mirror = NotchMirror(id: id, host: host, model: model)
         // The copy's own hover, named for its own display: the pointer's answer
         // is read from that window, on that display, and the deadline, the
@@ -4252,7 +4306,7 @@ final class NotchService: ObservableObject {
             guard let pressed = pressedArea,
                   NotchSupport.screenEdgeArea(pressed, contains: point) || NotchSupport.screenEdgeArea(area, contains: point),
                   windowHost?.containsDestination(point) == true else { return }
-            if compactActivity == .calendar { openCountdownEvent() } else { open() }
+            if compactActivity == .calendar { openCountdownEvent(on: displayID) } else { open(on: displayID) }
         case .leftMouseDragged:
             // A press at the screen's edge reports a drag at once, often without
             // moving. Only a drag that leaves the island cancels the click.
@@ -4839,9 +4893,10 @@ final class NotchService: ObservableObject {
     }
 
     /// The gallery steps its rows from the wheel; every other scroll over the
-    /// island is a gesture candidate.
-    private func handleScroll(_ event: NSEvent) -> Bool {
-        handleSectionScroll(event) || handleGesture(event)
+    /// island is a gesture candidate. The display is the window the wheel turned
+    /// on, so a gesture on a copy opens that copy's island.
+    private func handleScroll(_ event: NSEvent, on display: CGDirectDisplayID? = nil) -> Bool {
+        handleSectionScroll(event) || handleGesture(event, on: display)
     }
 
     private func handleSectionScroll(_ event: NSEvent) -> Bool {
@@ -4866,7 +4921,7 @@ final class NotchService: ObservableObject {
         return true
     }
 
-    private func handleGesture(_ event: NSEvent) -> Bool {
+    private func handleGesture(_ event: NSEvent, on display: CGDirectDisplayID? = nil) -> Bool {
         guard running, !suspended, NotchGestureSupport.isEnabled(), let panel,
               !trackingMenu, captureControls == nil, !heldDrag,
               event.modifierFlags.intersection([.command, .control, .option, .shift]).isEmpty else {
@@ -4903,7 +4958,7 @@ final class NotchService: ObservableObject {
                                           hasPhase: !event.phase.isEmpty,
                                           allowVertical: vertical, allowHorizontal: horizontal, expanded: expanded) else { return false }
         switch action {
-        case .open: open()
+        case .open: open(on: display)
         case .close: collapse()
         case .nextTrack, .previousTrack:
             guard musicSurface else { gesture = NotchGestureSupport(); return false }

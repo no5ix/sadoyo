@@ -145,7 +145,7 @@ enum NotchMirrorContract {
         func makeMirror(id: CGDirectDisplayID, geometry: NotchGeometry, size: CGSize) -> Mirror {
             let host = Host()
             made.append(host)
-            return Mirror(id: id, host: host, model: NotchMirrorModel(geometry: geometry, size: size))
+            return Mirror(id: id, host: host, model: NotchMirrorModel(displayID: id, geometry: geometry, size: size))
         }
         /// Which display draws the island's page, as production keeps it: one
         /// display at a time, and no window that moves.
@@ -385,7 +385,7 @@ enum NotchMirrorContract {
         service.syncMirrors()
         suite.expect(service.mirrors.isEmpty, "a stopped island leaves no copies")
 
-        let model = NotchMirrorModel(geometry: external2, size: CGSize(width: 100, height: 24))
+        let model = NotchMirrorModel(displayID: external.notchDisplayID, geometry: external2, size: CGSize(width: 100, height: 24))
         suite.expect(!model.update(geometry: external2, strip: external2, size: CGSize(width: 100, height: 24),
                                    activity: nil, expanded: false)
                      && model.update(geometry: external2, strip: external2, size: CGSize(width: 120, height: 24),
@@ -399,6 +399,81 @@ enum NotchMirrorContract {
                      && !model.update(geometry: external2, strip: external2, size: CGSize(width: 120, height: 24),
                                       activity: .music, expanded: true),
                      "a copy is only redrawn when what it shows changes, and the page it draws is such a change")
+        ownershipContracts(suite)
+    }
+
+    /// A page cannot outlive the window that drew it, and a display with no copy of
+    /// the island is no island. The page is asked for the display whose island was
+    /// opened, and the island's own display never takes a page because it is the
+    /// island's own: not when a display is unplugged, not when the choice is
+    /// switched off, and not when a display returns.
+    private static func ownershipContracts(_ suite: TestSuite) {
+        let builtIn = NSScreen(1, CGRect(x: 0, y: 0, width: 1470, height: 956), notched: true)
+        let external = NSScreen(2, CGRect(x: 1470, y: -86, width: 1920, height: 1080))
+        let third = NSScreen(3, CGRect(x: 3390, y: -86, width: 1920, height: 1080))
+        NSScreen.screens = [builtIn, external, third]
+        NSScreen.screensHaveSeparateSpaces = false
+        defer {
+            NSScreen.screens = []
+            NSScreen.screensHaveSeparateSpaces = true
+        }
+
+        let service = Service()
+        service.syncMirrors()
+        suite.expect(service.mirrors.count == 2 && service.mirrors[2]?.model.displayID == 2
+                         && service.mirrors[3]?.model.displayID == 3,
+                     "each copy knows the display its own window was built for")
+
+        service.expand(on: 2)
+        suite.expect(service.expanded && service.expansion.owner == 2 && service.presentsExpansion(on: 2)
+                         && !service.presentsExpansion(on: 1),
+                     "a page opened on a copy is drawn by that copy, and by no other window")
+
+        // That display is unplugged. The island refreshes its presentation, which
+        // retires the page with the window that drew it; the island's own display
+        // is not the page's new home, and the third display takes nothing.
+        NSScreen.screens = [builtIn, third]
+        service.syncMirrors()
+        service.retireExpansion()
+        suite.expect(service.mirrors[2] == nil && service.expansion.owner == nil && !service.expanded
+                         && !service.presentsExpansion(on: 1) && !service.presentsExpansion(on: 3),
+                     "a display that goes away takes the page with it, and no other display is handed it")
+
+        // The display returns. Its copy is a closed island, with nothing kept for
+        // it from before, and the island as a whole holds no stale ownership.
+        NSScreen.screens = [builtIn, external, third]
+        service.syncMirrors()
+        suite.expect(service.mirrors[2]?.model.expanded == false && service.mirrors[3]?.model.expanded == false
+                         && service.expansion.owner == nil && !service.expanded,
+                     "a display that returns brings a closed island and no page restored to it")
+
+        // A display switched off the island is no island: it opens nothing, and it
+        // answers no pointer of its own.
+        service.showsOnAllDisplays = false
+        service.syncMirrors()
+        let opened = service.opened
+        service.expand(on: 2)
+        service.mirrors[2]?.over = true
+        service.mirrors[2]?.host.hoverHandler?(true)
+        suite.expect(service.mirrors.isEmpty && service.opened == opened && service.expansion.owner == nil
+                         && !service.expanded,
+                     "with the island on its own display only, a secondary display opens nothing and answers no pointer")
+
+        // One page in the whole system: opening a second copy closes the first, and
+        // every copy draws only a page of its own, at its own display's measure.
+        service.showsOnAllDisplays = true
+        service.syncMirrors()
+        service.expand(on: 2)
+        service.expand(on: 3)
+        // The island refreshes after opening, and that is what tells each copy
+        // whether this display draws the page.
+        service.syncMirrors()
+        let drawing = [CGDirectDisplayID](service.mirrors.keys).sorted().filter { service.presentsExpansion(on: $0) }
+        suite.expect(service.expansion.owner == 3 && drawing == [3] && !service.presentsExpansion(on: 2)
+                         && !service.presentsExpansion(on: 1)
+                         && service.mirrors[2]?.model.expanded == false
+                         && service.mirrors[3]?.model.expanded == true,
+                     "a page opened on a second copy closes the first, and no two copies draw a page")
     }
 
     /// A pending arrival may retain an eligible copy, but cannot overrule the

@@ -448,6 +448,25 @@ private struct NotchBandEnvironmentKey: EnvironmentKey {
     static let defaultValue = NotchBand()
 }
 
+private struct NotchPageDisplayKey: EnvironmentKey {
+    static let defaultValue: CGDirectDisplayID? = nil
+}
+
+extension EnvironmentValues {
+    /// The display whose island window draws this view: the island's own window,
+    /// or a copy's window on its own display. A window is built for one display
+    /// and never moves, so this answer is fixed for everything the window draws
+    /// and cannot change under an open menu.
+    ///
+    /// Every page a view opens names this display, so the page opens on the
+    /// island the interaction happened on. `nil` is the island's own display,
+    /// for a view drawn outside any island window.
+    var notchPageDisplay: CGDirectDisplayID? {
+        get { self[NotchPageDisplayKey.self] }
+        set { self[NotchPageDisplayKey.self] = newValue }
+    }
+}
+
 extension EnvironmentValues {
     /// The open island's top row, where the page's own controls go: beside
     /// the camera, or across the top of an island without one.

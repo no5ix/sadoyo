@@ -6,6 +6,9 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct NotchFilesView: View {
+    /// The display whose island window draws this view. Every page opened
+    /// from here names it, so the page opens on the island it was asked on.
+    @Environment(\.notchPageDisplay) private var pageDisplay: CGDirectDisplayID?
     @ObservedObject var service: NotchService
     @ObservedObject private var shelf = ShelfService.shared
     @ObservedObject private var l10n = L10n.shared
@@ -295,7 +298,7 @@ struct NotchFilesView: View {
                   AppFeature.mediaTools.isAvailable, AppFeature.shelf.isAvailable,
                   NotchSupport.isEnabled() else { return }
             archives.archive(inputs, destination: destination, directory: multiple)
-            service.open(.files)
+            service.open(.files, on: pageDisplay)
         }
         guard let island = service.presentationWindow, island.isVisible else {
             NSApp.activate(ignoringOtherApps: true)
