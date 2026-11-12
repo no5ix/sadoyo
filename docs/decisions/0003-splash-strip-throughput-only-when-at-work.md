@@ -9,7 +9,7 @@
   `valid` says the last batch measurement is well-formed, not that a batch is being
   measured now. The closed island's strip took `current_decode_batch` as the figure and
   fell back to the lifetime average when it was missing, so a one-second task left
-  `92.3t/s` on the notch for the whole five-minute quiescence window, and a single
+  `92.3t/s` on the notch for the whole quiescence window, and a single
   reading that showed counters moving opened a run at once, freezing the strip's clock
   at `00:01` with `↑0 ↓0`.
 - Decision: The strip shows the throughput of a batch the engine is measuring now, and

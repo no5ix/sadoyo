@@ -658,18 +658,20 @@ enum NotchSplashSupport {
     /// request counters move inside the run, so a request ending is not a run
     /// ending and one pause is not the end of the work. The only signal the
     /// endpoint gives is a quiet that has outlasted the pauses, so the window
-    /// is a confirmation period of five minutes, and the app says what it
+    /// is a confirmation period of ten minutes, and the app says what it
     /// knows - the activity ended - rather than a completion it was never
-    /// told. Short idle gaps keep the run open; five minutes of nothing closes
-    /// it.
+    /// told. Short idle gaps keep the run open; ten minutes of nothing closes
+    /// it. A longer window costs a longer open run, and buys the one thing the
+    /// endpoint cannot: a pause long enough for a tool, an approval, or a
+    /// composed prompt to sit inside it and not read as the end of the work.
     ///
     /// This window belongs to the dashboard. It is not Splash's own
     /// `weights.idle_release_seconds`, which is the engine deciding when to put
     /// its weights to sleep; the two mechanisms are asked separately and one
     /// setting does not move the other.
-    static let taskIdleSeconds: TimeInterval = 5 * 60
-    /// Quiet readings needed, one: the window is five minutes, and waiting
-    /// through two of them would be ten minutes of a run whose work has
+    static let taskIdleSeconds: TimeInterval = 10 * 60
+    /// Quiet readings needed, one: the window is ten minutes, and waiting
+    /// through two of them would be twenty minutes of a run whose work has
     /// already stopped - and the clock the card shows stops with the work, not
     /// with the window.
     static let taskIdleReadings = 1
@@ -1004,6 +1006,20 @@ enum NotchSplashSupport {
         return String(format: "%02d:%02d", locale: Locale(identifier: "en_US_POSIX"), minutes, seconds)
     }
 
+    /// The time of day, as the person's own clock writes it: the 12- or 24-hour
+    /// rule is the system's, not the app's. A notice about a run speaks of the
+    /// day it is sent on, so the date is left out and the hour is kept.
+    static func timeOfDayText(_ date: Date) -> String { Self.timeOfDayFormatter.string(from: date) }
+
+    /// Built once: a date formatter is expensive, and a notice is sent from the
+    /// main actor, where the session's clock and its notices live.
+    private static let timeOfDayFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .none
+        formatter.timeStyle = .short
+        return formatter
+    }()
+
     /// The interval a monitoring session polls at, written short.
     static func intervalText(_ seconds: Int) -> String { "\(seconds)s" }
 
@@ -1151,13 +1167,17 @@ struct NotchSplashTaskTracker {
     enum Phase: Equatable {
         case idle
         case running(id: String, startedAt: Date)
-        case finished(id: String, outcome: Outcome, at: Date, elapsed: TimeInterval)
+        /// `startedAt` is where the run began and `at` is the first reading that
+        /// found the engine quiet - the mark the clock froze at. Both are needed
+        /// by the notice, which says when the run started, when it ended, and
+        /// says nothing about the quarter hour between that mark and the notice.
+        case finished(id: String, outcome: Outcome, startedAt: Date, at: Date, elapsed: TimeInterval)
     }
 
     /// What a poll decided, so the service acts on it once.
     enum Event: Equatable {
         case started(id: String, at: Date)
-        case finished(id: String, outcome: Outcome, at: Date, elapsed: TimeInterval)
+        case finished(id: String, outcome: Outcome, startedAt: Date, at: Date, elapsed: TimeInterval)
     }
 
     /// The marks a card's header shows for one task: the tokens the engine
@@ -1288,7 +1308,7 @@ struct NotchSplashTaskTracker {
         case .running(_, let startedAt):
             if let quiet = firstQuietAt { return max(0, quiet.timeIntervalSince(startedAt)) }
             return max(0, date.timeIntervalSince(startedAt))
-        case .finished(_, _, _, let elapsed): return max(0, elapsed)
+        case .finished(_, _, _, _, let elapsed): return max(0, elapsed)
         }
     }
 
@@ -1297,7 +1317,7 @@ struct NotchSplashTaskTracker {
         switch phase {
         case .idle: return nil
         case .running(let id, _): return id
-        case .finished(let id, _, _, _): return id
+        case .finished(let id, _, _, _, _): return id
         }
     }
 
@@ -1445,7 +1465,7 @@ struct NotchSplashTaskTracker {
 
     private mutating func finish(id: String, outcome: Outcome, at date: Date, startedAt: Date) -> Event {
         let elapsed = max(0, date.timeIntervalSince(startedAt))
-        phase = .finished(id: id, outcome: outcome, at: date, elapsed: elapsed)
+        phase = .finished(id: id, outcome: outcome, startedAt: startedAt, at: date, elapsed: elapsed)
         baseline = nil
         firstQuietAt = nil
         quietReadings = 0
@@ -1453,7 +1473,7 @@ struct NotchSplashTaskTracker {
         // with it: the header keeps the figures of the task that ended until
         // the next one begins, which begins them again at nothing.
         taskTokens = TaskTokens(input: runInput, output: runOutput)
-        return .finished(id: id, outcome: outcome, at: date, elapsed: elapsed)
+        return .finished(id: id, outcome: outcome, startedAt: startedAt, at: date, elapsed: elapsed)
     }
 
     /// The key a finished task is told by: its request's id and the second it
@@ -1701,7 +1721,7 @@ final class NotchSplashService: ObservableObject {
         stripReadingIsLive && stripDecodeSpeed != nil
     }
     var taskOutcome: NotchSplashTaskTracker.Outcome? {
-        if case .finished(_, let outcome, _, _) = phase { return outcome }
+        if case .finished(_, let outcome, _, _, _) = phase { return outcome }
         return nil
     }
 
@@ -1963,8 +1983,8 @@ final class NotchSplashService: ObservableObject {
         switch event {
         case .started:
             break
-        case .finished(let id, let outcome, let at, let elapsed):
-            finishTask(id: id, outcome: outcome, at: at, elapsed: elapsed)
+        case .finished(let id, let outcome, let startedAt, let at, let elapsed):
+            finishTask(id: id, outcome: outcome, startedAt: startedAt, at: at, elapsed: elapsed)
         }
     }
 
@@ -1977,20 +1997,26 @@ final class NotchSplashService: ObservableObject {
     /// still alive and the next prompt is timed as its own task with its own
     /// news. Only the way out on the card stops the reading.
     private func finishTask(id: String, outcome: NotchSplashTaskTracker.Outcome,
-                            at date: Date, elapsed: TimeInterval) {
+                            startedAt: Date, at date: Date, elapsed: TimeInterval) {
         lastOutcome = outcome
         let words = strings()
         let key = NotchSplashTaskTracker.announceKey(id: id, at: date, elapsed: elapsed)
         // The notice carries the task's own length, the number the card's clock
-        // froze at - not the time the notice happens to be sent.
+        // froze at, and the three times that place the run in the day: where it
+        // began, the quiet mark its clock froze at, and the moment these words
+        // go out. The last is the session's own clock and never `at`, which is
+        // the whole window earlier than the notice.
         let spoken = NotchSplashSupport.taskClock(max(0, elapsed))
+        let began = NotchSplashSupport.timeOfDayText(startedAt)
+        let over = NotchSplashSupport.timeOfDayText(date)
+        let sent = NotchSplashSupport.timeOfDayText(clock())
         if announcements.take(id: key, outcome: outcome) {
             // The counters completed, and the endpoint said so. What the app
             // says is what it knows: the activity ended, outlasted by a quiet
             // of the whole window, and how long it lasted. It does not claim
             // a task was completed, which the endpoint never reported.
             deliver(Notice(title: words.notifyActivityEndedTitle,
-                           body: words.notifyActivityEndedBody(spoken)))
+                           body: words.notifyActivityEndedBody(spoken, began, over, sent)))
         } else if announcements.takeUnsuccessful(id: key, outcome: outcome) {
             deliver(Notice(title: outcome == .failed ? words.notifyFailedTitle : words.notifyCancelledTitle,
                            body: outcome == .failed ? words.notifyFailedBody : words.notifyCancelledBody))
