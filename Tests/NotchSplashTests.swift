@@ -706,8 +706,8 @@ enum NotchSplashTests {
         // minute of the test's clock. The app's window is the long one, and it
         // is checked below at its own value.
         func task() -> NotchSplashTaskTracker { NotchSplashTaskTracker(quiescence: 30, quietReadingsNeeded: 2) }
-        suite.expect(NotchSplashSupport.taskIdleSeconds == 5 * 60 && NotchSplashSupport.taskIdleReadings == 1,
-                     "the dashboard's idle confirmation is one unbroken five-minute quiet, and it is the dashboard's "
+        suite.expect(NotchSplashSupport.taskIdleSeconds == 10 * 60 && NotchSplashSupport.taskIdleReadings == 1,
+                     "the dashboard's idle confirmation is one unbroken ten-minute quiet, and it is the dashboard's "
                      + "own number: Splash's weights.idle_release_seconds, which puts the engine's weights to sleep, is "
                      + "a separate mechanism asked of the server, and this setting does not move it")
         suite.expect(NotchSplashSupport.chartWindowSeconds == 10 * 60,
@@ -789,14 +789,15 @@ enum NotchSplashTests {
                          && tracker.elapsed(at: start.addingTimeInterval(50)) == 26,
                      "24 quiet seconds is inside the window: nothing is told, and the clock stays where the work ended")
         suite.expect(tracker.observe(snapshot(lastTurn), at: start.addingTimeInterval(60))
-                         == .finished(id: "r1", outcome: .completed, at: start.addingTimeInterval(26), elapsed: 26),
+                         == .finished(id: "r1", outcome: .completed, startedAt: start,
+                                      at: start.addingTimeInterval(26), elapsed: 26),
                      "a quiet that outlasts the window ends the task, timed to where the quiet began")
         suite.expect(tracker.elapsed(at: start.addingTimeInterval(600)) == 26,
                      "a finished task's clock stays at the length it froze at, and the window's minutes are not in it")
         suite.expect(tracker.observe(snapshot(lastTurn), at: start.addingTimeInterval(300)) == nil,
                      "an idle reading after a completion says nothing")
         suite.expect(tracker.phase == .finished(id: "r1", outcome: .completed,
-                                                at: start.addingTimeInterval(26), elapsed: 26),
+                                                startedAt: start, at: start.addingTimeInterval(26), elapsed: 26),
                      "the finished task is held across the idle stretch, its clock where it froze")
         // The next prompt the server works on is the next task, at once, with
         // its own clock from zero - no clearing asked of the page, and the
@@ -847,7 +848,7 @@ enum NotchSplashTests {
                      "14 quiet seconds is inside the window: nothing is told, and the clock rests at six seconds")
         suite.expect(positional.observe(snapshot(turn), at: start.addingTimeInterval(40))
                          == .finished(id: "position.0", outcome: .completed,
-                                      at: start.addingTimeInterval(6), elapsed: 6),
+                                      startedAt: start, at: start.addingTimeInterval(6), elapsed: 6),
                      "the first positional task is told on its counters, its clock at the length of the work")
         suite.expect(positional.observe(snapshot(positionalBusy), at: start.addingTimeInterval(100))
                          == .started(id: "position.0", at: start.addingTimeInterval(100)),
@@ -889,7 +890,8 @@ enum NotchSplashTests {
                      "one quiet reading with every counter where it was is not proof of anything")
         suite.expect(vanished.observe(snapshot(#"{"instance": {"id": "a"}, "requests": {"completed": 3}, "active_requests": []}"#),
                                       at: start.addingTimeInterval(40))
-                         == .finished(id: "r1", outcome: .lost, at: start.addingTimeInterval(4), elapsed: 4),
+                         == .finished(id: "r1", outcome: .lost, startedAt: start,
+                                      at: start.addingTimeInterval(4), elapsed: 4),
                      "work gone with every counter where it was is lost, never completed")
 
         let restarted = #"{"instance": {"id": "b"}, "requests": {"completed": 9}, "active_requests": []}"#
@@ -902,7 +904,8 @@ enum NotchSplashTests {
                          && restart.elapsed(at: start.addingTimeInterval(20)) == 3,
                      "17 quiet seconds inside the window says nothing, and the clock rests at three seconds")
         suite.expect(restart.observe(snapshot(restarted), at: start.addingTimeInterval(35))
-                         == .finished(id: "r1", outcome: .lost, at: start.addingTimeInterval(3), elapsed: 3),
+                         == .finished(id: "r1", outcome: .lost, startedAt: start,
+                                      at: start.addingTimeInterval(3), elapsed: 3),
                      "a new instance is a lost task, told when the quiet outlasts the window, its clock at the length of the work")
 
         var mute = task()
@@ -912,7 +915,8 @@ enum NotchSplashTests {
         suite.expect(mute.observe(snapshot(muteQuiet), at: start.addingTimeInterval(3)) == nil,
                      "no counters and one quiet reading say nothing")
         suite.expect(mute.observe(snapshot(muteQuiet), at: start.addingTimeInterval(34))
-                         == .finished(id: "r1", outcome: .lost, at: start.addingTimeInterval(3), elapsed: 3),
+                         == .finished(id: "r1", outcome: .lost, startedAt: start,
+                                      at: start.addingTimeInterval(3), elapsed: 3),
                      "a server that reports no counters says nothing about how a task ended")
 
         // Failure and cancellation are their own endings, told once, and they
@@ -924,7 +928,8 @@ enum NotchSplashTests {
                      "a failure inside the window is not told yet")
         suite.expect(failed.observe(snapshot(#"{"instance": {"id": "a"}, "requests": {"completed": 3, "failed": 1}, "active_requests": []}"#),
                                      at: start.addingTimeInterval(35))
-                         == .finished(id: "r1", outcome: .failed, at: start.addingTimeInterval(3), elapsed: 3),
+                         == .finished(id: "r1", outcome: .failed, startedAt: start,
+                                      at: start.addingTimeInterval(3), elapsed: 3),
                      "a failed count that grew is a failure, not a completion")
         var cancelled = task()
         suite.expect(cancelled.observe(snapshot(busy), at: start) != nil, "the task begins")
@@ -933,7 +938,8 @@ enum NotchSplashTests {
                      "a cancellation inside the window is not told yet")
         suite.expect(cancelled.observe(snapshot(#"{"instance": {"id": "a"}, "requests": {"completed": 3, "cancelled": 2}, "active_requests": []}"#),
                                         at: start.addingTimeInterval(35))
-                         == .finished(id: "r1", outcome: .cancelled, at: start.addingTimeInterval(3), elapsed: 3),
+                         == .finished(id: "r1", outcome: .cancelled, startedAt: start,
+                                      at: start.addingTimeInterval(3), elapsed: 3),
                      "a cancelled count that grew is a cancellation")
         // A run in which a turn failed and a later turn answered is a task
         // that produced an answer: the completed count outranks the failed.
@@ -948,7 +954,8 @@ enum NotchSplashTests {
                      "the retried turn answered with nothing in hand: the window opens and the clock rests at the answer's moment")
         suite.expect(retried.observe(snapshot(#"{"instance": {"id": "a"}, "requests": {"completed": 4, "failed": 1}, "active_requests": []}"#),
                                      at: start.addingTimeInterval(75))
-                         == .finished(id: "r1", outcome: .completed, at: start.addingTimeInterval(40), elapsed: 40),
+                         == .finished(id: "r1", outcome: .completed, startedAt: start,
+                                      at: start.addingTimeInterval(40), elapsed: 40),
                      "a task that answered after a failed turn is a completion, not a failure, told at the window's close")
 
         // Overlapping requests: the run being timed keeps its own clock, and
@@ -1003,6 +1010,7 @@ enum NotchSplashTests {
         let endedQuick = quick.observe(snapshot(quietAgain, at: start.addingTimeInterval(40)),
                                        at: start.addingTimeInterval(40))
         suite.expect(endedQuick == .finished(id: NotchSplashTaskTracker.unnumbered, outcome: .lost,
+                                             startedAt: start.addingTimeInterval(2),
                                              at: start.addingTimeInterval(3), elapsed: 1),
                      "a run the counters cannot speak for is lost, and is never announced as a completion")
         suite.expect(quick.elapsed(at: start.addingTimeInterval(600)) == 1,
@@ -1121,7 +1129,7 @@ enum NotchSplashTests {
         let frozen = tracker.taskTokens
         suite.expect(frozen == tokens.init(input: 12_990, output: 11_996),
                      "the quiet reading is measured like any other, so the run's figures include it: \(frozen)")
-        suite.expect(tracker.phase == .finished(id: "r1", outcome: .completed, at: at(40), elapsed: 40),
+        suite.expect(tracker.phase == .finished(id: "r1", outcome: .completed, startedAt: start, at: at(40), elapsed: 40),
                      "the run is called over, and its figures freeze with its clock, at the length of the work: \(frozen)")
         _ = tracker.observe(engine(500_000, 400_000, active: [], completed: 59), at: at(120))
         _ = tracker.observe(engine(600_000, 500_000, active: [], completed: 59), at: at(160))
@@ -1362,7 +1370,7 @@ enum NotchSplashTests {
         let second = finished.observe(snapshot(#"{"instance": {"id": "a"}, "requests": {"completed": 4}, "active_requests": []}"#),
                                       at: start.addingTimeInterval(45))
         suite.expect(second == .finished(id: "r1", outcome: .completed,
-                                         at: start.addingTimeInterval(10), elapsed: 10)
+                                         startedAt: start, at: start.addingTimeInterval(10), elapsed: 10)
                          && finished.elapsed(at: start.addingTimeInterval(600)) == 10
                          && !NotchSplashMonitoringPolicy.endsMonitoring(.init(idleSeconds: 600, outcome: .completed))
                          && NotchSplashSupport.showsDashboardCard(sectionVisible: true, isMonitoring: true),
@@ -1497,9 +1505,13 @@ enum NotchSplashTests {
                      "the completion notice is titled as the task's own")
         suite.expect(english.notifyActivityEndedTitle == "Splash Task Activity Ended",
                      "the notice of a run that ended says the activity ended, which is what the endpoint supports")
-        suite.expect(english.notifyActivityEndedBody("2m 20s").contains("2m 20s")
-                         && english.notifyActivityEndedBody("2m 20s").contains("Ten minutes"),
-                     "the notice names the window that ended the run, and carries the clock's length")
+        suite.expect(english.notifyActivityEndedBody("2m 20s", "1:16 PM", "1:31 PM", "1:41 PM").contains("2m 20s")
+                         && english.notifyActivityEndedBody("2m 20s", "1:16 PM", "1:31 PM", "1:41 PM").contains("Ten minutes")
+                         && english.notifyActivityEndedBody("2m 20s", "1:16 PM", "1:31 PM", "1:41 PM").contains("1:16 PM")
+                         && english.notifyActivityEndedBody("2m 20s", "1:16 PM", "1:31 PM", "1:41 PM").contains("1:31 PM")
+                         && english.notifyActivityEndedBody("2m 20s", "1:16 PM", "1:31 PM", "1:41 PM").contains("1:41 PM"),
+                     "the notice names the window that ended the run, and carries the clock's length and the run's "
+                     + "three times of the day")
         suite.expect(english.memoryAndKVCache == "Memory & KV Cache" && english.trend == "Trend"
                          && english.utilization == "Utilization",
                      "the two new cards and their bar are named as the reference names them")
@@ -1649,6 +1661,7 @@ enum NotchSplashTests {
             // A prompt begins: the request appears, and the task is timed.
             world.documents = [running("req-a", completed: 3)]
             spin(1.4)
+            let runBegan = world.now
             suite.expect(service.phase == .running(id: "req-a", startedAt: world.now)
                              && service.isTaskRunning && service.trackedID == "req-a",
                          "a request the server reports is taken up as a task")
@@ -1691,20 +1704,22 @@ enum NotchSplashTests {
             spin(1.4)
             suite.expect(service.isTaskRunning && world.notices.isEmpty,
                          "a counter that moved is the engine working, and the engine working is not the end")
-            // The confirmation, at its own length. Two readings of nothing, the
-            // second past the five-minute window: the task ends on the second,
-            // and its clock - which stopped at the first - is the length of the
-            // work, not of the work plus the window. The virtual clock jumps, as
-            // a test's clock must, so the run's length here is the test's own
-            // arithmetic.
-            world.now = world.now.addingTimeInterval(155)
+            // The confirmation, at its own length. The reading that found the
+            // engine quiet is the mark the clock freezes at, and it is noted here
+            // before the clock is turned; two readings of nothing follow, the
+            // second past the ten-minute window, so the task ends on the second
+            // with its clock at the length of the work and not of the work plus
+            // the window. The virtual clock jumps, as a test's clock must, so the
+            // run's length here is the test's own arithmetic.
+            let quietMark = world.now
+            world.now = world.now.addingTimeInterval(5 * 60 + 10)
             spin(2.6)
             suite.expect(service.isTaskRunning && world.notices.isEmpty,
-                         "a quiet of two and a half minutes is inside the window: the run goes on, its clock at rest")
+                         "a quiet of five minutes is inside the window: the run goes on, its clock at rest")
             suite.expect(Int(service.elapsed()) == 49,
                          "the card's clock rests at the last work while the window runs - "
                          + "forty-nine seconds of task, and the window's minutes are not added to it")
-            world.now = world.now.addingTimeInterval(155)
+            world.now = world.now.addingTimeInterval(5 * 60 + 10)
             spin(2.6)
             suite.expect(service.taskOutcome == .completed && service.isTaskFinished,
                          "a quiet that outlasts the window is the task's end, confirmed by its counter")
@@ -1717,11 +1732,28 @@ enum NotchSplashTests {
                              && world.notices.first?.body.contains("00:49") == true,
                          "the notice says the activity ended, which is what the endpoint supports, and carries "
                          + "the clock's frozen length")
+            // The notice's three times of the day: where the run began, the
+            // quiet mark its clock froze at, and the moment these words went out
+            // - a whole window after that mark, which is why the sent time is the
+            // session's clock and never the mark.
+            suite.expect(service.phase == .finished(id: "req-a", outcome: .completed,
+                                                    startedAt: runBegan, at: quietMark, elapsed: 49),
+                         "the finished phase carries the run's start and the quiet mark it froze at")
+            let began = NotchSplashSupport.timeOfDayText(runBegan)
+            let over = NotchSplashSupport.timeOfDayText(quietMark)
+            let sent = NotchSplashSupport.timeOfDayText(world.now)
+            suite.expect(world.notices.first?.body.contains(began) == true
+                             && world.notices.first?.body.contains(over) == true
+                             && world.notices.first?.body.contains(sent) == true,
+                         "the notice carries the run's length and the three times that place it in the day: the start, "
+                         + "the quiet the clock froze at, and the moment the notice was sent")
+            suite.expect(world.notices.first!.body.range(of: "lasted \(NotchSplashSupport.taskClock(49))") != nil,
+                         "the length is the card's own number, written as the card writes it")
             suite.expect(!world.notices.first!.title.contains("Completed"),
                          "the app does not claim a completion the endpoint never reported")
-            // Nine minutes of quiet is a pause; ten minutes of it is a run
-            // over. The window is one number, and a gap inside it leaves the
-            // run, the clock, and the reading alone.
+            // A quiet of ten minutes is a run over, and the reading is not asked
+            // to stop by it: the window is one number, and a gap inside it - or
+            // long after it - leaves the run, the clock, and the polling alone.
             let afterCompletion = service.reads
             world.now = world.now.addingTimeInterval(6 * 60)
             spin(2.4)
@@ -1750,11 +1782,11 @@ enum NotchSplashTests {
             // adds to the task's number.
             suite.expect(Int(service.elapsed()) == 12 && service.isTaskRunning,
                          "with the window open the card shows the work's length, and the task is open")
-            world.now = world.now.addingTimeInterval(155)
+            world.now = world.now.addingTimeInterval(5 * 60 + 10)
             spin(2.6)
             suite.expect(Int(service.elapsed()) == 12 && service.isTaskRunning,
-                         "the window's own minutes pass, and the task's length does not move")
-            world.now = world.now.addingTimeInterval(155)
+                         "five of the window's minutes pass, and the task's length does not move")
+            world.now = world.now.addingTimeInterval(5 * 60 + 10)
             spin(2.6)
             suite.expect(service.taskOutcome == .completed && Int(service.elapsed()) == 12,
                          "the second task is timed and frozen on its own length, not on that length plus the window")

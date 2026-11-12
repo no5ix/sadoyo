@@ -22,8 +22,9 @@ struct NotchMirrorView: View {
             .foregroundStyle(.white)
             // A closed copy is a picture and a door: its clicks are the window's
             // button. An open page is a page: its cards, sliders and fields take
-            // the clicks that are asked of them.
-            .allowsHitTesting(mirror.expanded)
+            // the clicks that are asked of them. A peek is a page named, and its
+            // two controls take the clicks they are asked for.
+            .allowsHitTesting(mirror.expanded || mirror.peeking)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .environment(\.colorScheme, .dark)
             .environment(\.notchPresentation, true)
@@ -32,7 +33,7 @@ struct NotchMirrorView: View {
             // here - a strip, a card, a secondary-click menu - opens here.
             .environment(\.notchPageDisplay, mirror.displayID)
             .tint(.white)
-            .accessibilityHidden(!mirror.expanded)
+            .accessibilityHidden(!(mirror.expanded || mirror.peeking))
     }
 
     @ViewBuilder private var content: some View {
@@ -44,6 +45,13 @@ struct NotchMirrorView: View {
             // display, and never on the island's own.
             NotchView(service: service, presentsPage: true, pageSurfaceSize: mirror.size,
                       hostDisplayID: mirror.displayID)
+        } else if mirror.peeking {
+            // The peek this copy's pointer waited out: the page it is reaching
+            // for, named at this display's own top, with the control that opens
+            // it here. The two controls name this copy's display, as the copy's
+            // own page does, and the pointer's leaving takes the peek back.
+            NotchPeekSurface(service: service, hostDisplayID: mirror.displayID,
+                             surfaceGeometry: mirror.geometry)
         } else {
             let geometry = mirror.geometry
             let size = mirror.size

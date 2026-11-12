@@ -2035,6 +2035,9 @@ final class NotchService: ObservableObject {
         pinned = false
         clipboardPinnedOnly = false
         hoverWork?.cancel(); hoverWork = nil
+        // The page is closed everywhere, so no copy has a hover keeping it open,
+        // and the moves followed for a copy are asked for no more.
+        mirrors.values.forEach { removeMirrorExitMonitors($0) }
         if noticeExpanded { noticeWork?.cancel(); noticeWork = nil }
         mutatePresentation(transitionContent: expanded || peeking || noticeExpanded ? .dismiss : .none) {
             if noticeExpanded { notice = nil; noticeExpanded = false }
@@ -3967,6 +3970,10 @@ final class NotchService: ObservableObject {
         /// The surface last drawn, so a copy that grew under a pointer that has
         /// not moved is seen as a change, as the island sees the same thing.
         var lastSize: CGSize?
+        /// The moves followed while this copy's hover keeps its page or its peek
+        /// open, so an exit AppKit never reported still closes it. One copy's
+        /// monitors ask about one copy's island.
+        var exitMonitors: [Any] = []
 
         init(id: CGDirectDisplayID, host: NotchWindowHost, model: NotchMirrorModel) {
             self.id = id
@@ -4023,8 +4030,10 @@ final class NotchService: ObservableObject {
                 // deadline goes with it, and its hover with that.
                 if let mirror = mirrors[id] {
                     mirror.cancelHoverWork()
+                    removeMirrorExitMonitors(mirror)
                     mirror.inside = false
                     mirror.hover.update(pointerInside: false)
+                    mirror.model.endPeek()
                     if mirror.model.shown {
                         mirror.model.shown = false
                         mirror.host.hide(animated: false)
@@ -4032,8 +4041,16 @@ final class NotchService: ObservableObject {
                 }
                 continue
             }
+            // A copy peeks for its own pointer, as the island peeks for its own:
+            // the page named at this display's measure, and nothing opened. The
+            // peek is this copy's, so a copy that carries the page never peeks,
+            // and a page open anywhere takes a copy's peek back - the page is one,
+            // and a copy naming it while another display draws it is a name over
+            // a page that has gone.
+            let peeking = !presents && expansion.owner == nil && mirrors[id]?.model.peeking == true
             let (strip, size) = presents
                 ? (base, expandedSize)
+                : peeking ? (base, base.peek)
                 : mirrorSurface(on: base, activity: activity)
             let mirror = mirrors[id] ?? makeMirror(id: id, geometry: base, size: size)
             mirrors[id] = mirror
@@ -4047,7 +4064,7 @@ final class NotchService: ObservableObject {
             let revealing = !mirror.model.shown
             let previous = mirror.model.activity
             let changed = mirror.model.update(geometry: base, strip: strip, size: size, activity: activity,
-                                              expanded: presents)
+                                              expanded: presents, peeking: peeking)
             let grewUnderPointer = mirror.lastSize != size
             mirror.lastSize = size
             mirror.host.panel.acceptsKeyFocus = presents
@@ -4057,9 +4074,12 @@ final class NotchService: ObservableObject {
             mirror.host.present(size: size, geometry: presents ? expandedGeometry : base, animated: !revealing,
                                 transitionContent: !revealing && previous != activity ? .replace : .none)
             // The copy's door: its whole strip at rest, and the open page's header
-            // where this display carries the dashboard, as the island's own is.
+            // where this display carries the dashboard, as the island's own is. A
+            // peeking copy's door is its own surface, as the island's is while it
+            // peeks: the pointer is on the page's name, and the whole of it opens.
             let activation = presents
                 ? expandedGeometry.activationArea(in: size, hasHeader: true, compactActivity: false, expandedHeader: true)
+                : peeking ? base.activationArea(in: size, hasHeader: true, compactActivity: false)
                 : CGRect(origin: .zero, size: size)
             mirror.host.setActivationArea(activation,
                                           title: presents ? FeatureStrings.notch(L10n.shared.language).collapse
@@ -4123,6 +4143,7 @@ final class NotchService: ObservableObject {
         guard !mirrors.isEmpty else { return }
         mirrors.values.forEach {
             $0.cancelHoverWork()
+            removeMirrorExitMonitors($0)
             $0.host.close()
         }
         mirrors.removeAll()
@@ -4166,13 +4187,45 @@ final class NotchService: ObservableObject {
         mirror.inside = pointerOverMirror(mirror)
         mirror.hover.update(pointerInside: mirror.inside)
         if !mirror.inside { mirror.cancelHoverWork() }
-        guard mirror.inside, wasInside != mirror.inside || mirror.hoverWork == nil else { return }
+        // The copy's moves are followed from the moment its hover has something
+        // to keep open, exactly as the island's own are: AppKit can report no
+        // exit at all for these windows, and a pointer on its way to another
+        // display is the case that needs it most.
+        defer { syncMirrorExitMonitoring(mirror, entered: entered) }
+        if !mirror.inside {
+            // Out of a copy, the answer the island's own pointer exit gets: the
+            // peek taken back, and the page this copy's hover opened closed. A
+            // page this copy's click opened stays, as it stays on the island, and
+            // a page another display carries is not this copy's to close.
+            guard wasInside,
+                  NotchSupport.closesOnPointerExit(expanded: carriesPage(mirror),
+                                                   peeking: mirror.model.peeking,
+                                                   openedByHover: openedByHover) else { return }
+            scheduleMirrorClose(mirror)
+            return
+        }
+        guard wasInside != mirror.inside || mirror.hoverWork == nil else { return }
         // A copy whose strip is a control of its own answers the pointer there.
         // The copies draw no controls - the page is opened, the play and pause
         // are the island's own strip's - so nothing here declines the opening.
         guard !mirror.hover.suppressed, hoverOpensThroughNotice || notice == nil || hiddenUntilHover,
-              !mirror.model.expanded, !expansion.presents(on: id), hoverOpeningEnabled else { return }
-        scheduleMirrorOpen(mirror)
+              !mirror.model.expanded, !mirror.model.peeking, !expansion.presents(on: id),
+              hoverOpeningEnabled else { return }
+        // The same choice the island's own hover makes, made for this display:
+        // the whole dashboard where the person chose that, the page's name where
+        // they chose the peek.
+        if mirrorHoverExpands { scheduleMirrorOpen(mirror) } else { scheduleMirrorPeek(mirror) }
+    }
+
+    /// Whether this copy's window is the one drawing the open page: the page
+    /// belongs to the display whose island was opened, and one display at a time.
+    private func carriesPage(_ mirror: NotchMirror) -> Bool {
+        expansion.presents(on: mirror.id) && mirror.model.expanded
+    }
+
+    /// The hover answer the person chose, read the way the island reads it.
+    private var mirrorHoverExpands: Bool {
+        hoverOpeningEnabled && UserDefaults.standard.bool(forKey: DefaultsKey.notchHoverExpands)
     }
 
     /// The opening a copy's pointer asked for: the delay the person chose, and
@@ -4186,15 +4239,121 @@ final class NotchService: ObservableObject {
             mirror.hoverWork = nil
             guard self.running, !self.suspended, self.showsOnAllDisplays, mirror.inside,
                   !mirror.hover.suppressed, self.hoverOpeningEnabled,
-                  !mirror.model.expanded, !self.expansion.presents(on: mirror.id),
+                  !mirror.model.expanded, !mirror.model.peeking,
+                  !self.expansion.presents(on: mirror.id),
                   self.hoverOpensThroughNotice || self.notice == nil || self.hiddenUntilHover,
                   self.pointerOverMirror(mirror) else { return }
-            self.expand(on: mirror.id)
+            // A copy of a countdown's strip is a door to its event, as the
+            // island's own strip is, and as the copy's own click is.
+            if self.compactActivity == .calendar {
+                self.openCountdownEvent(on: mirror.id)
+                self.provideHapticFeedback()
+                return
+            }
+            // The page, opened the way the island opens it on a hover: no focus
+            // taken, and the page records that a pointer asked for it. That record
+            // is what lets this copy's pointer leaving close it, and a click's
+            // opening stay open - the one distinction the island's own hover keeps.
+            self.open(takeFocus: false, wholeDashboard: true, on: mirror.id)
             self.provideHapticFeedback()
         }
         mirror.hoverWork = work
         let delay = NotchSupport.sanitizedHoverDelay(UserDefaults.standard.double(forKey: DefaultsKey.notchHoverDelay))
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    /// The peek a copy's pointer asked for, at the delay the person chose: the
+    /// page named on this display, and no page opened. The peek is this copy's -
+    /// one copy's pointer does not peek another display's island - and its surface
+    /// grows under a pointer that has not moved, as the island's does.
+    private func scheduleMirrorPeek(_ mirror: NotchMirror) {
+        mirror.cancelHoverWork()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            mirror.hoverWork = nil
+            guard self.running, !self.suspended, self.showsOnAllDisplays, mirror.inside,
+                  !mirror.hover.suppressed, self.hoverOpeningEnabled,
+                  !mirror.model.expanded, !mirror.model.peeking,
+                  !self.expansion.presents(on: mirror.id),
+                  self.hoverOpensThroughNotice || self.notice == nil || self.hiddenUntilHover,
+                  self.pointerOverMirror(mirror) else { return }
+            mirror.model.beginPeek()
+            // The copy's surface is its own size, so the copy's window is grown
+            // here, on this display, and nothing else is asked to move.
+            self.syncMirrors()
+            self.provideHapticFeedback()
+        }
+        mirror.hoverWork = work
+        let delay = NotchSupport.sanitizedHoverDelay(UserDefaults.standard.double(forKey: DefaultsKey.notchHoverDelay))
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    /// The close a copy's pointer asked for: the peek taken back, or the page that
+    /// copy's hover opened closed, after the pause the person chose. The island's
+    /// own close asks its questions again when the deadline fires, and so do these,
+    /// of this copy: the pointer is not back on that island, that island's news is
+    /// still one a pointer may close, and the page is still the display's that
+    /// asked for it.
+    private func scheduleMirrorClose(_ mirror: NotchMirror) {
+        mirror.cancelHoverWork()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            mirror.hoverWork = nil
+            guard self.running, !self.suspended, self.showsOnAllDisplays, !mirror.inside,
+                  !mirror.hover.suppressed, self.pointerOverMirror(mirror) == false,
+                  self.captureControls == nil, !self.pinned, !self.heldDrag, !self.keepsWorkingSurface,
+                  !AssistiveKeyboard.ownsCocoaPoint(NSEvent.mouseLocation) else { return }
+            if mirror.model.peeking {
+                mirror.model.endPeek()
+                self.syncMirrors()
+                self.removeMirrorExitMonitors(mirror)
+                return
+            }
+            guard self.carriesPage(mirror),
+                  NotchSupport.closesOnPointerExit(expanded: true, peeking: false,
+                                                   openedByHover: self.openedByHover) else { return }
+            self.collapse()
+        }
+        mirror.hoverWork = work
+        let delay = NotchSupport.closeDelay()
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    /// The moves followed while a copy's hover keeps something open, for that copy
+    /// alone. AppKit reports hover from the moves a window receives, and those
+    /// stop when the pointer crosses the transparent margin, passes into another
+    /// display, or is taken by the page under it; the exit that closes a copy is
+    /// then never delivered. From an exit, while the copy has something to keep
+    /// open, every move is asked of that copy's window, which answers for its own
+    /// display. A pointer at rest costs nothing.
+    private func syncMirrorExitMonitoring(_ mirror: NotchMirror, entered: Bool) {
+        let closes = NotchSupport.closesOnPointerExit(expanded: carriesPage(mirror),
+                                                      peeking: mirror.model.peeking,
+                                                      openedByHover: openedByHover)
+        // The report of a leaving is where a copy starts following the pointer's
+        // moves: the exit AppKit drops, and the pointer that slips back
+        // unreported, are both covered from there on. A pointer at rest costs
+        // nothing, and a copy with nothing an exit closes follows nothing.
+        let watching = closes && !hiddenUntilHover && captureControls == nil && !pinned && !heldDrag
+            && !keepsWorkingSurface
+        guard watching else { removeMirrorExitMonitors(mirror); return }
+        guard mirror.exitMonitors.isEmpty else { return }
+        let moves: NSEvent.EventTypeMask = [.mouseMoved, .leftMouseDragged]
+        if let token = NSEvent.addGlobalMonitorForEvents(matching: moves, handler: { [weak self, weak mirror] _ in
+            guard let self, let mirror else { return }
+            self.mirrorHover(mirror.id, entered: false)
+        }) { mirror.exitMonitors.append(token) }
+        if let token = NSEvent.addLocalMonitorForEvents(matching: moves, handler: { [weak self, weak mirror] event in
+            guard let self, let mirror else { return event }
+            self.mirrorHover(mirror.id, entered: false)
+            return event
+        }) { mirror.exitMonitors.append(token) }
+    }
+
+    private func removeMirrorExitMonitors(_ mirror: NotchMirror) {
+        guard !mirror.exitMonitors.isEmpty else { return }
+        mirror.exitMonitors.forEach(NSEvent.removeMonitor)
+        mirror.exitMonitors.removeAll()
     }
 
     /// A surface that changed under a pointer that has not moved: a page opened
@@ -4206,13 +4365,17 @@ final class NotchService: ObservableObject {
             mirror.inside = false
             mirror.hover.update(pointerInside: false)
             mirror.cancelHoverWork()
+            if mirror.model.peeking { mirror.model.endPeek() }
             return
         }
         mirror.inside = true
-        guard surfaceChanged, mirror.hoverWork == nil, !mirror.model.expanded,
+        guard surfaceChanged, mirror.hoverWork == nil, !mirror.model.expanded, !mirror.model.peeking,
               !mirror.hover.suppressed, hoverOpeningEnabled,
               hoverOpensThroughNotice || notice == nil || hiddenUntilHover else { return }
-        scheduleMirrorOpen(mirror)
+        // The answer a resting pointer gets is the answer a moving one gets: the
+        // whole dashboard where the person chose that, the page's name where they
+        // chose the peek.
+        if mirrorHoverExpands { scheduleMirrorOpen(mirror) } else { scheduleMirrorPeek(mirror) }
     }
 
     /// A press on a copy's island: the press cancels that copy's opening, and a

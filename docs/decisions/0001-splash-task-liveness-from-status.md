@@ -34,7 +34,7 @@
      than the polling interval leaves nothing but its counters - and they never
      keep one open, because a busy neighbour's counters would hold a finished
      run open forever.
-  3. The confirmation window is five minutes
+  3. The confirmation window is ten minutes
      (`NotchSplashSupport.taskIdleSeconds`), and it belongs to the dashboard. It
      is not Splash's own `weights.idle_release_seconds`, which is the engine
      deciding when to put its weights to sleep; the two are asked separately and
@@ -58,9 +58,17 @@
      finished. The app's own agent harness needs windows of an hour (Claude) and
      six hours (the rest) before a session file is taken for dead, which is the
      measure of how sparse that signal is at the scale of a single task.
+  7. The notice of a run that ended carries its length and the three times that
+     place it in the day: where the run began, the quiet mark its clock froze at,
+     and the moment the notice goes out. They are three instants and not one. The
+     window sits between the quiet mark and the sending, so the sending is the
+     session's own clock, and the start is handed to the notice by the tracker -
+     arithmetic on the sending time would put both the start and the end a whole
+     window too late. Each language places the four figures in its own order, and
+     the localization test keeps the places honest.
 - Consequences: benefits, costs, risks, and migration/testing implications.
   The card shows the task's length, and the island stops watching at the same
-  number. The cost is that a task is called over up to five minutes after its
+  number. The cost is that a task is called over up to ten minutes after its
   last work, and the run is open in that stretch: an activity that has finished
   keeps its frozen clock, and new work resumes the same run. A status that stops
   answering leaves the run open, which is the safe direction - the card keeps a
@@ -71,8 +79,10 @@
   revisited together, in this record.
 - Related code: `Sources/Vorssaint/Services/Notch/NotchSplashSupport.swift`
   (`NotchSplashStatus.Activity.hasWork`, `NotchSplashSupport.taskIdleSeconds`,
-  `NotchSplashTaskTracker`, `NotchSplashService.apply` and `report`),
+  `NotchSplashSupport.timeOfDayText`, `NotchSplashTaskTracker`,
+  `NotchSplashService.apply`, `finishTask` and `report`),
+  `Sources/Vorssaint/Core/NotchSplashStrings.swift` (`notifyActivityEndedBody`),
   `Sources/Vorssaint/UI/Notch/NotchSplashStrip.swift`,
-  `Tests/NotchSplashTests.swift` (the window, the frozen clock, the live fields,
-  the failed and stale readings, the instance that changed).
+  `Tests/NotchSplashTests.swift` (the window, the frozen clock, the notice's three
+  times, the live fields, the failed and stale readings, the instance that changed).
 - Supersedes: not applicable.

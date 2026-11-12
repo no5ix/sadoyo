@@ -1027,6 +1027,11 @@ final class NotchMirrorModel: ObservableObject {
     /// page instead of the closed strip. One display at a time, answered by
     /// `NotchDisplayExpansion`; the windows themselves never move.
     @Published private(set) var expanded = false
+    /// Whether this copy's own pointer asked for the peek: the page named, not
+    /// opened. The island's window peeks from the service's own state, which
+    /// belongs to the island's display; a copy's peek belongs to the copy whose
+    /// pointer waited out the delay, and one copy's peek is not another's.
+    @Published private(set) var peeking = false
     var shown = false
     /// The outline last drawn around it, and whether a timer's color tinted it.
     var outline: Bool?
@@ -1041,9 +1046,9 @@ final class NotchMirrorModel: ObservableObject {
 
     /// Whether anything it draws changed, so a copy is only resized when it did.
     func update(geometry: NotchGeometry, strip: NotchGeometry, size: CGSize, activity: NotchCompactActivity?,
-                expanded: Bool) -> Bool {
+                expanded: Bool, peeking: Bool = false) -> Bool {
         guard self.geometry != geometry || self.strip != strip || self.size != size || self.activity != activity
-                || self.expanded != expanded else {
+                || self.expanded != expanded || self.peeking != peeking else {
             return false
         }
         self.geometry = geometry
@@ -1051,8 +1056,16 @@ final class NotchMirrorModel: ObservableObject {
         self.size = size
         self.activity = activity
         self.expanded = expanded
+        self.peeking = peeking
         return true
     }
+
+    /// The peek this copy's pointer asked for, begun and ended by the service:
+    /// the copy's surface grows under a pointer that has not moved, and the
+    /// pointer's leaving takes the growth back.
+    func beginPeek() { peeking = true }
+
+    func endPeek() { peeking = false }
 }
 
 /// A choice outlives the gaps in what was chosen, such as a song changing

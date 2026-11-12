@@ -1364,6 +1364,12 @@ def main():
               "    func retireExpansion()",
               "    func mirrorHover(",
               "    private func scheduleMirrorOpen(",
+              "    private func scheduleMirrorPeek(",
+              "    private func scheduleMirrorClose(",
+              "    private func syncMirrorExitMonitoring(",
+              "    private func removeMirrorExitMonitors(",
+              "    private func carriesPage(",
+              "    private var mirrorHoverExpands:",
               "    private func rearmMirrorHoverOpen(",
               "    private func mirrorWillPress(",
               "    private func mirrorWasClicked(",
@@ -1415,6 +1421,11 @@ def main():
         music_visibility = music_visibility.replace(call + "()", call + "(in: ReviewDefaults.current)")
     music_visibility = music_visibility.replace("NotchSupport.routes(.track)",
                                                 "NotchSupport.routes(.track, in: ReviewDefaults.current)")
+    # Closing the page asks each copy to stop following its pointer's moves. This
+    # fixture has no copies: the music strip's visibility is the page's shape, and
+    # the copies are the mirror suite's to test.
+    music_visibility = music_visibility.replace(
+        "        mirrors.values.forEach { removeMirrorExitMonitors($0) }\n", "")
     music_visibility = music_visibility.replace("UserDefaults.standard", "ReviewDefaults.current!")
     music_visibility = music_visibility.replace("calendar: hasCalendarActivity", "calendar: false")
     music_visibility = music_visibility.replace("splash: hasSplashActivity", "splash: false")
@@ -1482,6 +1493,9 @@ def main():
               "    private func closeMirrors()", "    private func updateFullscreenDisplays()",
               "    func presentsExpansion(on", "    func retireExpansion()",
               "    func mirrorHover(", "    private func scheduleMirrorOpen(",
+              "    private func scheduleMirrorPeek(", "    private func scheduleMirrorClose(",
+              "    private func syncMirrorExitMonitoring(", "    private func removeMirrorExitMonitors(",
+              "    private func carriesPage(", "    private var mirrorHoverExpands:",
               "    private func rearmMirrorHoverOpen(", "    private func mirrorWillPress(",
               "    private func mirrorWasClicked(", "    func expand(on"])
           .replace("NotchSupport.hidesUntilHover()", "hidesUntilHover")
@@ -1490,6 +1504,10 @@ def main():
           .replace("NotchSupport.showsInCaptures()", "showsInCaptures")
           .replace("UserDefaults.standard.bool(forKey: DefaultsKey.notchOutlineEnabled)", "outlineEnabled")
           .replace("UserDefaults.standard.bool(forKey: DefaultsKey.notchHideInFullscreen)", "hidesInFullscreen")
+          .replace("UserDefaults.standard.bool(forKey: DefaultsKey.notchHoverExpands)", "hoverExpands")
+          .replace("AssistiveKeyboard.ownsCocoaPoint(NSEvent.mouseLocation)", "assistiveKeyboardHoldsPointer")
+          .replace("captureControls == nil", "captureControlsActive == false")
+          .replace("NotchSupport.closeDelay()", "mirrorCloseDelay")
           .replace("FeatureStrings.notch(L10n.shared.language).open", "openTitle")
           .replace("FeatureStrings.notch(L10n.shared.language).collapse", "collapseTitle")
           + "}\n}\n")
