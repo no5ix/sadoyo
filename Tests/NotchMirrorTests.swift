@@ -30,6 +30,7 @@ enum NotchMirrorContract {
         var orders = 0
         var orderedBelow = 0
         var windowNumber = 1
+        var acceptsKeyFocus = false
         func orderFrontRegardless() { isVisible = true; orders += 1 }
         func order(_ place: NSWindow.OrderingMode, relativeTo otherWindow: Int) {
             isVisible = true
@@ -43,9 +44,16 @@ enum NotchMirrorContract {
         var hides = 0, closes = 0
         var outline: (enabled: Bool, color: NSColor)?
         var activationRect = CGRect.zero
+        var activationTitle = ""
         var activate: (() -> Void)?
+        var willPress: (() -> Void)?
         var settling = false
         var settled: [() -> Void] = []
+        /// The copy's own hover area, and the handler that answers its pointer.
+        var hoverArea: CGRect?
+        var hoverHandler: ((Bool) -> Void)?
+        func setHoverArea(_ area: CGRect?) { hoverArea = area }
+        func setHoverHandler(_ handler: @escaping (Bool) -> Void) { hoverHandler = handler }
         func present(size: CGSize, geometry: NotchGeometry, animated: Bool, transitionContent: NotchContentTransition) {
             presented.append((size, geometry, animated, transitionContent))
         }
@@ -54,15 +62,35 @@ enum NotchMirrorContract {
         func setOutline(enabled: Bool, color: NSColor) { outline = (enabled, color) }
         func setActivationArea(_ rect: CGRect, title: String, willPress: @escaping () -> Void, activate: @escaping () -> Void) {
             activationRect = rect
+            activationTitle = title
+            self.willPress = willPress
             self.activate = activate
         }
         func whenSettled(_ action: @escaping () -> Void) {
             if settling { settled.append(action) } else { action() }
         }
     }
-    struct NotchMirror {
+    /// A display's own island, as the service keeps its copies: the window built
+    /// for that display, the pointer's place on that display, the opening its
+    /// pointer asked for, and whether it draws the island's page. The test says
+    /// where the pointer is, and runs the deadline for itself.
+    final class Mirror {
+        let id: CGDirectDisplayID
         let host: Host
         let model: NotchMirrorModel
+        var inside = false
+        var hover = NotchHoverState()
+        var hoverWork: DispatchWorkItem?
+        var lastSize: CGSize?
+        var over = false
+        init(id: CGDirectDisplayID, host: Host, model: NotchMirrorModel) {
+            self.id = id
+            self.host = host
+            self.model = model
+        }
+        func cancelHoverWork() { hoverWork?.cancel(); hoverWork = nil }
+        /// The pointer's deadline for this display, run when the test says it is up.
+        func runHoverWork() { hoverWork?.perform(); hoverWork = nil }
     }
     enum SpaceWindowBridge {
         static var fullscreen: Set<CGDirectDisplayID> = []
@@ -81,7 +109,7 @@ enum NotchMirrorContract {
         var windowHost: Host? = Host()
         var mirrorHeldForArrival: CGDirectDisplayID?
         var displayID: CGDirectDisplayID? = 1
-        var mirrors: [CGDirectDisplayID: NotchMirror] = [:]
+        var mirrors: [CGDirectDisplayID: Mirror] = [:]
         var fullscreenDisplays: Set<CGDirectDisplayID> = []
         var compactActivity: NotchCompactActivity?
         var compactCompanion: NotchCompactActivity?
@@ -114,14 +142,39 @@ enum NotchMirrorContract {
                              base: NotchGeometry?) -> NotchGeometry {
             base!.compactTimerGeometry(showsDownloads: false, wing: 60)
         }
-        func makeMirror(geometry: NotchGeometry, size: CGSize) -> NotchMirror {
+        func makeMirror(id: CGDirectDisplayID, geometry: NotchGeometry, size: CGSize) -> Mirror {
             let host = Host()
             made.append(host)
-            return NotchMirror(host: host, model: NotchMirrorModel(geometry: geometry, size: size))
+            return Mirror(id: id, host: host, model: NotchMirrorModel(geometry: geometry, size: size))
         }
-        func collapse() { collapses += 1; expanded = false; peeking = false }
-        func open() { opened += 1; expanded = true }
-        func openCountdownEvent() { countdownOpenings += 1; expanded = true }
+        /// Which display draws the island's page, as production keeps it: one
+        /// display at a time, and no window that moves.
+        var expansion = NotchDisplayExpansion()
+        var expandedGeometry: NotchGeometry {
+            let screen = NSScreen.screens.first { $0.notchDisplayID == expansion.owner } ?? NSScreen.screens[0]
+            return baseGeometry(for: screen)
+        }
+        var expandedSize: CGSize { expandedGeometry.expanded }
+        /// A copy's pointer's place, as the test says it is.
+        func pointerOverMirror(_ mirror: Mirror) -> Bool { mirror.over }
+        var hoverOpeningEnabled = true
+        var hoverOpensThroughNotice = true
+        var hiddenUntilHover = false
+        var notice: NotchNotice?
+        func provideHapticFeedback() {}
+        var collapseTitle = "Collapse"
+        func collapse() { collapses += 1; expanded = false; peeking = false; expansion.closed() }
+        func open() { opened += 1; expanded = true; expansion.asking(toOpen: displayID ?? 0) }
+        func open(takeFocus: Bool, on display: CGDirectDisplayID?) {
+            opened += 1
+            expanded = true
+            expansion.asking(toOpen: display ?? (displayID ?? 0))
+        }
+        func openCountdownEvent(on display: CGDirectDisplayID? = nil) {
+            countdownOpenings += 1
+            expanded = true
+            expansion.asking(toOpen: display ?? (displayID ?? 0))
+        }
         func move(to screen: NSScreen) { displayID = screen.notchDisplayID; moves.append(screen.notchDisplayID) }
     }
 
@@ -257,23 +310,57 @@ enum NotchMirrorContract {
         service.mascotVisible = false
         service.syncMirrors()
 
-        // A click on a copy brings the island there, open, closing it where it was.
+        // A click on a copy opens the page on that copy's display, and the page
+        // leaves the display that carried it. No window moves, and no island
+        // changes the display it was built for.
+        // Production's syncMirrors wires a copy's hover to that copy; the fixture's
+        // makeMirror builds the window, so the same production answer is wired here.
+        for (id, copy) in service.mirrors {
+            copy.host.setHoverHandler { [weak service] entered in service?.mirrorHover(id, entered: entered) }
+        }
         service.displayID = 2
+        service.expansion.asking(toOpen: 2)
         service.expanded = true
         service.syncMirrors()
+        let closedBefore = service.collapses
+        service.mirrors[1]?.over = true
         service.mirrors[1]?.host.activate?()
-        suite.expect(service.collapses == 1 && service.moves == [1] && service.displayID == 1 && service.opened == 1,
-                     "clicking a copy closes the island, moves it to that display and opens it there")
+        service.syncMirrors()
+        suite.expect(service.expanded && service.expansion.owner == 1 && service.displayID == 2,
+                     "clicking a copy opens the page there, and the island keeps its own display")
+        suite.expect(service.mirrors[1]?.model.expanded == true
+                     && service.mirrors[1]?.model.geometry.screen == builtIn.frame,
+                     "the copy that was opened draws the page, measured for its own display")
+        suite.expect(service.mirrors[1]?.host.activationTitle == service.collapseTitle,
+                     "its header is the one that closes the page")
+        // The page's own copy closes at a second click, as the island's header does.
+        service.mirrors[1]?.host.activate?()
+        suite.expect(service.collapses == closedBefore + 1 && !service.expanded && service.expansion.owner == nil,
+                     "a click on the display that carries the page closes it")
+        service.syncMirrors()
+        // A deliberate hover opens the copy's display at the chosen delay, and a
+        // pointer that has not stayed there opens nothing.
+        service.mirrors[1]?.over = true
+        service.mirrors[1]?.host.hoverHandler?(true)
+        suite.expect(service.mirrors[1]?.hoverWork != nil && !service.expanded,
+                     "a hover on a copy waits out the chosen delay")
+        service.mirrors[1]?.runHoverWork()
+        suite.expect(service.expanded && service.expansion.owner == 1, "a hover past the delay opens that display")
+        service.collapse()
+        service.syncMirrors()
+        service.mirrors[1]?.over = false
+        service.mirrors[1]?.host.hoverHandler?(true)
+        suite.expect(service.mirrors[1]?.hoverWork == nil && service.expansion.owner == nil,
+                     "a pointer no longer over the copy opens nothing")
         let opened = service.opened
-        service.canFollowPointer = false
-        service.mirrors[2]?.host.activate?()
-        service.canFollowPointer = true
-        suite.expect(service.opened == opened, "a notice or a drag keeps the island where it is")
         service.compactActivity = .calendar
-        service.mirrors[2]?.host.activate?()
+        service.mirrors[1]?.host.activate?()
         service.compactActivity = nil
-        suite.expect(service.countdownOpenings == 1 && service.opened == opened,
-                     "clicking a copy of an event countdown opens on its event")
+        suite.expect(service.countdownOpenings == 1 && service.opened == opened
+                     && service.expansion.owner == 1,
+                     "clicking a copy of an event countdown opens its event on that display")
+        service.collapse()
+        service.syncMirrors()
 
         // Unplugging a display closes its copy; leaving the choice closes them all.
         service.displayID = 1
@@ -299,11 +386,19 @@ enum NotchMirrorContract {
         suite.expect(service.mirrors.isEmpty, "a stopped island leaves no copies")
 
         let model = NotchMirrorModel(geometry: external2, size: CGSize(width: 100, height: 24))
-        suite.expect(!model.update(geometry: external2, strip: external2, size: CGSize(width: 100, height: 24), activity: nil)
-                     && model.update(geometry: external2, strip: external2, size: CGSize(width: 120, height: 24), activity: nil)
-                     && model.update(geometry: external2, strip: external2, size: CGSize(width: 120, height: 24), activity: .music)
-                     && model.activity == .music,
-                     "a copy is only redrawn when what it shows changes")
+        suite.expect(!model.update(geometry: external2, strip: external2, size: CGSize(width: 100, height: 24),
+                                   activity: nil, expanded: false)
+                     && model.update(geometry: external2, strip: external2, size: CGSize(width: 120, height: 24),
+                                     activity: nil, expanded: false)
+                     && model.update(geometry: external2, strip: external2, size: CGSize(width: 120, height: 24),
+                                     activity: .music, expanded: false)
+                     && model.activity == .music
+                     && model.update(geometry: external2, strip: external2, size: CGSize(width: 120, height: 24),
+                                     activity: .music, expanded: true)
+                     && model.expanded
+                     && !model.update(geometry: external2, strip: external2, size: CGSize(width: 120, height: 24),
+                                      activity: .music, expanded: true),
+                     "a copy is only redrawn when what it shows changes, and the page it draws is such a change")
     }
 
     /// A pending arrival may retain an eligible copy, but cannot overrule the

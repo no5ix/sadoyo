@@ -24,7 +24,15 @@ enum NotchDestinationContract {
     enum NSWorkspace { static let shared = Workspace() }
     final class Workspace { var frontmostApplication: RunningApplication? }
     struct RunningApplication { let processIdentifier: Int32 }
-    final class Host { func containsHover(_ point: CGPoint) -> Bool { false } }
+    final class Host {
+        /// The window this host presents: the island's own, and a copy's for a
+        /// display of its own. The keyboard is held by the window that draws the
+        /// open page, whichever that is, so the window the state names and the
+        /// window the host presents are one and the same.
+        let panel: Panel
+        init(panel: Panel) { self.panel = panel }
+        func containsHover(_ point: CGPoint) -> Bool { false }
+    }
     enum NSEvent { static let mouseLocation = CGPoint.zero }
     final class AppDelegate { func closePopover(preservingNotch: Bool) {} }
     final class Application {
@@ -95,8 +103,33 @@ enum NotchDestinationContract {
         var running = true
         var session = NotchSessionState()
         var suspended: Bool { !session.canPresent }
-        var panel: Panel? = Panel()
-        var windowHost: Host? = Host()
+        var panel: Panel?
+        /// The window that holds the keyboard: the island's own, or the copy whose
+        /// display carries the open page. The test has one window.
+        var expansionPanel: Panel? { panel }
+        var windowHost: Host?
+        init() {
+            // The island's one window, shared by the state and the host that
+            // presents it, so a page drawn by the island's own window answers the
+            // keyboard of the window the state names.
+            let window = Panel()
+            panel = window
+            windowHost = Host(panel: window)
+        }
+        /// The display the island stands on, the display whose window draws the
+        /// open page, and the copies that answer their own displays. This test has
+        /// one window, so the page's window is that one, wherever it was opened.
+        var displayID: CGDirectDisplayID? = 1
+        var expansion = NotchDisplayExpansion()
+        var expansionHost: Host? { windowHost }
+        struct Copy {
+            var hover = NotchHoverState()
+        }
+        var mirrors: [CGDirectDisplayID: Copy] = [:]
+        func presentsExpansion(on id: CGDirectDisplayID?) -> Bool {
+            guard let id, let owner = expansion.owner else { return false }
+            return owner == id
+        }
         var modules: [NotchModule] = []
         var selected = NotchModule.controls
         var selectedMetric: MetricDetailKind?
@@ -521,6 +554,7 @@ enum NotchDestinationContract {
         let detached = Service()
         _ = detached.showScratchpad(toggle: true)
         detached.panel = nil
+        detached.windowHost = nil
         suite.expect(detached.showScratchpad(toggle: true) && detached.expanded,
                      "an island without a panel is never taken for the key window")
         service.panel?.isKeyWindow = true

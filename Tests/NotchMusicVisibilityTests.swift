@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Vorssaint
 
+import CoreGraphics
 import Foundation
 
 /// Production presentation and consumer methods run against a controlled
@@ -41,8 +42,13 @@ enum NotchMusicVisibilityTests {
         var onSelectionProgressChange: ((Bool) -> Void)?
     }
     enum NotchContentTransition { case none, dismiss }
-    struct Host { func containsHover(_ point: CGPoint) -> Bool { false } }
-    struct Panel {
+    struct Host {
+        /// The window this host presents. The keyboard belongs to the window that
+        /// draws the open page, which here is this island's own.
+        let panel = Panel()
+        func containsHover(_ point: CGPoint) -> Bool { false }
+    }
+    final class Panel {
         var acceptsKeyFocus = false
         var level = 0
         func resignKey() {}
@@ -63,6 +69,18 @@ enum NotchMusicVisibilityTests {
         var running = true
         var suspended = false
         var expanded = false
+        /// The display the island stands on, the display whose window draws the
+        /// open page, and the geometry that page is measured for. This contract has
+        /// one window, so the page is drawn by the island's own, at its own measure;
+        /// the page's ownership is production's own type.
+        var displayID: CGDirectDisplayID? = 1
+        var expansion = NotchDisplayExpansion()
+        var presentationGeometry: NotchGeometry { geometry }
+        var expansionHost: Host? { windowHost }
+        /// One window in this contract, and its tests open the island by setting
+        /// `expanded`: the page is drawn by the island's own window whenever a page
+        /// is open, so the page's presence answers which window draws it here.
+        func presentsExpansion(on id: CGDirectDisplayID?) -> Bool { expanded }
         var peeking = false
         var showingAppPanel = false
         var showingSections = false
@@ -245,8 +263,9 @@ enum NotchMusicVisibilityTests {
             service.expanded = true
             service.selected = .music
             service.syncVisibleConsumers()
-            suite.expect(reader.running && service.surfaceSize == service.expandedSize,
-                         "manually opening Music in fullscreen starts its reader")
+            suite.expect(reader.running, "manually opening Music in fullscreen starts its reader")
+            suite.expect(service.surfaceSize == service.expandedSize,
+                         "and the island opened there is drawn at the page's size")
             service.collapse()
             suite.expect(!reader.running && service.surfaceSize == closed,
                          "closing Music in fullscreen stops its reader and restores the black cutout")
@@ -278,8 +297,10 @@ enum NotchMusicVisibilityTests {
                     service.selected = module
                     service.expanded = true
                     service.syncVisibleConsumers()
-                    suite.expect(reader.running && service.surfaceSize == service.expandedSize,
+                    suite.expect(reader.running,
                            "Nothing still starts the music reader when its explicit controls open")
+                    suite.expect(service.surfaceSize == service.expandedSize,
+                           "and the island opened on its controls is drawn at the page's size")
                     for playing in [true, false, true] {
                         reader.playback = .init(isPlaying: playing)
                         service.syncVisibleConsumers()

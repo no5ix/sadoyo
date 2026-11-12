@@ -6,6 +6,14 @@ import SwiftUI
 
 struct NotchView: View {
     @ObservedObject var service: NotchService
+    /// Drawn by a copy's window: the page this display was opened on, at the
+    /// size that display's window presents, and with none of the island's own
+    /// rest, notice, capture controls or fullscreen state. One page, on the one
+    /// display whose island was opened; the windows themselves never move.
+    var presentsPage: Bool = false
+    /// The size a copy's window draws the page at, and nil for the island's own
+    /// window, which measures its own surface.
+    var pageSurfaceSize: CGSize? = nil
     @ObservedObject private var l10n = L10n.shared
     @ObservedObject private var music = NotchMusicService.shared
     @ObservedObject private var launcher = QuickLauncherService.shared
@@ -32,7 +40,7 @@ struct NotchView: View {
                 guard arrives || leaves else { return }
                 transaction.animation = .easeInOut(duration: NotchMascotMotion.restCrossfade)
             }
-            .frame(width: service.surfaceSize.width, height: service.surfaceSize.height, alignment: .top)
+            .frame(width: surfaceSize.width, height: surfaceSize.height, alignment: .top)
             .foregroundStyle(.white)
             // The window server leaves SwiftUI content that ignores hit tests
             // out of its own hit test unless it is fully opaque. The backdrop
@@ -74,8 +82,21 @@ struct NotchView: View {
         return false
     }
 
+    /// The surface this window draws: the island measures its own, and a copy is
+    /// drawn at the size its host presents it at.
+    private var surfaceSize: CGSize { pageSurfaceSize ?? service.surfaceSize }
+
+    /// Whether this window draws the open page: the island's own window while the
+    /// page belongs to its display, and a copy's window where the pointer opened
+    /// the page on that display.
+    private var showsPage: Bool { presentsPage || service.pageIsOnIslandDisplay }
+
+    /// The geometry of the surface drawn: the island's own, and the display whose
+    /// island was opened, for a copy's page.
+    private var pageGeometry: NotchGeometry { presentsPage ? service.expandedGeometry : service.geometry }
+
     private var shape: NotchShape {
-        NotchShape.island(height: service.surfaceSize.height, geometry: service.geometry)
+        NotchShape.island(height: surfaceSize.height, geometry: pageGeometry)
     }
 
     @ViewBuilder private var surface: some View {
@@ -97,7 +118,7 @@ struct NotchView: View {
             } else {
                 NotchCaptureControlsView(options: options, service: service, layout: service.captureControlsLayout)
             }
-        } else if service.expanded {
+        } else if showsPage {
             if service.showingCommandBar {
                 commandBarPage
             } else {

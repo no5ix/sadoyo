@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-11-10T17:35:49Z",
-  "updated_at": "2026-11-10T18:29:05Z",
+  "updated_at": "2026-11-11T20:05:50Z",
   "files": {
     ".gitattributes": {
       "role": "index",
@@ -83,9 +83,9 @@
     },
     "ARCHITECTURE.md": {
       "role": "index",
-      "sha256": "a7263ef3f5f9db4726d90dda11a62991cd512b0a76652da3ac679279c84e2c1f",
-      "size": 6276,
-      "normalized_sha256": "a7263ef3f5f9db4726d90dda11a62991cd512b0a76652da3ac679279c84e2c1f"
+      "sha256": "3e069898e7a0fde77c917d3920d3fafe7378a1825f68986a78758948063eee11",
+      "size": 7270,
+      "normalized_sha256": "3e069898e7a0fde77c917d3920d3fafe7378a1825f68986a78758948063eee11"
     },
     "CHANGELOG.md": {
       "role": "index",
@@ -6405,9 +6405,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "1058a6553f8ddad5da757cc94ac521fbd8ba381a5e720ef759e6d5dd7df35a2a",
-      "size": 10023,
-      "normalized_sha256": "1058a6553f8ddad5da757cc94ac521fbd8ba381a5e720ef759e6d5dd7df35a2a"
+      "sha256": "eaddf78fe3a15a4c307b9eddf7fc5807a6eea530a138e3f7b2df51785e540f99",
+      "size": 10196,
+      "normalized_sha256": "eaddf78fe3a15a4c307b9eddf7fc5807a6eea530a138e3f7b2df51785e540f99"
     },
     "aoci.meta.txt": {
       "role": "index",

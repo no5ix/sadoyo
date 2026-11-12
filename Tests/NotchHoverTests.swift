@@ -49,6 +49,17 @@ enum NotchHoverTests {
     final class Host {
         var visible = true
         var rect = CGRect.zero
+        /// The door's own answers: the press, and the click, wired by the test to
+        /// the production answers a copy's window is given in `syncMirrors`.
+        var activationRect = CGRect.zero
+        var willPress: (() -> Void)?
+        var activate: (() -> Void)?
+        func setActivationArea(_ rect: CGRect, title: String, willPress: @escaping () -> Void,
+                               activate: @escaping () -> Void) {
+            activationRect = rect
+            self.willPress = willPress
+            self.activate = activate
+        }
         /// The closed island's place inside a banner that grew over it, as the
         /// production host keeps it for hover.
         var hoverArea: CGRect?
@@ -71,6 +82,26 @@ enum NotchHoverTests {
             if let area = hoverArea, area.contains(local) { return true }
             return controls.contains { $0.contains(point) }
         }
+    }
+    /// A display's own island, as the service keeps its copies: the window built
+    /// for that display, the pointer's place on that display, the opening its
+    /// pointer asked for, and whether this window draws the island's page. The
+    /// test says where the pointer is and runs the deadline for itself.
+    final class Mirror {
+        let id: CGDirectDisplayID
+        let host = Host()
+        let model: NotchMirrorModel
+        var inside = false
+        var hover = NotchHoverState()
+        var hoverWork: DispatchWorkItem?
+        var lastSize: CGSize?
+        init(id: CGDirectDisplayID, geometry: NotchGeometry) {
+            self.id = id
+            model = NotchMirrorModel(geometry: geometry, size: CGSize(width: 180, height: 32))
+        }
+        func cancelHoverWork() { hoverWork?.cancel(); hoverWork = nil }
+        /// The pointer's deadline for this display, run when the test says it is up.
+        func runHoverWork() { hoverWork?.perform(); hoverWork = nil }
     }
     enum NotchContentTransition { case none, reveal, dismiss, depart, replace }
     enum NotchMusicService {
@@ -204,19 +235,27 @@ enum NotchHoverTests {
         /// Whether an opening asked for the whole dashboard over the strip the
         /// pointer rests on, as the production open's `wholeDashboard` says.
         var askedWholeDashboard = false
-        func open(_ module: NotchModule? = nil, takeFocus: Bool, wholeDashboard: Bool = false) {
+        func open(_ module: NotchModule? = nil, takeFocus: Bool, wholeDashboard: Bool = false,
+                  on display: CGDirectDisplayID? = nil) {
             requestedModule = module
             askedWholeDashboard = wholeDashboard
+            askedDisplay = display
             openings += 1; expanded = true; openedByHover = !takeFocus
-            hoverState.open(); hoverWork?.cancel(); hoverWork = nil
+            _ = expansion.asking(toOpen: display ?? (displayID ?? 0))
+            mirrors[display ?? 0]?.hover.open()
+            if display == nil || display == displayID { hoverState.open() }
+            hoverWork?.cancel(); hoverWork = nil
+            syncExpansion()
             updateBounds()
         }
         func collapse() {
             // The production collapse refuses while a drag holds the island.
             guard !heldDrag else { return }
             closures += 1; expanded = false; peeking = false; openedByHover = false
+            expansion.closed()
             hoverState.close(pointerInside: windowHost?.containsHover(NSEvent.mouseLocation) == true)
             hoverWork?.cancel(); hoverWork = nil
+            syncExpansion()
             updateBounds()
         }
         func mutatePresentation(transitionContent: NotchContentTransition, _ change: () -> Void) { change(); updateBounds() }
@@ -228,6 +267,45 @@ enum NotchHoverTests {
         func bridgeMascotHome(from: CGFloat) {}
         func syncMenuSpaceMonitoring() { menuSpaceSyncs += 1 }
         func provideHapticFeedback() { feedbacks += 1 }
+        /// Each other display's island, and the one display that draws the page.
+        var displayID: CGDirectDisplayID? = 1
+        var mirrors: [CGDirectDisplayID: Mirror] = [:]
+        var showsOnAllDisplays = true
+        var expansion = NotchDisplayExpansion()
+        var pageIsOnIslandDisplay: Bool { expansion.owner != nil && expansion.owner == displayID }
+        var askedDisplay: CGDirectDisplayID?
+        var countdownOpenings = 0
+        /// A copy of a countdown's strip is a door to its event, opened on the
+        /// display whose island was asked.
+        func openCountdownEvent(on display: CGDirectDisplayID? = nil) {
+            countdownOpenings += 1
+            open(nil, takeFocus: true, on: display)
+        }
+        /// A copy's window, built for its own display, and the pointer's place there.
+        func addMirror(_ id: CGDirectDisplayID, screen: CGRect = CGRect(x: 0, y: 0, width: 1920, height: 1080)) -> Mirror {
+            let geometry = NotchGeometry(screen: screen, safeAreaTop: 0, cameraWidth: 0, menuBarHeight: 22,
+                                         compactSideRoom: 64)
+            let mirror = Mirror(id: id, geometry: geometry)
+            // The copy's window is built for its own display, and its whole
+            // bounds answer the pointer there.
+            mirror.host.rect = geometry.frame(for: mirror.model.size)
+            mirrors[id] = mirror
+            return mirror
+        }
+        /// A copy's pointer's place, read from that copy's own window, whose frame
+        /// is its display's - so a pointer on one display is never inside another
+        /// display's island.
+        func pointerOverMirror(_ mirror: Mirror) -> Bool { mirror.host.containsHover(NSEvent.mouseLocation) }
+        /// The page is one surface on one display's window. Production's
+        /// `syncMirrors` answers which window draws it; the fixture answers with
+        /// the same rule and the same model, so a test can count open pages.
+        func syncExpansion() {
+            for (id, mirror) in mirrors {
+                let geometry = mirror.model.geometry
+                _ = mirror.model.update(geometry: geometry, strip: geometry, size: mirror.model.size,
+                                        activity: mirror.model.activity, expanded: expansion.presents(on: id))
+            }
+        }
         func updateBounds() {
             windowHost?.rect = geometry.frame(for: surfaceSize)
             // Production hands the closed island's place to the host whenever it
@@ -235,6 +313,185 @@ enum NotchHoverTests {
             // it a place the island answers.
             windowHost?.setHoverArea(islandAreaUnderNotice)
         }
+    }
+
+    static func displayExpansionChecks(_ suite: TestSuite) {
+        func away() { NSEvent.mouseLocation = CGPoint(x: -12_000, y: -12_000) }
+        func over(_ mirror: Mirror) { NSEvent.mouseLocation = CGPoint(x: mirror.host.rect.midX, y: mirror.host.rect.midY) }
+        func overIsland(_ service: Service) {
+            NSEvent.mouseLocation = CGPoint(x: service.geometry.screen.midX,
+                                            y: service.geometry.screen.maxY - service.geometry.collapsed.height / 2)
+        }
+        func fresh() -> Service {
+            DispatchQueue.main = NotchScreenRefreshContract.Scheduler()
+            UserDefaults.standard = UserDefaults.Preferences()
+            UserDefaults.standard.delay = 0.5
+            NSEvent.global = [:]
+            NSEvent.local = [:]
+            AssistiveKeyboard.active = false
+            NSWorkspace.shared.accessibilityDisplayShouldReduceMotion = false
+            away()
+            let service = Service()
+            service.displayID = 1
+            service.updateBounds()
+            return service
+        }
+        func pages(_ service: Service) -> Int {
+            (service.pageIsOnIslandDisplay ? 1 : 0) + service.mirrors.values.filter { $0.model.expanded }.count
+        }
+        /// A copy's door, wired to the production answers the way `syncMirrors`
+        /// wires them in the app: the press, and the click.
+        func door(_ service: Service, _ mirror: Mirror) {
+            mirror.host.willPress = { [weak service, weak mirror] in mirror.map { service?.mirrorWillPress($0) } }
+            mirror.host.activate = { [weak service, weak mirror] in mirror.map { service?.mirrorWasClicked($0) } }
+        }
+
+        // One island per display, one page, and the display whose pointer asked
+        // for it draws it. Windows are never moved, and the pointer of one
+        // display is never taken for the pointer of another.
+        let service = fresh()
+        let second = service.addMirror(2, screen: CGRect(x: 0, y: 0, width: 1920, height: 1080))
+        let third = service.addMirror(3, screen: CGRect(x: 1920, y: 0, width: 1920, height: 1080))
+        door(service, second)
+        door(service, third)
+        service.syncExpansion()
+        suite.expect(service.expansion.owner == nil && !service.expanded && pages(service) == 0,
+                     "no display draws a page at rest")
+
+        overIsland(service)
+        service.hover(true)
+        suite.expect(service.hoverWork != nil && !service.expanded, "the island's display waits out its own delay")
+        service.hoverWork?.perform()
+        suite.expect(service.expanded && service.expansion.owner == 1 && service.pageIsOnIslandDisplay
+                     && pages(service) == 1,
+                     "the island's own display draws the page opened on it")
+
+        service.collapse()
+        service.syncExpansion()
+        over(second)
+        service.mirrorHover(2, entered: true)
+        suite.expect(second.hoverWork != nil && !service.expanded && service.expansion.owner == nil,
+                     "a hover on a copy that has not outlasted the delay opens nothing")
+        second.runHoverWork()
+        suite.expect(service.expanded && service.expansion.owner == 2 && second.model.expanded
+                     && !service.pageIsOnIslandDisplay && pages(service) == 1,
+                     "the copy draws the page its own display's pointer opened")
+
+        over(third)
+        service.mirrorHover(3, entered: true)
+        third.runHoverWork()
+        service.syncExpansion()
+        suite.expect(service.expansion.owner == 3 && third.model.expanded && !second.model.expanded
+                     && !service.pageIsOnIslandDisplay && pages(service) == 1,
+                     "a second display's hover closes the page where it was open, and only one page is open")
+
+        // Each display answers its own pointer, on its own deadline.
+        service.collapse()
+        service.syncExpansion()
+        over(second)
+        service.mirrorHover(2, entered: true)
+        over(third)
+        service.mirrorHover(3, entered: true)
+        second.runHoverWork()
+        suite.expect(service.expansion.owner == nil && !service.expanded,
+                     "a copy's opening whose pointer has gone to another display opens nothing")
+        third.runHoverWork()
+        suite.expect(service.expansion.owner == 3, "the display the pointer rests on is the one opened")
+
+        service.collapse()
+        over(third)
+        service.mirrorHover(3, entered: true)
+        away()
+        service.mirrorHover(3, entered: false)
+        suite.expect(third.hoverWork == nil && service.expansion.owner == nil,
+                     "a hover shorter than the delay, ended by leaving the display, opens nothing")
+
+        // The deadline, run by the clock the person chose.
+        let timed = fresh()
+        let copy = timed.addMirror(2)
+        over(copy)
+        timed.mirrorHover(2, entered: true)
+        DispatchQueue.main.advance(0.1)
+        suite.expect(timed.expansion.owner == nil && !timed.expanded, "the chosen delay is kept on a copy")
+        DispatchQueue.main.advance(0.5)
+        suite.expect(timed.expansion.owner == 2 && timed.expanded, "a hover past the chosen delay opens that display")
+
+        // Clicks, on the copy and on the page's own display.
+        service.collapse()
+        service.syncExpansion()
+        over(second)
+        second.host.willPress?()
+        suite.expect(second.hover.suppressed && second.hoverWork == nil,
+                     "a press on a copy ends its opening and keeps the next approach")
+        second.host.activate?()
+        suite.expect(service.expanded && service.expansion.owner == 2 && service.askedDisplay == 2
+                     && service.displayID == 1 && second.id == 2,
+                     "a click on a copy opens the page there, and no island changes its display")
+        second.host.activate?()
+        suite.expect(!service.expanded && service.expansion.owner == nil && pages(service) == 0,
+                     "a click on the display that carries the page closes it")
+
+        // The island's own news is no door kept shut for a deliberate act, and a
+        // mirrored notification is the person's own message, kept for its card.
+        let timer = NotchNotice(event: .timer, title: "Time is up", detail: "Timer", symbol: "timer")
+        let message = NotchNotice(event: .systemNotification, title: "Alex", detail: "Hello", symbol: "bell.fill",
+                                  notification: NotchNotificationContent(app: "Chat", title: "Alex", subtitle: "",
+                                                                         body: "Hello"),
+                                  notificationID: UUID())
+        service.notice = timer
+        over(second)
+        second.host.activate?()
+        suite.expect(service.expanded && service.expansion.owner == 2,
+                     "a click opens the page on a copy over a countdown's notice")
+        service.collapse()
+        service.mirrorHover(2, entered: true)
+        second.runHoverWork()
+        suite.expect(service.expansion.owner == 2, "a deliberate hover goes past a countdown's notice")
+        service.collapse()
+        service.notice = message
+        over(third)
+        service.mirrorHover(3, entered: true)
+        suite.expect(third.hoverWork == nil && service.expansion.owner == nil,
+                     "a mirrored notification keeps its own expansion under a copy's pointer")
+        service.notice = nil
+
+        // A display with no copy of its own answers nothing, and a page whose
+        // window is gone is gone with it.
+        service.collapse()
+        service.syncExpansion()
+        service.showsOnAllDisplays = false
+        over(second)
+        service.mirrorHover(2, entered: true)
+        second.host.activate?()
+        suite.expect(second.hoverWork == nil && !service.expanded && service.expansion.owner == nil,
+                     "with the island on one display, a copy answers no pointer and opens no page")
+        service.showsOnAllDisplays = true
+        over(second)
+        second.host.activate?()
+        suite.expect(service.expansion.owner == 2, "a copy put back opens for its display's click")
+        service.showsOnAllDisplays = false
+        service.retireExpansion()
+        service.syncExpansion()
+        suite.expect(service.expansion.owner == nil && !service.expanded && pages(service) == 0,
+                     "a page whose display has no window is closed, and not handed to another")
+        service.showsOnAllDisplays = true
+
+        // The island's own pointer opens the page on its own display, as the
+        // pointer on a copy opened the page there.
+        service.collapse()
+        service.syncExpansion()
+        over(third)
+        service.mirrorHover(3, entered: true)
+        third.runHoverWork()
+        service.syncExpansion()
+        suite.expect(service.expansion.owner == 3 && third.model.expanded, "precondition: the page is on a copy")
+        overIsland(service)
+        service.hover(true)
+        service.hoverWork?.perform()
+        suite.expect(service.expansion.owner == 1 && service.pageIsOnIslandDisplay && !third.model.expanded
+                     && pages(service) == 1,
+                     "the island's own pointer opens the page on the island's own display")
+        away()
     }
 
     static func run(_ suite: TestSuite) {
@@ -1270,6 +1527,7 @@ enum NotchHoverTests {
         musicStripCapsuleSizingContracts(fixture: fixture, leave: leave, expect: expect)
         shelfDragContracts(fixture: fixture, expect: expect)
         temporaryPresentationContracts(fixture: fixture, leave: leave, expect: expect)
+        displayExpansionChecks(suite)
     }
 
     /// A deliberate hover goes past whatever the island is showing at the

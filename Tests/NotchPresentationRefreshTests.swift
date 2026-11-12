@@ -265,6 +265,31 @@ enum NotchPresentationRefreshContract {
         }
         var windowHost: Host? = Host()
         var panel: Panel? { windowHost?.panel }
+        /// The display the island stands on, and the one whose window draws the
+        /// open page. This test has one window, so the page's window answers for
+        /// every display, and the page's ownership is production's own type.
+        var displayID: CGDirectDisplayID? = 1
+        var expansion = NotchDisplayExpansion()
+        init() {
+            // The page opens on the display this island stands on: one window here,
+            // so a page open anywhere is drawn by this window.
+            expansion.asking(toOpen: displayID ?? 0)
+        }
+        func presentsExpansion(on id: CGDirectDisplayID?) -> Bool {
+            guard let id, let owner = expansion.owner else { return false }
+            return owner == id
+        }
+        func retireExpansion() {
+            guard let owner = expansion.owner, owner != displayID,
+                  !showsOnAllDisplays || mirrors[owner] == nil else { return }
+            expansion.closed()
+            expanded = false
+        }
+        var showsOnAllDisplays = false
+        var mirrors: [CGDirectDisplayID: Int] = [:]
+        /// The page is measured for the display whose island was opened. One window
+        /// here, so it is measured for this island's own display.
+        var presentationGeometry: NotchGeometry { geometry }
         var geometry = NotchGeometry(screen: CGRect(x: 0, y: 0, width: 1440, height: 900),
                                      safeAreaTop: 32, cameraWidth: 210)
         var expandedPageTop = NotchPageTop.row

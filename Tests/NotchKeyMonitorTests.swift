@@ -79,6 +79,9 @@ enum NotchKeyMonitorTests {
         var keepsSurfaceOnClick = false, showsCapturePreview = false
         var captureDismiss: (() -> Void)?
         let panel: Panel? = Panel()
+        /// The window that holds the keyboard: the island's own, or the copy whose
+        /// display carries the open page. The test has one window.
+        var expansionPanel: Panel? { panel }
         var windowHost: Host? = Host()
         var captureControls: Int?
         var modules = NotchModule.allCases

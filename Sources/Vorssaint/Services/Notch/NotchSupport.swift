@@ -111,7 +111,9 @@ struct NotchClipboardPastePress: Equatable {
 
 enum NotchDisplay: String, CaseIterable {
     /// `pointer` moves the closed island to the display the pointer is on.
-    /// `all` does too, and every other display shows the closed island.
+    /// `all` gives every display its own island and moves nothing: the island
+    /// keeps the display it was built for, the pointer on a display opens the
+    /// page on that display, and one display at a time draws the page.
     case automatic, builtIn, main, pointer, all
 }
 
@@ -769,6 +771,43 @@ struct NotchHoverState {
     }
 }
 
+/// Which display's island carries the open dashboard.
+///
+/// A display's island is a window of its own and stays on that display: the
+/// copies on the other displays are drawn for their own displays, and a pointer
+/// that reaches one of them is answered there. What moves between displays is
+/// the open dashboard, and it is one surface - a page of the island, not a copy
+/// kept per display - so the answer is a single display, and asking for another
+/// one takes it away from the one that carried it. Two dashboards open at once
+/// is not a state this can be in, and the whole island reads this one answer for
+/// what any of its windows draws.
+struct NotchDisplayExpansion: Equatable {
+    /// The display whose window draws the open dashboard, and nil while no
+    /// dashboard is open anywhere.
+    private(set) var owner: CGDirectDisplayID?
+
+    /// Whether a dashboard is open on some display.
+    var isOpen: Bool { owner != nil }
+
+    /// Whether the window of `id` is the one that draws the open dashboard.
+    func presents(on id: CGDirectDisplayID) -> Bool {
+        guard let owner else { return false }
+        return owner == id
+    }
+
+    /// Asking for the dashboard on `id`. The display that carried it is answered
+    /// when that was another one, so the rule that closes the previous dashboard
+    /// is stated once and no caller can open a second beside it.
+    mutating func asking(toOpen id: CGDirectDisplayID) -> CGDirectDisplayID? {
+        let previous = owner
+        owner = id
+        return previous != id ? previous : nil
+    }
+
+    /// The dashboard is closed: no display carries it.
+    mutating func closed() { owner = nil }
+}
+
 enum NotchHoverEmphasis {
     /// `reach` is how much further than half the width one side goes, as a
     /// strip naming its song does on its cover's side.
@@ -957,6 +996,10 @@ final class NotchMirrorModel: ObservableObject {
     @Published private(set) var strip: NotchGeometry
     @Published private(set) var size: CGSize
     @Published private(set) var activity: NotchCompactActivity?
+    /// Whether this copy's display carries the open dashboard, and so draws the
+    /// page instead of the closed strip. One display at a time, answered by
+    /// `NotchDisplayExpansion`; the windows themselves never move.
+    @Published private(set) var expanded = false
     var shown = false
     /// The outline last drawn around it, and whether a timer's color tinted it.
     var outline: Bool?
@@ -969,14 +1012,17 @@ final class NotchMirrorModel: ObservableObject {
     }
 
     /// Whether anything it draws changed, so a copy is only resized when it did.
-    func update(geometry: NotchGeometry, strip: NotchGeometry, size: CGSize, activity: NotchCompactActivity?) -> Bool {
-        guard self.geometry != geometry || self.strip != strip || self.size != size || self.activity != activity else {
+    func update(geometry: NotchGeometry, strip: NotchGeometry, size: CGSize, activity: NotchCompactActivity?,
+                expanded: Bool) -> Bool {
+        guard self.geometry != geometry || self.strip != strip || self.size != size || self.activity != activity
+                || self.expanded != expanded else {
             return false
         }
         self.geometry = geometry
         self.strip = strip
         self.size = size
         self.activity = activity
+        self.expanded = expanded
         return true
     }
 }

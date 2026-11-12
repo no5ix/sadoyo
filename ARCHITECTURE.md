@@ -65,6 +65,10 @@ The Now Playing adapter and app-side services form a distinct boundary. Player i
 ### Dynamic Island / Notch
 The Dynamic Island spans service state, geometry, compact activity selection, dashboard composition, menu-bar entry points, and individual detail pages. Treat these as one navigation and sizing system: trace the request from its entry point through service routing to the rendered destination. Dynamic content must be measured consistently with the containing window. Preserve independent activity state and metric-detail routing.
 
+With the island on every display, each display owns a persistent island window and answers the pointer on its own display, and the open dashboard is one page in the whole system, drawn by the window of the display whose island was opened. Deliberate hover and click open the page on that display and close it where it was; passive pointer-following keeps its own restrictive gate and belongs to the pointer display choice alone. Never move an island window between displays to change the page, and treat a page whose display has no window as closed. See [0002](docs/decisions/0002-one-island-per-display-one-page.md).
+
+The Splash strip on the closed island shows only a throughput the engine is measuring in the reading that answers work in hand. A last batch's rate and the lifetime averages are figures of what the engine has done: they belong to the Complete Dashboard, and are never drawn in the closed island. See [0003](docs/decisions/0003-splash-strip-throughput-only-when-at-work.md).
+
 ### Menu bar and app panel
 Status items and AppDelegate coordinate multiple presentation destinations. A metric click is not equivalent to opening the general app panel. Preserve the requested metric identity through fallback paths and verify the actual Release interaction where possible.
 

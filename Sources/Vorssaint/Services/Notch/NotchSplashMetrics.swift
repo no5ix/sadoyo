@@ -16,6 +16,13 @@ import Foundation
 /// question directly, over the batch it is running, and a figure taken from
 /// the engine cannot drift from the engine's own idea of what it is doing.
 ///
+/// A batch block the server marks valid is a well-formed measurement, not a
+/// promise that the batch is running now: an engine at rest keeps the rate of
+/// the batch it finished last, and answers a lifetime average beside it. So the
+/// figures of the present are asked of the reading's activity as well: the
+/// endpoint says what it has in hand, and a figure of the present is kept only
+/// while it says it has something in hand.
+///
 /// Four rules keep the cards honest, and all four are about absence:
 ///
 /// * A field the server does not carry is nil, and its line and its figure are
@@ -43,25 +50,31 @@ struct NotchSplashLiveMetrics: Equatable {
     /// The figures of one reading. A server that answers no batch, and a batch
     /// it marks not valid, leave the current figures nil; the averages beside
     /// them are read from the status by the card, not copied into these.
-    static func current(_ metrics: NotchSplashStatus.Metrics) -> NotchSplashLiveMetrics {
+    ///
+    /// `present` is the reading's own answer about the engine's present: work in
+    /// hand on any of the counts the endpoint keeps. A batch rate measured over an
+    /// engine that says it has nothing in hand is the last batch's, so its current
+    /// figure is left empty: a valid measurement is not proof that it is running.
+    /// The percentiles of finished requests are not figures of the present at all,
+    /// and the reading of them does not depend on `present`.
+    static func current(_ metrics: NotchSplashStatus.Metrics, present: Bool) -> NotchSplashLiveMetrics {
         NotchSplashLiveMetrics(
-            decode: metrics.currentDecodeBatchTokensPerSecond,
-            prefill: metrics.currentPrefillBatchTokensPerSecond,
+            decode: present ? metrics.currentDecodeBatchTokensPerSecond : nil,
+            prefill: present ? metrics.currentPrefillBatchTokensPerSecond : nil,
             ttftP50: NotchSplashSupport.ttftSeconds(milliseconds: metrics.ttftMilliseconds),
             ttftP95: NotchSplashSupport.ttftSeconds(milliseconds: metrics.ttftP95Milliseconds)
         )
     }
 
-    /// The decode speed the island's strip shows: the batch in hand, and the
-    /// engine's own average over the whole of its running while no batch is in
-    /// hand. Both are the engine's figures; neither is invented, and the strip
-    /// shows nothing when the server answers neither. The average is shown in
-    /// the strip because the strip has room for one figure and the engine's
-    /// average is the figure the endpoint gives for a machine at rest; the card
-    /// of four readings is where the two are shown apart.
-    static func stripDecodeSpeed(current: Double?, overall: Double?) -> Double? {
-        if let current, current.isFinite { return current }
-        guard let overall, overall.isFinite, overall > 0 else { return nil }
-        return overall
+    /// The decode speed the island's strip shows: the batch in hand, and nothing
+    /// beside it. The closed island is a reading of what the engine is doing, so
+    /// an engine with no batch in hand has no speed to show, and the engine's
+    /// average over the whole of its running is never taken in the batch's place:
+    /// it is a figure of what the engine has done, and it outlives every quiet
+    /// stretch. The card of four readings is where the two are shown apart, and
+    /// it keeps the average while the engine rests.
+    static func stripDecodeSpeed(current: Double?) -> Double? {
+        guard let current, current.isFinite, current > 0 else { return nil }
+        return current
     }
 }

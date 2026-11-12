@@ -24,7 +24,34 @@ enum NotchActivityTests {
         accessoryContracts(suite)
         NotchAccessoryConnectionTests.run(suite)
         PeripheralBatteryLifecycleTests.run(suite)
+        displayExpansionContracts(suite)
         gateContracts(suite)
+    }
+
+    /// The island's page as the ownership of a display: one display at a time, asked
+    /// for by name, the display that carried it answered back, and nothing at all
+    /// once closed. It says nothing about windows, and moves none.
+    private static func displayExpansionContracts(_ suite: TestSuite) {
+        var expansion = NotchDisplayExpansion()
+        suite.expect(expansion.owner == nil && !expansion.isOpen, "no display carries a page at rest")
+        suite.expect(!expansion.presents(on: 1) && !expansion.presents(on: 2), "no display draws a page at rest")
+        suite.expect(expansion.asking(toOpen: 2) == nil, "the first page has no display to answer back")
+        suite.expect(expansion.owner == 2 && expansion.isOpen && expansion.presents(on: 2)
+                     && !expansion.presents(on: 1),
+                     "the display asked for draws the page, and it is the only one that does")
+        suite.expect(expansion.asking(toOpen: 2) == nil,
+                     "asking again where the page is open answers no other display")
+        suite.expect(expansion.asking(toOpen: 3) == 2,
+                     "asking for a second display answers the display that carried the page")
+        suite.expect(expansion.owner == 3 && expansion.presents(on: 3) && !expansion.presents(on: 2),
+                     "the page belongs to the display asked for, and to no other")
+        suite.expect(expansion.asking(toOpen: 1) == 3 && expansion.presents(on: 1),
+                     "the island's own display is asked for by name, like any other")
+        expansion.closed()
+        suite.expect(expansion.owner == nil && !expansion.isOpen && !expansion.presents(on: 1),
+                     "a close leaves no display carrying a page")
+        suite.expect(expansion.asking(toOpen: 4) == nil && expansion.presents(on: 4),
+                     "a page asked for after a close is open on the display asked for")
     }
 
     /// Keep Awake as an activity: off until turned on, gated like the others,

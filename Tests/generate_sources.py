@@ -1344,6 +1344,9 @@ def main():
                      + '        default: preconditionFailure("Only music is measured by this fixture")\n'
                      + "        }\n    }\n#sourceLocation()\n")
     write("NotchHover.swift", "import AppKit\nextension NotchHoverTests {\nfinal class Service: State {\n"
+          + "    /// A display's own island, as the service keeps its copies, drawn by the\n"
+          + "    /// fixture's own window double.\n"
+          + "    typealias NotchMirror = Mirror\n\n"
           + declaration(notch, "    func show(_ incoming:").replace("NotchSupport.routes(incoming.event)", "true")
             .replace("    func", "    @discardableResult\n    func", 1)
           + "".join(declaration(notch, prefix).replace("    private ", "    ", 1) for prefix in [
@@ -1357,6 +1360,14 @@ def main():
               "    private var compactStripAnswersPointer:",
               "    private func scheduleHoverOpen()",
               "    private func rearmHoverOpen(",
+              "    func presentsExpansion(on",
+              "    func retireExpansion()",
+              "    func mirrorHover(",
+              "    private func scheduleMirrorOpen(",
+              "    private func rearmMirrorHoverOpen(",
+              "    private func mirrorWillPress(",
+              "    private func mirrorWasClicked(",
+              "    func expand(on",
               "    private var holdsNotification:", "    private func holdNotification(",
               "    private func syncNoticeWithPreferences(",
               "    private func releaseNotification(", "    private func scheduleNoticeDismissal(",
@@ -1427,7 +1438,7 @@ def main():
                                                 "AppFeature.fanControl.isAvailable(in: ReviewDefaults.current)")
     music_visibility = music_visibility.replace("AppFeature.connectedDevices.isAvailable",
                                                 "AppFeature.connectedDevices.isAvailable(in: ReviewDefaults.current)")
-    write("NotchMusicVisibility.swift", "import Foundation\nextension NotchMusicVisibilityTests {\n"
+    write("NotchMusicVisibility.swift", "import CoreGraphics\nimport Foundation\nextension NotchMusicVisibilityTests {\n"
           + "final class Service: State {\nfunc resignPanelKey() { panel?.resignKey() }\n"
           + "func forgetDetailHeight() {}\n"
           + music_visibility + "}\n}\n")
@@ -1463,10 +1474,16 @@ def main():
           + declaration(notch, "    private func cancelRelocation()").replace("private func", "func", 1)
           + "}\n}\n")
     write("NotchMirrors.swift", "import AppKit\nextension NotchMirrorContract {\nfinal class Service: State {\n"
+          + "    /// A display's own island, as the service keeps its copies, drawn by the\n"
+          + "    /// fixture's own window double.\n"
+          + "    typealias NotchMirror = Mirror\n\n"
           + "".join(declaration(notch, prefix).replace("    private ", "    ", 1) for prefix in [
               "    private func syncMirrors()", "    private func mirrorSurface(", "    private func mirrorSideRoom(",
               "    private func closeMirrors()", "    private func updateFullscreenDisplays()",
-              "    private func bringIsland("])
+              "    func presentsExpansion(on", "    func retireExpansion()",
+              "    func mirrorHover(", "    private func scheduleMirrorOpen(",
+              "    private func rearmMirrorHoverOpen(", "    private func mirrorWillPress(",
+              "    private func mirrorWasClicked(", "    func expand(on"])
           .replace("NotchSupport.hidesUntilHover()", "hidesUntilHover")
           .replace("NotchSupport.hiddenShowsActivity()", "hiddenShowsActivity")
           .replace("NotchSupport.coversMenus()", "coversMenus")
@@ -1474,6 +1491,7 @@ def main():
           .replace("UserDefaults.standard.bool(forKey: DefaultsKey.notchOutlineEnabled)", "outlineEnabled")
           .replace("UserDefaults.standard.bool(forKey: DefaultsKey.notchHideInFullscreen)", "hidesInFullscreen")
           .replace("FeatureStrings.notch(L10n.shared.language).open", "openTitle")
+          .replace("FeatureStrings.notch(L10n.shared.language).collapse", "collapseTitle")
           + "}\n}\n")
     write("NotchSectionScrollRoute.swift", "import AppKit\nextension NotchSectionPagingTests {\nfinal class Service: State {\n"
           + "".join(declaration(notch, prefix).replace("    private ", "    ", 1) for prefix in [
@@ -1595,7 +1613,7 @@ def main():
               if line.startswith("    func toggle() {")]
     if len(toggle) != 1 or not toggle[0].rstrip().endswith("}"):
         raise ValueError("Expected a one-line toggle() in NotchService")
-    write("NotchDestinations.swift", "import Foundation\n\nextension NotchDestinationContract {\n"
+    write("NotchDestinations.swift", "import CoreGraphics\nimport Foundation\n\nextension NotchDestinationContract {\n"
           + "enum MetricDetailKind: String {\n" + metric_cases + "\n}\n"
           + "enum MenuBarMetric: String, CaseIterable {\n" + menu_metric_cases + "\n"
           + declaration(renderer, "    var feature: AppFeature")
@@ -1630,7 +1648,7 @@ def main():
               .replace("UserDefaults.standard", "ReviewDefaults.current!")
           + declaration(notch, "    func openActivity(")
               .replace("UserDefaults.standard", "ReviewDefaults.current!")
-          + declaration(notch, "    func openCountdownEvent()")
+          + declaration(notch, "    func openCountdownEvent(")
           + declaration(notch, "    var reopeningModule:")
           + declaration(notch, "    private func updateSession(").replace("private func", "func", 1)
               .replace("AppFeature.mixer.isAvailable", "AppFeature.mixer.isAvailable(in: ReviewDefaults.current)")

@@ -111,6 +111,10 @@ final class NotchService: ObservableObject {
     @Published private(set) var geometry = NotchGeometry(
         screen: CGRect(x: 0, y: 0, width: 1440, height: 900), safeAreaTop: 0, cameraWidth: 0)
     @Published private(set) var expanded = false
+    /// Which display's window draws the open dashboard: the island's own, or the
+    /// copy of the display whose island the pointer opened. One dashboard, one
+    /// display, and the windows never move between displays.
+    @Published private(set) var expansion = NotchDisplayExpansion()
     @Published private(set) var showsKeyboardFocus = false
     /// True when macOS refused the island's own shortcut, so Settings can say so.
     @Published private(set) var shortcutRegistrationFailed = false
@@ -311,7 +315,8 @@ final class NotchService: ObservableObject {
     /// the island rests, so a preference sync never moves an open island.
     private var displayID: CGDirectDisplayID?
     private var followsPointer = false
-    /// Every other display shows a copy of the closed island.
+    /// Every other display has its own island window: it answers the pointer on
+    /// its own display, and draws the open page where that display was opened.
     private var showsOnAllDisplays = false
     /// A capsule names a song only for a moment as it starts.
     @Published private(set) var capsuleMusicTitleShown = false
@@ -431,6 +436,8 @@ final class NotchService: ObservableObject {
     private var measuredCommandBarHeight: CGFloat?
     private var musicTitleWork: DispatchWorkItem?
     private static let musicTitleDuration: TimeInterval = 4
+    /// Every other display shows a copy of the closed island, and answers the
+    /// pointer on its own display.
     private var mirrors: [CGDirectDisplayID: NotchMirror] = [:]
     /// Displays showing a full-screen Space, read as Spaces change.
     private var fullscreenDisplays: Set<CGDirectDisplayID> = []
@@ -567,19 +574,25 @@ final class NotchService: ObservableObject {
     /// quiet - the clock is the only state, and a dashboard left open with a
     /// finished task is not an activity.
     /// Splash is an activity of the closed island while the card's clock is
-    /// advancing, and on no other condition. It is the same state the card shows:
-    /// when the task ends the clock freezes, the notice is told, and Splash leaves
-    /// the island, while the card, the reading, and the monitoring session stay as
-    /// they were, and the activities that stood below take the strip at once.
+    /// advancing and the reading says the engine has work in hand, and on no
+    /// other condition. It is the same state the card shows: when the task ends
+    /// the clock freezes, the notice is told, and Splash leaves the island, while
+    /// the card, the reading, and the monitoring session stay as they were, and
+    /// the activities that stood below take the strip at once. A run kept open
+    /// through its confirmation window is the task's news and not its speed: the
+    /// engine at rest answers the last batch's rate and its own lifetime average,
+    /// and neither of them is a measurement of the present, so the closed island
+    /// shows nothing of Splash across that quiet.
     ///
     /// A reading that is momentarily missing is not a task that has ended. The
     /// strip has always answered a figure it does not have with its placeholder,
-    /// and it does that here too; asking the activity for a fresh decode figure
-    /// would take a running task off the island between two of the engine's
-    /// generations, which is a flicker and not an ending.
+    /// and it does that here too, for the engine that says it is at work and
+    /// answers no batch this time round; taking the activity off the island on
+    /// the width of one reading would be a flicker, and the strip's width with it.
     var hasSplashActivity: Bool {
         NotchSplashSupport.showsIslandActivity(sectionVisible: modules.contains(.splash),
-                                               isTaskRunning: NotchSplashService.shared.isTaskRunning)
+                                               isTaskRunning: NotchSplashService.shared.isTaskRunning,
+                                               isLive: NotchSplashService.shared.stripReadingIsLive)
     }
 
     /// The strip's two activities, recomputed from the activities running now.
@@ -1083,6 +1096,47 @@ final class NotchService: ObservableObject {
                                            primaryPlayerID: dashboardPrimaryPlayerID)
     }
 
+    /// Whether the open page belongs to the display this island stands on: the
+    /// answer the island's own window draws by.
+    var pageIsOnIslandDisplay: Bool { presentsExpansion(on: displayID) }
+
+    /// Whether the window of a display draws the open page. `nil` is answered
+    /// for this island's own display, and nothing is open on any display while
+    /// no page is open. One page, one display: this is the whole of the rule.
+    func presentsExpansion(on id: CGDirectDisplayID?) -> Bool {
+        guard let id, let owner = expansion.owner else { return false }
+        return owner == id
+    }
+
+    /// The window that draws the open page: the island's own while the page
+    /// belongs to its display, and the copy's when its display was opened.
+    private var expansionHost: NotchWindowHost? {
+        guard let owner = expansion.owner, owner != displayID, let mirror = mirrors[owner] else { return windowHost }
+        return mirror.host
+    }
+
+    /// A page cannot be carried by a display that has no island window: the
+    /// copies switched off, that display unplugged, the island withdrawn from it.
+    /// The page goes with the window that drew it, and every window left keeps
+    /// its own closed strip; nothing is handed to the island's own display.
+    func retireExpansion() {
+        guard let owner = expansion.owner, owner != displayID,
+              !showsOnAllDisplays || mirrors[owner] == nil else { return }
+        expansion.closed()
+        expanded = false
+    }
+
+    /// The panel that holds the keyboard for the open page, whoever draws it.
+    private var expansionPanel: NotchPanel? { expansionHost?.panel }
+
+    /// The geometry the open page is drawn for: the island's own, or the display
+    /// whose island was opened. A page opened on a narrower display is measured
+    /// for that display, as the island's own is measured for its own.
+    private var presentationGeometry: NotchGeometry {
+        guard let owner = expansion.owner, owner != displayID, let mirror = mirrors[owner] else { return geometry }
+        return mirror.model.geometry
+    }
+
     var expandedSize: CGSize {
         let geometry = expandedGeometry
         if showingSections {
@@ -1247,7 +1301,7 @@ final class NotchService: ObservableObject {
             width: width))
     }
     var expandedGeometry: NotchGeometry {
-        var result = geometry
+        var result = presentationGeometry
         // Capture editing has a full toolbar whose actions must stay reachable.
         result.requiresFullWidthHeader = selected == .captures && captureActions != nil
             && !showingSections && !showingAppPanel && selectedMetric == nil
@@ -1318,7 +1372,9 @@ final class NotchService: ObservableObject {
             }
             return captureControlsLayout.size
         }
-        if expanded { return showingCommandBar ? commandBarSurfaceSize : expandedSize }
+        // The page is drawn by one window. On the window that does not draw it,
+        // the surface is the closed strip, and its notice, and its rest.
+        if expanded, presentsExpansion(on: displayID) { return showingCommandBar ? commandBarSurfaceSize : expandedSize }
         if dragPlaceholder { return CGSize(width: geometry.peek.width, height: geometry.safeContentTop + 66) }
         if let notice {
             guard noticeExpanded else { return geometry.noticeSize(wings: notice.wings(in: geometry)) }
@@ -1600,7 +1656,11 @@ final class NotchService: ObservableObject {
         NotchNotificationService.shared.syncWithPreferences()
         NotchAudioLevelService.shared.syncWithPreferences()
         AgentUsageService.shared.syncWithPreferences()
-        followsPointer = displayPreference == .pointer || displayPreference == .all
+        // Every display that shows the island answers the pointer on its own
+        // display, so the island keeps the display it was built on: nothing is
+        // followed from one display to another, and each copy is opened where it
+        // stands. Only the pointer choice moves the island, and only closed.
+        followsPointer = displayPreference == .pointer
         showsOnAllDisplays = displayPreference == .all
         updateFullscreenDisplays()
         updateScreen()
@@ -1839,16 +1899,18 @@ final class NotchService: ObservableObject {
     /// A compact strip opens its activity's page, as opening the island does:
     /// unless the user turned off opening the visible activity, in which case
     /// the reopening choice decides here too.
-    func openActivity(_ module: NotchModule) {
+    func openActivity(_ module: NotchModule, on display: CGDirectDisplayID? = nil) {
         let opensActivity = UserDefaults.standard.object(forKey: DefaultsKey.notchOpensActivity) as? Bool ?? true
-        if opensActivity { open(module) } else { open() }
+        if opensActivity { open(module, on: display) } else { open(on: display) }
     }
 
-    /// Opens the Calendar page scrolled to the countdown's event.
-    func openCountdownEvent() {
+    /// Opens the Calendar page scrolled to the countdown's event, on the display
+    /// whose island was opened: the island's own, and a copy's where a copy's
+    /// strip was the door.
+    func openCountdownEvent(on display: CGDirectDisplayID? = nil) {
         let calendar = NotchCalendarService.shared
         calendar.revealing = calendar.countdown?.event.id
-        openActivity(.calendar)
+        openActivity(.calendar, on: display)
         // Explore or an app panel opened in the page's place keeps no event
         // for a later visit to Calendar.
         if !expanded || selected != .calendar || showingSections || showingAppPanel { calendar.revealing = nil }
@@ -1856,7 +1918,7 @@ final class NotchService: ObservableObject {
 
     func open(_ module: NotchModule? = nil, pinned: Bool = false, takeFocus: Bool = true,
               appPanel: Bool = false, metric: MetricDetailKind? = nil, feedback: Bool = true, sections: Bool = false,
-              wholeDashboard: Bool = false) {
+              wholeDashboard: Bool = false, on display: CGDirectDisplayID? = nil) {
         guard NotchSupport.isEnabled(), !suspended else { return }
         // The capture controls cover the open page and hold collapsing off, so
         // an island opened now would wait behind them and open by itself once
@@ -1864,7 +1926,18 @@ final class NotchService: ObservableObject {
         if captureControls != nil { expandCaptureControls(); return }
         if !running || self.panel == nil { syncWithPreferences() }
         else { refreshModules() }
-        guard let panel else { return }
+        guard panel != nil else { return }
+        // The dashboard is one surface, and the display whose pointer asked for it
+        // is the one that draws it. The display that carried it is taken first, so
+        // the page closes there as it opens here, and two of them are never open
+        // at once. No window moves, and no display ownership changes: a copy keeps
+        // its own display and draws the page at the size that display measures.
+        if let asked = display ?? displayID {
+            _ = expansion.asking(toOpen: asked)
+            mirrors[asked]?.hover.open()
+            if asked == displayID { hoverState.open() }
+        }
+        let surface = expansionHost
         let reopening = openingDestination(overActivity: !wholeDashboard)
         let useReopeningSurface = !wholeDashboard && module == nil && !expanded && !appPanel && !sections && metric == nil
         let destination = module.flatMap { modules.contains($0) ? $0 : nil } ?? reopening.module
@@ -1891,8 +1964,7 @@ final class NotchService: ObservableObject {
         }
         (NSApp.delegate as? AppDelegate)?.closePopover(preservingNotch: true)
         if !expanded, modules.contains(.clipboard) { ClipboardHistoryService.shared.rememberPasteTarget() }
-        panel.acceptsKeyFocus = true
-        hoverState.open()
+        surface?.panel.acceptsKeyFocus = true
         hoverWork?.cancel()
         // Entering a detail decides what lies behind it; switching details or
         // passing through the gallery keeps that answer.
@@ -1922,10 +1994,10 @@ final class NotchService: ObservableObject {
             // the message; a held one must not reappear after collapsing.
             if notice?.notificationID != nil { noticeWork?.cancel(); noticeWork = nil; notice = nil; noticeExpanded = false }
         }
-        inside = windowHost?.containsHover(NSEvent.mouseLocation) == true
+        inside = surface?.containsHover(NSEvent.mouseLocation) == true
         installEventMonitors()
         syncVisibleConsumers()
-        if takeFocus { panel.makeKey() }
+        if takeFocus { surface?.panel.makeKey() }
         if feedback, changesPresentation { provideHapticFeedback() }
         if closesCommandBar { commandBarDidClose() }
     }
@@ -1934,6 +2006,9 @@ final class NotchService: ObservableObject {
         guard captureControls == nil, !heldDrag else { return }
         let closeCapture = detachCaptureIfClosingOnCollapse()
         let closesCommandBar = showingCommandBar
+        // The keyboard goes back the way it came: from the window that carried
+        // the page, which is the island's own or a copy's, on its own display.
+        let surface = expansionHost
         hoverState.close(pointerInside: windowHost?.containsHover(NSEvent.mouseLocation) == true)
         pinned = false
         clipboardPinnedOnly = false
@@ -1942,6 +2017,9 @@ final class NotchService: ObservableObject {
         mutatePresentation(transitionContent: expanded || peeking || noticeExpanded ? .dismiss : .none) {
             if noticeExpanded { notice = nil; noticeExpanded = false }
             expanded = false
+            // No display carries the page: every window of the island goes back
+            // to its own closed strip, on its own display.
+            expansion.closed()
             openedByHover = false
             peeking = false
             selectedMetric = nil
@@ -1954,7 +2032,7 @@ final class NotchService: ObservableObject {
             highlightedSection = nil
             sectionRow = 0
         }
-        panel?.acceptsKeyFocus = false
+        surface?.panel.acceptsKeyFocus = false
         resignPanelKey()
         if closesCommandBar { commandBarDidClose() }
         removeEventMonitors()
@@ -1962,7 +2040,11 @@ final class NotchService: ObservableObject {
         closeCapture?()
     }
 
-    func toggle() { expanded ? collapse() : open() }
+    /// The island's own door, and a copy's: the page is closed where it is open,
+    /// and opened - on the asking display - where it is not. A page open on
+    /// another display is not this island's, so a click here opens it here, and
+    /// the page that was open closes.
+    func toggle() { expanded && presentsExpansion(on: displayID) ? collapse() : open() }
 
     /// The island stays on screen, so only a manual resign takes its keyboard.
     /// While Vorssaint stays the active app (its Settings window is open, for
@@ -1972,7 +2054,9 @@ final class NotchService: ObservableObject {
     /// goes back to the app's frontmost regular window on this Space, as
     /// closing a window does.
     func resignPanelKey() {
-        guard let panel else { return }
+        // The keyboard is given back by the window that holds it: the island's
+        // own, or the copy whose display carries the open page.
+        guard let panel = expansionPanel ?? self.panel else { return }
         panel.resignKey()
         guard NSApp.keyWindow === panel,
               NSWorkspace.shared.frontmostApplication?.processIdentifier == ProcessInfo.processInfo.processIdentifier,
@@ -2021,7 +2105,8 @@ final class NotchService: ObservableObject {
         // which is the whole dashboard: nothing asks which activity to open.
         let opensOnHover = hoverOpeningEnabled
             && UserDefaults.standard.bool(forKey: DefaultsKey.notchHoverExpands)
-        let emphasize = inside && !hiddenInFullscreen && !hiddenUntilHover && !expanded && !peeking && !dragPlaceholder
+        let emphasize = inside && !hiddenInFullscreen && !hiddenUntilHover && !presentsExpansion(on: displayID)
+            && !peeking && !dragPlaceholder
             && notice == nil && captureControls == nil && !opensOnHover
             && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         if hoverEmphasized != emphasize || unnamesMusic {
@@ -2055,7 +2140,7 @@ final class NotchService: ObservableObject {
         if inside {
             if holdsNotification, let id = notice?.notificationID { holdNotification(id); return }
             guard !hoverState.suppressed, hoverOpensThroughNotice || notice == nil || hiddenUntilHover,
-                  !expanded, !peeking, !dragPlaceholder,
+                  !presentsExpansion(on: displayID), !peeking, !dragPlaceholder,
                   hoverOpeningEnabled else { return }
             if !hiddenInFullscreen, compactStripAnswersPointer { return }
             scheduleHoverOpen()
@@ -3177,6 +3262,7 @@ final class NotchService: ObservableObject {
     }
 
     func refreshPresentation(animated: Bool = true, transitionContent: NotchContentTransition = .none) {
+        retireExpansion()
         // The page's cards keep the order their activities began in, and a
         // refresh is where the island learns that one has begun, ended, or
         // been running all along under a page that has just opened. The closed
@@ -3234,7 +3320,8 @@ final class NotchService: ObservableObject {
             removeScreenEdgeClickMonitors()
             return
         }
-        let open = expanded || peeking || notice != nil || dragPlaceholder || captureControls != nil
+        let open = (expanded && presentsExpansion(on: displayID)) || peeking || notice != nil
+            || dragPlaceholder || captureControls != nil
         guard open || (!hiddenAtRestInFullscreen && (geometry.isNotched || geometry.compactSideRoom != nil)) else {
             finishMusicDeparture()
             presentedMusic = nil
@@ -3272,11 +3359,12 @@ final class NotchService: ObservableObject {
            !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
             NotificationCenter.default.post(name: .notchMascotRestYields, object: nil)
         }
-        var presented = expanded ? expandedGeometry : geometry
+        let showsPage = expanded && presentsExpansion(on: displayID)
+        var presented = showsPage ? expandedGeometry : geometry
         presented.surfaceShift = surfaceShift
         windowHost?.present(size: size, geometry: presented, animated: animated,
                             transitionContent: contentTransition,
-                            quickAccess: expanded && captureControls == nil && !showingCommandBar && !access.buttons.isEmpty
+                            quickAccess: showsPage && captureControls == nil && !showingCommandBar && !access.buttons.isEmpty
                                 ? access : nil,
                             revealFromHidden: !hiddenInFullscreen && captureControls == nil
                                 && UserDefaults.standard.bool(forKey: DefaultsKey.notchHideUntilHover)
@@ -3308,8 +3396,9 @@ final class NotchService: ObservableObject {
         } else if notice != nil || dragPlaceholder {
             activationRect = .zero
         } else {
-            activationRect = (expanded ? expandedGeometry : compactActivityIsVisible ? compactActivityGeometry : geometry)
-                .activationArea(in: size, hasHeader: expanded || peeking, compactActivity: compactActivityIsVisible, expandedHeader: expanded)
+            activationRect = (showsPage ? expandedGeometry : compactActivityIsVisible ? compactActivityGeometry : geometry)
+                .activationArea(in: size, hasHeader: showsPage || peeking, compactActivity: compactActivityIsVisible,
+                                expandedHeader: showsPage)
                 // Over the camera, wherever a strip reaching to one side puts it.
                 .offsetBy(dx: -surfaceShift, dy: 0)
         }
@@ -3317,7 +3406,7 @@ final class NotchService: ObservableObject {
         // for as long as that banner is on screen.
         windowHost?.setHoverArea(islandAreaUnderNotice)
         let text = FeatureStrings.notch(L10n.shared.language)
-        windowHost?.setActivationArea(activationRect, title: expanded ? text.collapse : text.open,
+        windowHost?.setActivationArea(activationRect, title: showsPage ? text.collapse : text.open,
             willPress: { [weak self] in
                 guard let self else { return }
                 self.hoverWork?.cancel()
@@ -3370,7 +3459,8 @@ final class NotchService: ObservableObject {
             // an emphasis may still show, and the next move
             // decides whether it is still needed.
             guard self.running, !self.suspended, self.inside, !self.hoverState.suppressed,
-                  !self.expanded, !self.peeking, !self.pinned, !self.heldDrag, !self.keepsWorkingSurface,
+                  !self.presentsExpansion(on: self.displayID), !self.peeking, !self.pinned, !self.heldDrag,
+                  !self.keepsWorkingSurface,
                   self.captureControls == nil,
                   (self.notice?.notificationID == nil || self.hiddenUntilHover), !self.dragPlaceholder,
                   self.hoverOpeningEnabled,
@@ -3401,7 +3491,8 @@ final class NotchService: ObservableObject {
     /// transition, decides whether the island can open, and nothing is made to
     /// wait for a pointer to leave and come back.
     private func rearmHoverOpen(overIsland: Bool, surfaceChanged: Bool) {
-        guard surfaceChanged, overIsland, !expanded, !peeking, !pinned, !heldDrag, !keepsWorkingSurface,
+        guard surfaceChanged, overIsland, !presentsExpansion(on: displayID), !peeking, !pinned, !heldDrag,
+              !keepsWorkingSurface,
               !dragPlaceholder, notice == nil, captureControls == nil, !hoverState.suppressed,
               hoverOpeningEnabled, hoverWork == nil else { return }
         scheduleHoverOpen()
@@ -3802,20 +3893,54 @@ final class NotchService: ObservableObject {
 
     // MARK: Every display
 
-    /// The closed island as another display draws it, in a window of its own.
-    private struct NotchMirror {
+    /// A display's own island: its window, the model it draws from, and where
+    /// the pointer is on that display.
+    ///
+    /// A copy is not a passive picture. Each has a hover area of its own on its
+    /// own display, its own suppression, and its own opening deadline, so a
+    /// pointer that reached one island and left it is not held against another.
+    /// The window is built for one display and stays on it: what moves between
+    /// displays is the open dashboard, and that is one surface, answered by
+    /// `expansion` and drawn by the window of the display that was opened.
+    private final class NotchMirror {
+        let id: CGDirectDisplayID
         let host: NotchWindowHost
         let model: NotchMirrorModel
+        /// This display's own answer about its island: a resize of one copy
+        /// suppresses one copy, and no other.
+        var hover = NotchHoverState()
+        var inside = false
+        /// The opening this display's pointer asked for, at the chosen delay.
+        var hoverWork: DispatchWorkItem?
+        /// The surface last drawn, so a copy that grew under a pointer that has
+        /// not moved is seen as a change, as the island sees the same thing.
+        var lastSize: CGSize?
+
+        init(id: CGDirectDisplayID, host: NotchWindowHost, model: NotchMirrorModel) {
+            self.id = id
+            self.host = host
+            self.model = model
+        }
+
+        func cancelHoverWork() {
+            hoverWork?.cancel(); hoverWork = nil
+        }
     }
 
-    /// With the island on every display, it follows the pointer as it does
-    /// when it only follows it, and each other display shows a copy of what
-    /// it shows closed. The copies are drawn for their own displays, a
-    /// capsule or a notch, and they take no part in hovering or notices.
+    /// The copies, one per display, each answering the pointer on its own
+    /// display. A hover past the chosen delay, and a click, open the dashboard
+    /// there and close it on the display that carried it; the window that drew it
+    /// stays where it was built, and the page is drawn at the size that display
+    /// measures for it.
+    ///
+    /// The island's own news is not copied: a notice is drawn by the island's own
+    /// window, over the strip it came from, and a copy shows the page, the strip,
+    /// and the island at rest.
     private func syncMirrors() {
         guard showsOnAllDisplays, running, !suspended, windowHost != nil else { closeMirrors(); return }
         let screens = NSScreen.screens
         for (id, mirror) in mirrors where !screens.contains(where: { $0.notchDisplayID == id }) {
+            mirror.cancelHoverWork()
             mirror.host.close()
             mirrors[id] = nil
         }
@@ -3826,6 +3951,9 @@ final class NotchService: ObservableObject {
         let outline = UserDefaults.standard.bool(forKey: DefaultsKey.notchOutlineEnabled)
         for screen in screens {
             let id = screen.notchDisplayID
+            // One open dashboard, and the window of the display it was opened on
+            // draws it. Every other display keeps its closed strip.
+            let presents = expansion.presents(on: id)
             var base: NotchGeometry?
             if id != displayID || id == mirrorHeldForArrival, !hidesAtRest, !fullscreenDisplays.contains(id) {
                 var geometry = baseGeometry(for: screen)
@@ -3839,14 +3967,23 @@ final class NotchService: ObservableObject {
                 }
             }
             guard let base else {
-                if let mirror = mirrors[id], mirror.model.shown {
-                    mirror.model.shown = false
-                    mirror.host.hide(animated: false)
+                // The island of this display is off the screen: its pointer's
+                // deadline goes with it, and its hover with that.
+                if let mirror = mirrors[id] {
+                    mirror.cancelHoverWork()
+                    mirror.inside = false
+                    mirror.hover.update(pointerInside: false)
+                    if mirror.model.shown {
+                        mirror.model.shown = false
+                        mirror.host.hide(animated: false)
+                    }
                 }
                 continue
             }
-            let (strip, size) = mirrorSurface(on: base, activity: activity)
-            let mirror = mirrors[id] ?? makeMirror(geometry: base, size: size)
+            let (strip, size) = presents
+                ? (base, expandedSize)
+                : mirrorSurface(on: base, activity: activity)
+            let mirror = mirrors[id] ?? makeMirror(id: id, geometry: base, size: size)
             mirrors[id] = mirror
             if mirror.model.outline != outline || mirror.model.timerOutline != (activity == .timer) {
                 mirror.model.outline = outline
@@ -3857,14 +3994,29 @@ final class NotchService: ObservableObject {
             if mirror.host.panel.sharingType != sharing { mirror.host.panel.sharingType = sharing }
             let revealing = !mirror.model.shown
             let previous = mirror.model.activity
-            guard mirror.model.update(geometry: base, strip: strip, size: size, activity: activity) || revealing else { continue }
+            let changed = mirror.model.update(geometry: base, strip: strip, size: size, activity: activity,
+                                              expanded: presents)
+            let grewUnderPointer = mirror.lastSize != size
+            mirror.lastSize = size
+            mirror.host.panel.acceptsKeyFocus = presents
+            guard changed || revealing || grewUnderPointer else { continue }
             mirror.model.shown = true
             // Shown at once where the island just left, so the two trade places.
-            mirror.host.present(size: size, geometry: base, animated: !revealing,
+            mirror.host.present(size: size, geometry: presents ? expandedGeometry : base, animated: !revealing,
                                 transitionContent: !revealing && previous != activity ? .replace : .none)
-            mirror.host.setActivationArea(CGRect(origin: .zero, size: size),
-                                          title: FeatureStrings.notch(L10n.shared.language).open,
-                                          willPress: {}, activate: { [weak self] in self?.bringIsland(to: id) })
+            // The copy's door: its whole strip at rest, and the open page's header
+            // where this display carries the dashboard, as the island's own is.
+            let activation = presents
+                ? expandedGeometry.activationArea(in: size, hasHeader: true, compactActivity: false, expandedHeader: true)
+                : CGRect(origin: .zero, size: size)
+            mirror.host.setActivationArea(activation,
+                                          title: presents ? FeatureStrings.notch(L10n.shared.language).collapse
+                                                          : FeatureStrings.notch(L10n.shared.language).open,
+                                          willPress: { [weak self, weak mirror] in mirror.map { self?.mirrorWillPress($0) } },
+                                          activate: { [weak self, weak mirror] in mirror.map { self?.mirrorWasClicked($0) } })
+            // A page opened under a pointer that has not crossed the copy's edge,
+            // as the island's own re-arm for a surface that changed under it.
+            if presents { rearmMirrorHoverOpen(mirror, surfaceChanged: grewUnderPointer) }
             guard !mirror.host.panel.isVisible else { continue }
             // Under the window that is about to leave, so that display keeps
             // an island when the window goes. In front, the copy would cover
@@ -3898,18 +4050,27 @@ final class NotchService: ObservableObject {
                                            barHeight: geometry.menuBarHeight, occupied: [])
     }
 
-    private func makeMirror(geometry: NotchGeometry, size: CGSize) -> NotchMirror {
+    private func makeMirror(id: CGDirectDisplayID, geometry: NotchGeometry, size: CGSize) -> NotchMirror {
         let model = NotchMirrorModel(geometry: geometry, size: size)
         let host = NotchWindowHost(content: AnyView(NotchMirrorView(service: self, mirror: model)),
                                    geometry: geometry, size: size,
                                    background: { AnyView(NotchWindowBackground(presentation: $0)) })
         host.panel.title = FeatureStrings.notch(L10n.shared.language).title
-        return NotchMirror(host: host, model: model)
+        host.panel.handleScroll = { [weak self] event in self?.handleScroll(event) ?? false }
+        let mirror = NotchMirror(id: id, host: host, model: model)
+        // The copy's own hover, named for its own display: the pointer's answer
+        // is read from that window, on that display, and the deadline, the
+        // suppression and the opening are this copy's.
+        host.setHoverHandler { [weak self] entered in self?.mirrorHover(id, entered: entered) }
+        return mirror
     }
 
     private func closeMirrors() {
         guard !mirrors.isEmpty else { return }
-        mirrors.values.forEach { $0.host.close() }
+        mirrors.values.forEach {
+            $0.cancelHoverWork()
+            $0.host.close()
+        }
         mirrors.removeAll()
     }
 
@@ -3929,17 +4090,110 @@ final class NotchService: ObservableObject {
         })
     }
 
-    /// A click on a copy brings the island to its display, open, closing it
-    /// on the display it was open on.
-    private func bringIsland(to id: CGDirectDisplayID) {
-        guard running, !suspended, showsOnAllDisplays, id != displayID else { return }
-        if expanded || peeking { collapse() }
-        windowHost?.whenSettled { [weak self] in
-            guard let self, self.running, !self.suspended, self.canFollowPointer,
-                  let screen = NSScreen.screens.first(where: { $0.notchDisplayID == id }) else { return }
-            self.move(to: screen)
-            if self.compactActivity == .calendar { self.openCountdownEvent() } else { self.open() }
+    /// Whether the pointer rests on a copy's island: asked of that copy's own
+    /// window, whose frame is that display's, so a pointer on one display is
+    /// never taken for a pointer on another.
+    private func pointerOverMirror(_ mirror: NotchMirror) -> Bool {
+        mirror.host.containsHover(NSEvent.mouseLocation)
+    }
+
+    /// The pointer reached, or left, a copy's island.
+    ///
+    /// This is the island's own deliberate hover, asked of this display: the
+    /// delay the person chose, the same suppressions, and the same answer to the
+    /// island's own news - a banner the person did not ask for is no door kept
+    /// shut, while a mirrored notification is the person's own message and keeps
+    /// its own expansion under the pointer. Each display answers for itself: a
+    /// pointer on one display is not inside another display's island, and the
+    /// suppression one island's resize leaves behind is not carried to a second.
+    func mirrorHover(_ id: CGDirectDisplayID, entered: Bool) {
+        guard let mirror = mirrors[id], running, !suspended, showsOnAllDisplays else { return }
+        let wasInside = mirror.inside
+        mirror.inside = pointerOverMirror(mirror)
+        mirror.hover.update(pointerInside: mirror.inside)
+        if !mirror.inside { mirror.cancelHoverWork() }
+        guard mirror.inside, wasInside != mirror.inside || mirror.hoverWork == nil else { return }
+        // A copy whose strip is a control of its own answers the pointer there.
+        // The copies draw no controls - the page is opened, the play and pause
+        // are the island's own strip's - so nothing here declines the opening.
+        guard !mirror.hover.suppressed, hoverOpensThroughNotice || notice == nil || hiddenUntilHover,
+              !mirror.model.expanded, !expansion.presents(on: id), hoverOpeningEnabled else { return }
+        scheduleMirrorOpen(mirror)
+    }
+
+    /// The opening a copy's pointer asked for: the delay the person chose, and
+    /// the deadline's own questions asked again when it fires - the pointer still
+    /// on that island, that island not open already, the island's news still one
+    /// a deliberate hover goes past.
+    private func scheduleMirrorOpen(_ mirror: NotchMirror) {
+        mirror.cancelHoverWork()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            mirror.hoverWork = nil
+            guard self.running, !self.suspended, self.showsOnAllDisplays, mirror.inside,
+                  !mirror.hover.suppressed, self.hoverOpeningEnabled,
+                  !mirror.model.expanded, !self.expansion.presents(on: mirror.id),
+                  self.hoverOpensThroughNotice || self.notice == nil || self.hiddenUntilHover,
+                  self.pointerOverMirror(mirror) else { return }
+            self.expand(on: mirror.id)
+            self.provideHapticFeedback()
         }
+        mirror.hoverWork = work
+        let delay = NotchSupport.sanitizedHoverDelay(UserDefaults.standard.double(forKey: DefaultsKey.notchHoverDelay))
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    /// A surface that changed under a pointer that has not moved: a page opened
+    /// where the pointer already rests, and a copy that grew under it, are seen
+    /// the way the island sees the same thing - the opening is asked for again,
+    /// and a pointer no longer over the island stops being inside it.
+    private func rearmMirrorHoverOpen(_ mirror: NotchMirror, surfaceChanged: Bool) {
+        if !pointerOverMirror(mirror) {
+            mirror.inside = false
+            mirror.hover.update(pointerInside: false)
+            mirror.cancelHoverWork()
+            return
+        }
+        mirror.inside = true
+        guard surfaceChanged, mirror.hoverWork == nil, !mirror.model.expanded,
+              !mirror.hover.suppressed, hoverOpeningEnabled,
+              hoverOpensThroughNotice || notice == nil || hiddenUntilHover else { return }
+        scheduleMirrorOpen(mirror)
+    }
+
+    /// A press on a copy's island: the press cancels that copy's opening, and a
+    /// pointer left on the island keeps its next approach from opening it, as it
+    /// does on the island's own strip.
+    private func mirrorWillPress(_ mirror: NotchMirror) {
+        mirror.cancelHoverWork()
+        mirror.hover.close(pointerInside: pointerOverMirror(mirror))
+    }
+
+    /// A click on a copy's island opens the dashboard there, closing the display
+    /// that carried it; a click on the display that carries it closes it, as the
+    /// island's own header does.
+    private func mirrorWasClicked(_ mirror: NotchMirror) {
+        mirror.cancelHoverWork()
+        if expansion.presents(on: mirror.id) { collapse() }
+        else { expand(on: mirror.id) }
+    }
+
+    /// The dashboard a display's pointer asked for.
+    ///
+    /// No window moves, and no display ownership changes: the copy keeps its own
+    /// display and draws the page there, at the size that display measures, and
+    /// the display that carried the page closes first. This is a deliberate act -
+    /// a click, or a hover that stayed past the chosen delay - so the island's
+    /// own news is no obstruction: a countdown that has ended keeps ringing and a
+    /// song waiting on its notice keeps its own dismissal, while the page opens
+    /// where the pointer is. Passive pointer-following is the other rule, and it
+    /// is kept off a notice on purpose.
+    func expand(on id: CGDirectDisplayID, takeFocus: Bool = true) {
+        guard running, !suspended, showsOnAllDisplays, id != displayID, mirrors[id] != nil else { return }
+        // A copy of a countdown's strip is a door to its event, as the island's
+        // own strip is, and the page opens on the display whose island was asked.
+        if compactActivity == .calendar { openCountdownEvent(on: id); return }
+        open(takeFocus: takeFocus, on: id)
     }
 
     private var screenEdgeClickArea: CGRect? {
@@ -4425,7 +4679,7 @@ final class NotchService: ObservableObject {
     }
 
     private func syncPanelKey() {
-        let isKey = panel?.isKeyWindow == true
+        let isKey = expansionPanel?.isKeyWindow == true
         if panelIsKey != isKey { panelIsKey = isKey }
     }
 
@@ -4489,16 +4743,16 @@ final class NotchService: ObservableObject {
             guard let self else { return event }
             // Opening by pointer may assign a control focus automatically.
             // Restore its visible indicator before handling any keyboard input.
-            if event.type == .keyDown, event.window === self.panel, !self.showsKeyboardFocus {
+            if event.type == .keyDown, event.window === self.expansionPanel, !self.showsKeyboardFocus {
                 self.showsKeyboardFocus = true
             }
             // While an input method is composing, Esc belongs to it and
             // drops the candidate; the island takes the next one.
-            if event.type == .keyDown, event.window === self.panel, event.keyCode == 53,
-               (self.panel?.firstResponder as? NSTextView)?.hasMarkedText() == true { return event }
+            if event.type == .keyDown, event.window === self.expansionPanel, event.keyCode == 53,
+               (self.expansionPanel?.firstResponder as? NSTextView)?.hasMarkedText() == true { return event }
             // The Command Bar inside the island reads its own keys, Escape included.
-            if event.type == .keyDown, event.window === self.panel, self.showingCommandBar { return event }
-            if event.type == .keyDown, event.window === self.panel, self.captureControls == nil {
+            if event.type == .keyDown, event.window === self.expansionPanel, self.showingCommandBar { return event }
+            if event.type == .keyDown, event.window === self.expansionPanel, self.captureControls == nil {
                 let modifiers = event.modifierFlags.intersection([.command, .control, .option, .shift])
                 if modifiers == .command, event.charactersIgnoringModifiers?.lowercased() == "k" {
                     self.toggleSections()
@@ -4529,7 +4783,7 @@ final class NotchService: ObservableObject {
                 if self.handleScratchpadKey(event) { return nil }
                 if self.handleClipboardPasteKey(event) { return nil }
             }
-            if event.type == .keyDown, event.window === self.panel, self.selected == .tools, !self.showingAppPanel, !self.showingSections {
+            if event.type == .keyDown, event.window === self.expansionPanel, self.selected == .tools, !self.showingAppPanel, !self.showingSections {
                 let launcher = QuickLauncherService.shared
                 // The rail reads across its rows until it scrolls, in the
                 // rows the open page leaves it below its header; the editing
@@ -4539,13 +4793,13 @@ final class NotchService: ObservableObject {
                     : self.expandedGeometry.toolFlow(count: launcher.visibleItems.count)
                 return launcher.handlePanelKey(event, flow: flow)
             }
-            if event.type == .keyDown, event.window === self.panel, event.keyCode == 53 {
+            if event.type == .keyDown, event.window === self.expansionPanel, event.keyCode == 53 {
                 // A level being typed in the mixer cancels on Escape by
                 // itself, and the scratchpad's find bar closes on it; the
                 // next one steps back.
-                if let editor = self.panel?.firstResponder as? NSTextView, editor.isFieldEditor,
+                if let editor = self.expansionPanel?.firstResponder as? NSTextView, editor.isFieldEditor,
                    (editor.delegate as AnyObject?) is MixerPercentNativeTextField { return event }
-                if PlainTextEditor.findBarHasKeyboard(in: self.panel) { return event }
+                if PlainTextEditor.findBarHasKeyboard(in: self.expansionPanel) { return event }
                 self.stepBack()
                 return nil
             }

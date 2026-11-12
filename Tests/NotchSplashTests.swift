@@ -314,17 +314,21 @@ enum NotchSplashTests {
                          && bare.metrics.ttftMilliseconds == nil
                          && bare.metrics.ttftP95Milliseconds == nil,
                      "figures the server does not carry are missing, and not zero")
-        suite.expect(NotchSplashLiveMetrics.current(bare.metrics) == NotchSplashLiveMetrics.empty,
-                     "a reading with no figures leaves the card's current figures empty, and keeps nothing of the last")
+        suite.expect(NotchSplashLiveMetrics.current(bare.metrics, present: false) == NotchSplashLiveMetrics.empty
+                         && NotchSplashLiveMetrics.current(bare.metrics, present: true) == .empty,
+                     "a reading with no figures leaves the card's current figures empty, at rest or at work, "
+                     + "and keeps nothing of the last")
 
-        // The strip's number is the batch in hand, and the engine's average while
-        // no batch is in hand; an engine that has moved no tokens shows nothing.
-        suite.expect(NotchSplashLiveMetrics.stripDecodeSpeed(current: 53.9, overall: 88) == 53.9,
+        // The strip's number is the batch in hand and nothing else. The engine's
+        // average over its whole running is the card's second figure, and is never
+        // taken in the batch's place on the island: it is a figure of what the
+        // engine has done, and an engine at rest keeps both of them forever.
+        suite.expect(NotchSplashLiveMetrics.stripDecodeSpeed(current: 53.9) == 53.9,
                      "the strip writes the batch in hand while the engine has one")
-        suite.expect(NotchSplashLiveMetrics.stripDecodeSpeed(current: nil, overall: 88) == 88,
-                     "with no batch in hand the strip writes the engine's average over its running")
-        suite.expect(NotchSplashLiveMetrics.stripDecodeSpeed(current: nil, overall: 0) == nil
-                         && NotchSplashLiveMetrics.stripDecodeSpeed(current: nil, overall: nil) == nil,
+        suite.expect(NotchSplashLiveMetrics.stripDecodeSpeed(current: nil) == nil,
+                     "with no batch in hand the strip writes nothing, whatever the engine's average over its running")
+        suite.expect(NotchSplashLiveMetrics.stripDecodeSpeed(current: 0) == nil
+                         && NotchSplashLiveMetrics.stripDecodeSpeed(current: nil) == nil,
                      "an engine that has decoded nothing, and a server that answers no rate, leave the strip empty")
 
         // The pair of a card, in the order the card writes it: the batch in hand
@@ -1763,7 +1767,8 @@ enum NotchSplashTests {
             // the clock is the state behind both.
             suite.expect(!service.isTaskRunning
                              && !NotchSplashSupport.showsIslandActivity(sectionVisible: true,
-                                                                         isTaskRunning: service.isTaskRunning)
+                                                                         isTaskRunning: service.isTaskRunning,
+                                                                         isLive: service.stripReadingIsLive)
                              && service.isMonitoring
                              && NotchSplashSupport.showsDashboardCard(sectionVisible: true,
                                                                        isMonitoring: service.isMonitoring),
@@ -1776,7 +1781,8 @@ enum NotchSplashTests {
             spin(1.4)
             suite.expect(service.isTaskRunning
                              && NotchSplashSupport.showsIslandActivity(sectionVisible: true,
-                                                                        isTaskRunning: service.isTaskRunning),
+                                                                        isTaskRunning: service.isTaskRunning,
+                                                                        isLive: service.stripReadingIsLive),
                          "the next request begins a clock of its own, and the island takes Splash back as an activity")
             world.documents = [done(5, failed: 1)]
             world.now = world.now.addingTimeInterval(5)
@@ -2027,13 +2033,17 @@ enum NotchSplashTests {
     /// size, so one section is one shape wherever it is seen.
     static func islandActivityChecks(_ suite: TestSuite) {
         func source(_ path: String) -> String { (try? String(contentsOfFile: path, encoding: .utf8)) ?? "" }
-        // The rule, in its three cases.
-        suite.expect(NotchSplashSupport.showsIslandActivity(sectionVisible: true, isTaskRunning: true),
-                     "a clock that is advancing is an activity on the island")
-        suite.expect(!NotchSplashSupport.showsIslandActivity(sectionVisible: true, isTaskRunning: false),
+        // The rule, in its cases: the section, the clock, and the reading's own
+        // answer about the engine's present.
+        suite.expect(NotchSplashSupport.showsIslandActivity(sectionVisible: true, isTaskRunning: true, isLive: true),
+                     "a clock that is advancing over an engine at work is an activity on the island")
+        suite.expect(!NotchSplashSupport.showsIslandActivity(sectionVisible: true, isTaskRunning: false, isLive: true),
                      "a frozen clock is not an activity, whatever the server and the dashboard go on to say")
-        suite.expect(!NotchSplashSupport.showsIslandActivity(sectionVisible: false, isTaskRunning: true),
+        suite.expect(!NotchSplashSupport.showsIslandActivity(sectionVisible: false, isTaskRunning: true, isLive: true),
                      "a section not in the island has no strip, clock advancing or not")
+        suite.expect(!NotchSplashSupport.showsIslandActivity(sectionVisible: true, isTaskRunning: true, isLive: false),
+                     "a run kept open through its confirmation window is news being waited for, not work: a quiet "
+                     + "engine keeps its clock, its card and its averages, and shows no speed on the island")
         // One clock, one answer, at the tracker's own moment of ending: the task
         // runs, the island registers it; the task ends, its clock freezes, and
         // the island lets it go while the card keeps it.
@@ -2042,7 +2052,8 @@ enum NotchSplashTests {
                             at: start)
         suite.expect(tracker.isRunning
                          && NotchSplashSupport.showsIslandActivity(sectionVisible: true,
-                                                                    isTaskRunning: tracker.isRunning),
+                                                                    isTaskRunning: tracker.isRunning,
+                                                                    isLive: true),
                      "the running clock the card shows is the state the island registers")
         _ = tracker.observe(snapshot(#"{"instance": {"id": "a"}, "requests": {"completed": 4}, "active_requests": []}"#),
                             at: start.addingTimeInterval(10))
@@ -2050,7 +2061,8 @@ enum NotchSplashTests {
                                     at: start.addingTimeInterval(45))
         suite.expect(ended != nil && !tracker.isRunning
                          && !NotchSplashSupport.showsIslandActivity(sectionVisible: true,
-                                                                     isTaskRunning: tracker.isRunning)
+                                                                     isTaskRunning: tracker.isRunning,
+                                                                     isLive: false)
                          && NotchSplashSupport.showsDashboardCard(sectionVisible: true, isMonitoring: true)
                          && tracker.elapsed(at: start.addingTimeInterval(600)) == 10,
                      "the moment the task is told leaves the island and keeps the card, on the one frozen clock, "
@@ -2069,12 +2081,16 @@ enum NotchSplashTests {
             let end = tail.range(of: "\n    }")?.lowerBound ?? tail.startIndex
             return String(tail[..<end])
         }()
-        suite.expect(body.contains("showsIslandActivity") && body.contains("isTaskRunning"),
-                     "the island's Splash activity is the clock: \(body.trimmingCharacters(in: .whitespacesAndNewlines))")
+        suite.expect(body.contains("showsIslandActivity") && body.contains("isTaskRunning")
+                         && body.contains("isLive") && body.contains("stripReadingIsLive"),
+                     "the island's Splash activity is the clock and the reading's answer about the present: "
+                     + "\(body.trimmingCharacters(in: .whitespacesAndNewlines))")
         suite.expect(!body.contains("isMonitoring") && !body.contains("isTaskFinished")
-                         && !body.contains("stripShowsDecodeSpeed") && !body.contains("snapshot"),
-                     "a reading that goes on, a task that has been told, and a decode figure that can be missing for a "
-                     + "moment between two generations are none of them in the island's rule")
+                         && !body.contains("stripShowsDecodeSpeed") && !body.contains("snapshot")
+                         && !body.contains("hasWork"),
+                     "a reading that goes on, a task that has been told, a decode figure that can be missing for a "
+                     + "moment between two generations, and the status read at the island are none of them in the "
+                     + "island's rule")
         suite.expect(service.contains("Publishers.CombineLatest3(splash.$isMonitoring.removeDuplicates(),")
                          && service.contains("splash.$phase.removeDuplicates()"),
                      "the island is woken by the same publication that freezes the clock, and by no poller of its own")
@@ -2165,6 +2181,175 @@ enum NotchSplashTests {
                      "the dashboard's card is measured without the trend, as it is drawn")
     }
 
+    /// The closed island's throughput: what the reading has to answer for, and
+    /// what it may not.
+    ///
+    /// The endpoint keeps the rate of the batch it finished last, marks it valid,
+    /// and answers the engine's average over the whole of its running beside it -
+    /// and it does all of that while it has nothing in hand. `valid` says the
+    /// measurement is well-formed, not that a batch is running, so a figure of
+    /// the present is kept only over a reading that says the engine is at work:
+    /// an idle engine has no speed on the island, while the card keeps the
+    /// averages, the clock it froze, and the reading it is on.
+    static func stripThroughputChecks(_ suite: TestSuite) {
+        /// The reference's own idle answer: the last batch marked valid, the
+        /// lifetime average beside it, and nothing counted as work anywhere.
+        let resting = """
+        {"instance": {"id": "a"},
+         "requests": {"completed": 3, "failed": 0, "cancelled": 0},
+         "active_requests": [],
+         "scheduler": {"queued": 0, "waiting_resources": 0, "prefilling": 0, "decoding": 0},
+         "frontend": {"active": 0, "waiting": 0},
+         "transport": {"pending": 0, "status_stale": false},
+         "metrics": {"decode_tokens_per_second": 92.3, "prefill_tokens_per_second": 481.2,
+                     "current_decode_batch": {"valid": true, "tokens_per_second": 104.5},
+                     "current_prefill_batch": {"valid": true, "tokens_per_second": 316.3},
+                     "ttft_ms": {"p50": 2068, "p95": 7985},
+                     "prefill_input_tokens": 2011746, "decode_output_tokens": 464776}}
+        """
+        func metrics(_ batch: String) -> String {
+            "\"metrics\": {\"decode_tokens_per_second\": 92.3, \"prefill_tokens_per_second\": 481.2, "
+                + "\"current_decode_batch\": \(batch), \"ttft_ms\": {\"p50\": 2068, \"p95\": 7985}, "
+                + "\"prefill_input_tokens\": 2011746, \"decode_output_tokens\": 464776}"
+        }
+        func atWork(_ id: String, batch: String) -> String {
+            "{\"instance\": {\"id\": \"a\"}, "
+                + "\"requests\": {\"completed\": 3, \"failed\": 0, \"cancelled\": 0}, "
+                + "\"active_requests\": [{\"id\": \"\(id)\"}], \"scheduler\": {\"decoding\": 1}, \(metrics(batch))}"
+        }
+        /// The same work, answered with a batch the engine does not measure: the
+        /// rates it keeps are the averages, and no current figure arrives.
+        func atWorkWithoutBatch(_ id: String) -> String {
+            atWork(id, batch: "{\"valid\": false, \"tokens_per_second\": 104.5}")
+        }
+        func quiet(completed: Int) -> String {
+            "{\"instance\": {\"id\": \"a\"}, \"requests\": {\"completed\": \(completed), \"failed\": 0, \"cancelled\": 0}, "
+                + "\"active_requests\": [], \"scheduler\": {\"decoding\": 0}, "
+                + "\"metrics\": {\"decode_tokens_per_second\": 92.3, "
+                + "\"current_decode_batch\": {\"valid\": true, \"tokens_per_second\": 104.5}, "
+                + "\"prefill_input_tokens\": 2011800, \"decode_output_tokens\": 464900}}"
+        }
+
+        let world = PollingWorld(start: start, documents: [resting])
+        let historyPath = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+            .appendingPathComponent("vorss-tests-splash-strip-\(ProcessInfo.processInfo.processIdentifier).json")
+        let service = NotchSplashService(
+            read: { _, _, _ in (Data(world.nextDocument().utf8), world.code) },
+            address: { world.address },
+            enabled: { world.enabled },
+            savedInterval: { world.interval },
+            keepInterval: { _ in },
+            clock: { world.now },
+            strings: { FeatureStrings.notchSplash(.enUS) },
+            deliver: { world.notices.append($0) },
+            history: NotchSplashHistoryStore(url: historyPath))
+
+        func spin(_ seconds: TimeInterval) {
+            let end = Date().addingTimeInterval(seconds)
+            while Date() < end { RunLoop.main.run(until: Date().addingTimeInterval(0.05)) }
+        }
+        func islandActivity() -> Bool {
+            NotchSplashSupport.showsIslandActivity(sectionVisible: true, isTaskRunning: service.isTaskRunning,
+                                                   isLive: service.stripReadingIsLive)
+        }
+
+        MainActor.assumeIsolated {
+            // The rule, asked of the reading a real endpoint gives an idle engine.
+            let idle = status(resting)
+            suite.expect(!idle.hasWork, "an engine that names no request and counts nothing is at rest")
+            suite.expect(idle.metrics.currentDecodeBatchTokensPerSecond == 104.5
+                             && idle.metrics.decodeTokensPerSecond == 92.3,
+                         "a resting engine still answers the last batch's rate as valid, and its average beside it")
+            suite.expect(NotchSplashLiveMetrics.current(idle.metrics, present: false).decode == nil
+                             && NotchSplashLiveMetrics.current(idle.metrics, present: false).prefill == nil,
+                         "over a reading at rest those batch rates are not figures of the present")
+            suite.expect(NotchSplashLiveMetrics.current(idle.metrics, present: true).decode == 104.5,
+                         "over a reading at work the batch in hand is the figure")
+            suite.expect(NotchSplashLiveMetrics.current(idle.metrics, present: false).ttftP50 == 2.068,
+                         "the percentiles of finished requests are not figures of the present, and rest keeps them")
+
+            service.start()
+            spin(1.4)
+            suite.expect(service.isMonitoring && service.snapshot != nil && service.reads >= 1,
+                         "the reading is running over a resting engine")
+            suite.expect(!service.stripReadingIsLive && service.stripDecodeSpeed == nil
+                             && !service.stripShowsDecodeSpeed,
+                         "a resting engine that answers a valid last batch and a lifetime average of 92.3 leaves the "
+                         + "strip with no throughput at all")
+            suite.expect(service.live.decode == nil && service.live.prefill == nil,
+                         "the card's current figures are empty over a resting reading")
+            suite.expect(!islandActivity(), "and the closed island shows no Splash strip over an idle engine")
+            suite.expect(service.snapshot?.status.metrics.decodeTokensPerSecond == 92.3
+                             && service.phase == .idle && service.elapsed() == 0,
+                         "the card keeps the lifetime average to draw, and times nothing")
+            suite.expect(NotchSplashSupport.showsDashboardCard(sectionVisible: true,
+                                                               isMonitoring: service.isMonitoring),
+                         "the dashboard card stands for the reading, idle engine and all")
+
+            // Work: the batch in hand is the figure, and the island has a strip.
+            world.documents = [atWork("req-1", batch: "{\"valid\": true, \"tokens_per_second\": 116.7}")]
+            spin(1.4)
+            suite.expect(service.isTaskRunning && service.stripReadingIsLive
+                             && service.stripDecodeSpeed == 116.7 && service.stripShowsDecodeSpeed
+                             && islandActivity(),
+                         "a decode the engine is running is measured and shown: the batch in hand, not the average")
+
+            // A batch the engine does not measure, over an engine at work: the
+            // strip keeps its place and its placeholder, and no stale figure
+            // is brought in to fill it.
+            world.documents = [atWorkWithoutBatch("req-1")]
+            spin(1.4)
+            suite.expect(service.stripReadingIsLive && islandActivity() && service.stripDecodeSpeed == nil
+                             && NotchSplashSupport.stripSpeedText(nil) == nil,
+                         "an engine at work that answers no batch keeps the strip's place, and its number is missing")
+
+            // The work ends and the counters move: the run stays open for its
+            // confirmation window, and the closed island lets the speed go with
+            // the last reading of the engine at rest. The task, its clock and
+            // the reading are untouched by the strip leaving.
+            let opened = service.phase
+            world.documents = [quiet(completed: 4)]
+            spin(1.4)
+            suite.expect(service.isTaskRunning && service.trackedID == "req-1" && service.isMonitoring,
+                         "the quiet run is kept open, its clock and its reading as they were")
+            suite.expect(service.phase == opened && !service.isTaskFinished,
+                         "the task's tracking is not reset because the strip went away")
+            suite.expect(!service.stripReadingIsLive && service.stripDecodeSpeed == nil && !islandActivity(),
+                         "a run open over a resting engine shows no throughput: the last batch's rate and the "
+                         + "lifetime average are both figures of what the engine has done")
+            suite.expect(service.snapshot?.status.metrics.decodeTokensPerSecond == 92.3,
+                         "and the card is left with its averages to draw")
+
+            // The next prompt: the strip comes back with the batch in hand, in
+            // the same run and on the same clock.
+            world.documents = [atWork("req-2", batch: "{\"valid\": true, \"tokens_per_second\": 74.25}")]
+            spin(1.4)
+            suite.expect(service.trackedID == "req-1" && service.isTaskRunning
+                             && service.stripDecodeSpeed == 74.25 && islandActivity(),
+                         "work seen again resumes the same run, and the strip returns with the new batch's rate")
+
+            // A reading that did not arrive is not a reading of the present.
+            world.code = 500
+            spin(1.6)
+            suite.expect(service.failure != nil && !service.stripReadingIsLive
+                             && service.stripDecodeSpeed == nil && !islandActivity(),
+                         "a status that answers no reading leaves the strip with nothing to show")
+            suite.expect(service.snapshot?.status.metrics.decodeTokensPerSecond == 92.3 && service.isMonitoring,
+                         "the card keeps the last reading it was given, and the reading goes on")
+            world.code = 200
+            world.documents = [atWork("req-3", batch: "{\"valid\": true, \"tokens_per_second\": 88}")]
+            spin(1.4)
+            suite.expect(service.stripDecodeSpeed == 88 && islandActivity(),
+                         "and the strip returns with the next reading that measures a batch")
+
+            // A reading that arrived already old, and an engine begun again,
+            // answer nothing of the present either.
+            service.stop()
+            suite.expect(!service.stripReadingIsLive && service.stripDecodeSpeed == nil && !islandActivity(),
+                         "the way out leaves the strip with nothing, as an idle engine does")
+        }
+    }
+
     static func run(_ suite: TestSuite) {
         suite.run("splash settings") { settingsChecks(suite) }
         suite.run("splash reading") { readingChecks(suite) }
@@ -2183,6 +2368,7 @@ enum NotchSplashTests {
         suite.run("splash ruler") { rulerChecks(suite) }
         suite.run("splash dashboard") { dashboardChecks(suite) }
         suite.run("splash island activity") { islandActivityChecks(suite) }
+        suite.run("splash strip throughput") { stripThroughputChecks(suite) }
         suite.run("splash page") { pageChecks(suite) }
         suite.run("splash strings") { localizationChecks(suite) }
         suite.run("splash palette") { paletteChecks(suite) }

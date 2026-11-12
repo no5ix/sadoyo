@@ -743,7 +743,8 @@ enum NotchSplashSupport {
     }
 
     /// Whether the closed island draws a reading: the section is on the island,
-    /// and the card's clock is advancing.
+    /// the card's clock is advancing, and the reading says the engine has work in
+    /// hand.
     ///
     /// The clock is the question the island answers - is a run of work being
     /// watched now - and it is the same clock the card shows: advanced while the
@@ -755,8 +756,17 @@ enum NotchSplashSupport {
     /// its card and its frozen numbers, and none of that is an activity. Nothing
     /// here watches the server, times out, or guesses from numbers that stop
     /// moving: the island asks the tracker the single question the card asks.
-    static func showsIslandActivity(sectionVisible: Bool, isTaskRunning: Bool) -> Bool {
-        sectionVisible && isTaskRunning
+    ///
+    /// `isLive` is the reading's own answer about the present, asked beside the
+    /// clock: a run stays open through the confirmation window after its work
+    /// stopped, and the closed island is not a record of a run, it is a reading
+    /// of what the engine is doing. A quiet engine therefore keeps its clock, its
+    /// card, its averages and its notice, and keeps no speed on the island. A
+    /// figure missing from a reading of an engine at work is not in the rule: the
+    /// strip keeps its place and its placeholder for that moment, so a running
+    /// task is not taken off the island between two of the engine's generations.
+    static func showsIslandActivity(sectionVisible: Bool, isTaskRunning: Bool, isLive: Bool) -> Bool {
+        sectionVisible && isTaskRunning && isLive
     }
 
     // MARK: Thresholds
@@ -1667,17 +1677,28 @@ final class NotchSplashService: ObservableObject {
     var isTaskRunning: Bool { tracker.isRunning }
     var isTaskFinished: Bool { tracker.isFinished }
     var trackedID: String? { tracker.trackedID }
-    /// The decode speed the island's strip shows: the batch in hand, and the
-    /// engine's own average over its whole running while no batch is in hand.
+    /// The decode speed the island's strip shows: the batch in hand, and nothing
+    /// else. An engine at rest, and an engine that answers no current batch, leave
+    /// it nil; the engine's lifetime average is never taken in its place.
     var stripDecodeSpeed: Double? {
-        NotchSplashLiveMetrics.stripDecodeSpeed(current: live.decode,
-                                                overall: snapshot?.status.metrics.decodeTokensPerSecond)
+        // A rate of the present, or nothing: a reading at rest, an old reading,
+        // and a reading that did not arrive answer no rate, and the averages are
+        // the card's, never the strip's.
+        guard stripReadingIsLive else { return nil }
+        return NotchSplashLiveMetrics.stripDecodeSpeed(current: live.decode)
     }
-    /// Whether the island's strip has a decode speed to show: a reading is in
-    /// hand, and it is not so old that its numbers are about the past.
+    /// Whether the reading answers the engine's present: it arrived, it is not
+    /// older than the polling should have left it, and it says the engine has
+    /// work in hand. The averages outlive every quiet stretch, so this - and not
+    /// a number the card can show - is what says a rate is about now.
+    var stripReadingIsLive: Bool {
+        guard let snapshot, failure == nil, isMonitoring, !isStale(snapshot) else { return false }
+        return snapshot.status.hasWork
+    }
+    /// Whether the island's strip has a decode speed to draw: the reading is
+    /// about the present, and this reading answered a batch in hand.
     var stripShowsDecodeSpeed: Bool {
-        guard let snapshot, failure == nil, isMonitoring else { return false }
-        return !isStale(snapshot) && stripDecodeSpeed != nil
+        stripReadingIsLive && stripDecodeSpeed != nil
     }
     var taskOutcome: NotchSplashTaskTracker.Outcome? {
         if case .finished(_, let outcome, _, _) = phase { return outcome }
@@ -1833,7 +1854,7 @@ final class NotchSplashService: ObservableObject {
             liveInstanceKey = snapshot.instanceKey
             live = .empty
         }
-        live = NotchSplashLiveMetrics.current(snapshot.status.metrics)
+        live = NotchSplashLiveMetrics.current(snapshot.status.metrics, present: snapshot.status.hasWork)
     }
 
     // MARK: The loop

@@ -3,8 +3,15 @@
 
 import SwiftUI
 
-/// What the island shows closed, drawn for another display. It takes no
-/// clicks itself: a click on its window brings the island there, open.
+/// A display's own island.
+///
+/// Closed, it is what the island shows, drawn for this display - a capsule or a
+/// notch - and it takes no clicks of its own: its window's own button, and its
+/// own hover area, answer the pointer on this display and open the page here.
+/// Open, it is the page: the island's one page, drawn by this window because
+/// this display's island was the one opened. Nothing of the dashboard is
+/// duplicated here - the same view, the same state, the page of one display at a
+/// time - and the windows stay on the displays they were built for.
 struct NotchMirrorView: View {
     @ObservedObject var service: NotchService
     @ObservedObject var mirror: NotchMirrorModel
@@ -13,29 +20,39 @@ struct NotchMirrorView: View {
         content
             .frame(width: mirror.size.width, height: mirror.size.height, alignment: .top)
             .foregroundStyle(.white)
-            .allowsHitTesting(false)
+            // A closed copy is a picture and a door: its clicks are the window's
+            // button. An open page is a page: its cards, sliders and fields take
+            // the clicks that are asked of them.
+            .allowsHitTesting(mirror.expanded)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .environment(\.colorScheme, .dark)
             .environment(\.notchPresentation, true)
             .tint(.white)
-            .accessibilityHidden(true)
+            .accessibilityHidden(!mirror.expanded)
     }
 
     @ViewBuilder private var content: some View {
-        let geometry = mirror.geometry
-        let size = mirror.size
-        if let activity = mirror.activity {
-            activityStrip(activity, geometry: geometry, size: size)
-                .modifier(NotchMascotActivityVisit(
-                    service: service,
-                    track: service.mascotOn
-                        ? NotchMascotSupport.track(overActivity: geometry.floats ? geometry : mirror.strip, size: size,
-                                                   side: service.mascotSide)
-                        : nil))
-        } else if geometry.floats {
-            NotchCapsuleRestingView(service: service, size: size, displayGeometry: geometry)
+        if mirror.expanded {
+            // The page, at the size this display's window presents it, with none
+            // of the island's own rest, notice, capture controls, or fullscreen
+            // state: this window draws the page, and only the page.
+            NotchView(service: service, presentsPage: true, pageSurfaceSize: mirror.size)
         } else {
-            NotchRestingStrip(service: service, displayGeometry: geometry)
+            let geometry = mirror.geometry
+            let size = mirror.size
+            if let activity = mirror.activity {
+                activityStrip(activity, geometry: geometry, size: size)
+                    .modifier(NotchMascotActivityVisit(
+                        service: service,
+                        track: service.mascotOn
+                            ? NotchMascotSupport.track(overActivity: geometry.floats ? geometry : mirror.strip,
+                                                       size: size, side: service.mascotSide)
+                            : nil))
+            } else if geometry.floats {
+                NotchCapsuleRestingView(service: service, size: size, displayGeometry: geometry)
+            } else {
+                NotchRestingStrip(service: service, displayGeometry: geometry)
+            }
         }
     }
 
