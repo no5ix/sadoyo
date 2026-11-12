@@ -39,10 +39,30 @@
     A peek is a copy's own state, so one copy's
     pointer does not peek another display's island, and a page opened anywhere takes a
     copy's peek back: the page is one. Because AppKit can report no exit at all for these
-    windows, a copy starts following the pointer's moves when it reports a leaving that can
-    close something - the exit AppKit drops, and the pointer that slips back unreported, are
-    both covered from there - and it stops when it has nothing left to close
-    (`syncMirrorExitMonitoring`), as the island follows them for its own.
+    windows, an island follows the pointer's moves by one rule, stated once in
+    `NotchIslandHover` and asked of the island's own window and of every copy's alike
+    (`syncHoverExitMonitoring`, `syncMirrorExitMonitoring`). The following starts at the
+    island's own *entry* - while its hover waits out the chosen delay, and while a press's
+    suppression is held - and runs while it carries the open page or the page's name. It
+    never starts from a report of a leaving, because the opening that entry waits out
+    grows the island's surface under a pointer that has not moved, and a window grown
+    under a stationary pointer is the one that reports no leaving: the exit that closes
+    the page is the exit least likely to arrive. It stops when there is nothing left to
+    close, and one copy's monitors ask about one copy's island only.
+  - Leaving is measured against the whole interactive region, not the compact strip:
+    `NotchWindowHost.containsHover` asks a window's *destination* bounds, so the open page
+    and a peek are part of the region the pointer is inside. A pointer that moves from the
+    closed strip into the page a hover opened is inside, and the page stays; it closes
+    when the pointer leaves the whole of it. Every display answers this the same, and no
+    display is given a collapse timer of its own.
+  - The closed island's content is one answer, in `NotchService.stripContent`
+    (`NotchStripContent`): the pair of activities, and whether the song is named between
+    the wings. Every window of the island draws that content, so the strip a person sees
+    is the same content on every display, and `interactive` gates only what a surface does
+    under a pointer - its hover, its play and pause, its naming - never what it shows. A
+    copy that picked its own arrangement, the song's solo layout where the island shows
+    the pair, is a second island; the layout question is answered once, from the island's
+    own surface.
   - Deliberate and passive are separate rules on purpose. The island's own news is no
     obstruction to a deliberate act, so `expand(on:)` goes past a `notice` (a countdown
     that has ended keeps ringing) and past `heldMusic` (a song keeps its own dismissal).
@@ -61,22 +81,32 @@
   hover, their peek, and the moves they follow (`closeMirrors`, `syncMirrors`,
   `retireExpansion`, `collapse`, `removeMirrorExitMonitors`), and the behaviour of
   `notchDisplay = all` changes for anyone who relied on the island following the pointer
-  across displays - that is what `.pointer` is for. The three-display interaction cannot
-  be proven by unit tests: automated coverage drives the production bodies with window,
-  display, Spaces and pointer doubles, and the real hover on three displays needs the
-  Release app. The same goes for a copy whose surface grows under a pointer that has not
-  moved (`rearmMirrorHoverOpen`): no fixture draws a copy at a measure that grows under a
-  resting pointer, so the answer it gives to the person's peek choice is seen in the app.
+  across displays - that is what `.pointer` is for. The hover lifecycle every island
+  answers, and the content every window draws, are one rule each and are tested as such:
+  `hoverLifecycleContracts` and `hoverParityChecks` drive the production bodies through
+  three displays, a pointer that reports only its entry, and an open panel the pointer
+  moves inside. What remains outside the fixtures is the physical interaction on three
+  displays, which needs the Release app. The same goes for a copy whose surface grows
+  under a pointer that has not moved (`rearmMirrorHoverOpen`): no fixture draws a copy at
+  a measure that grows under a resting pointer, so the answer it gives to the person's
+  peek choice is seen in the app.
 - Related code: `Sources/Vorssaint/Services/Notch/NotchSupport.swift`
-  (`NotchDisplayExpansion`, `NotchMirrorModel`, `NotchMirrorModel.peeking`),
+  (`NotchDisplayExpansion`, `NotchIslandHover`, `NotchStripContent`, `NotchMirrorModel`,
+  `NotchMirrorModel.peeking`),
   `Sources/Vorssaint/Services/Notch/NotchService.swift`
   (`syncMirrors`, `makeMirror`, `mirrorHover`, `scheduleMirrorOpen`, `scheduleMirrorPeek`,
-  `scheduleMirrorClose`, `syncMirrorExitMonitoring`, `removeMirrorExitMonitors`,
-  `carriesPage`, `mirrorHoverExpands`, `rearmMirrorHoverOpen`,
-  `mirrorWillPress`, `mirrorWasClicked`, `expand(on:)`, `presentsExpansion(on:)`,
+  `scheduleMirrorClose`, `syncHoverExitMonitoring`, `syncMirrorExitMonitoring`,
+  `removeMirrorExitMonitors`, `carriesPage`, `mirrorHoverExpands`, `rearmMirrorHoverOpen`,
+  `stripContent`, `mirrorWillPress`, `mirrorWasClicked`, `expand(on:)`, `presentsExpansion(on:)`,
   `retireExpansion`, `presentationGeometry`, `expansionHost`, `followsPointer`),
+  `Sources/Vorssaint/Services/Notch/NotchWindowHost.swift` (`containsHover`, whose answer
+  is the destination bounds of one window - the whole region a pointer is inside),
   `Sources/Vorssaint/UI/Notch/NotchMirrorView.swift`, `Sources/Vorssaint/UI/Notch/NotchView.swift`
-  (the island's own and a copy's shared `NotchPeekSurface`).
-  Tests: `Tests/NotchMirrorTests.swift` (`displayExpansionChecks`, `pointerExitContracts`),
-  `Tests/NotchHoverTests.swift` (`displayExpansionChecks`), `Tests/NotchActivityTests.swift`
-  (`displayExpansionChecks`), `Tests/generate_sources.py`.
+  (the island's own and a copy's shared `NotchPeekSurface`),
+  `Sources/Vorssaint/UI/Notch/NotchMusicStrip.swift` and
+  `Sources/Vorssaint/UI/Notch/NotchCapsuleViews.swift` (the closed strips, which draw
+  `NotchStripContent` on every display).
+  Tests: `Tests/NotchMirrorTests.swift` (`displayExpansionChecks`, `pointerExitContracts`,
+  `hoverLifecycleContracts`, `stripContentContracts`),
+  `Tests/NotchHoverTests.swift` (`displayExpansionChecks`, `hoverParityChecks`),
+  `Tests/NotchActivityTests.swift` (`displayExpansionChecks`), `Tests/generate_sources.py`.

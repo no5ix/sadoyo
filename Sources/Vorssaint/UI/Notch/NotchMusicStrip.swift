@@ -47,6 +47,15 @@ struct NotchMusicStrip: View {
     private var artwork: NSImage? { shown == nil ? music.artwork : shown?.artwork }
     private var tint: NotchArtworkTint? { shown == nil ? music.artworkTint : shown?.tint }
     private var live: Bool { interactive && snapshot == nil }
+    /// What the closed strip shows: the island's one answer, read the same by
+    /// every window that draws it. A copy on another display draws the song
+    /// beside the same mark, named as the island names it, and is not a second
+    /// island that picked its own arrangement. Only the pointer is each
+    /// window's own.
+    private var content: NotchStripContent { service.stripContent }
+    /// A strip on its way out draws the song alone, as it was drawn, in its own
+    /// geometry.
+    private var pairedCompanion: NotchCompactActivity? { snapshot == nil ? content.companion : nil }
     /// A physical camera's wings are fitted to the cover and the bars; a
     /// simulated one keeps a little air beside its drawn cutout.
     private var innerInset: CGFloat { Layout.innerInset(geometry) }
@@ -66,8 +75,12 @@ struct NotchMusicStrip: View {
         guard let artist = playback?.track.artist?.trimmingCharacters(in: .whitespaces), !artist.isEmpty else { return nil }
         return artist
     }
-    /// A simulated camera has room for the track even when its wings disappear.
-    private var fillsCameraGap: Bool { Layout.fillsCameraGap(geometry) }
+    /// A simulated camera has room for the track even when its wings disappear,
+    /// and the island answers that once for every display: the words are the
+    /// song's name, so no window's width and no pointer's place decides it.
+    private var fillsCameraGap: Bool {
+        snapshot == nil ? content.namesSongInGap : Layout.fillsCameraGap(geometry)
+    }
     private var showsArtist: Bool { Layout.showsArtist(geometry) }
     /// The left side while the pointer has the song named, nil otherwise. A
     /// strip on its way out keeps the name it had, which leaves with it.
@@ -83,7 +96,7 @@ struct NotchMusicStrip: View {
         // reads left to right in the order of their standing. The name makes
         // room; the strip's click opens the island, where every activity has its
         // card.
-        let companion = live ? service.compactCompanion : nil
+        let companion = pairedCompanion
         let named: CGFloat? = companion == nil ? namedWing : nil
         Button { live ? service.activateMusicStrip() : service.openActivity(.music, on: pageDisplay) } label: {
             HStack(spacing: 0) {

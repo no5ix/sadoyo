@@ -205,11 +205,11 @@ struct NotchView: View {
             }
         } else if service.peeking {
             NotchPeekSurface(service: service, hostDisplayID: hostDisplayID)
-        } else if let activity = service.compactActivity {
+        } else if let activity = service.stripContent.activity {
             // Hover grows the capsule around its strip, as it grows the
             // notch around its wings. Drawn at the grown size, a song's
             // cover and bars jumped out at once while the shape still grew.
-            let strip = service.compactStripSize(for: activity, companion: service.compactCompanion)
+            let strip = service.compactStripSize(for: activity, companion: service.stripContent.companion)
             activityStrip(activity, size: strip)
                 .modifier(NotchMascotActivityVisit(service: service,
                                                    track: service.mascotTrack(overActivityStrip: strip),

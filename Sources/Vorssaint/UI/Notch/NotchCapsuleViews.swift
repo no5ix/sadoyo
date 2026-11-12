@@ -279,13 +279,15 @@ struct NotchCapsuleMusicStrip: View {
     private var playing: Bool { (live ? service.musicStripRequest : nil) ?? playback?.isPlaying == true }
     /// The activity drawn at the row's leading end beside the song: the one of
     /// the pair that stands above it, so the capsule reads in their standing.
-    private var companion: NotchCompactActivity? { live ? service.compactCompanion : nil }
+    /// The pair is the island's one answer, read the same by its own capsule and
+    /// by a copy on any other display; a strip on its way out keeps the row it
+    /// was drawn with.
+    private var companion: NotchCompactActivity? { snapshot == nil ? service.stripContent.companion : nil }
     /// The working agents, for the mark of agents that shares the row.
     private var agentWorking: Int { Set(AgentUsageService.shared.snapshot.live.map(\.provider)).count }
 
     var body: some View {
         let side = CapsuleLayout.artworkSide(geometry)
-        let companion = live ? service.compactCompanion : nil
         let markWidth = companion.map {
             CapsuleLayout.timerMarkWidth(companion: $0, workingAgents: agentWorking, downloadPercent: false,
                                          geometry: geometry, language: l10n.language)

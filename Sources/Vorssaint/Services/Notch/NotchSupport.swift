@@ -771,6 +771,78 @@ struct NotchHoverState {
     }
 }
 
+/// What one island window's hover knows, for the display it was built for.
+///
+/// The island's own window and every copy's window answer one lifecycle, so a
+/// pointer that reaches a display's island and leaves it gets the same answer
+/// there that it gets on the island's own display: the delay the person chose,
+/// a page that delay opened, and the close the leaving asks for. Nothing here
+/// names a display, and no rule here is answered twice: the window, its
+/// geometry, and where the pointer is on that display belong to the caller.
+struct NotchIslandHover {
+    /// The pointer is over this island, as this window answers it.
+    var inside = false
+    /// This window draws the island's open page.
+    var showsPage = false
+    /// This window shows the page's name, and no page.
+    var peeking = false
+    /// The island's news lies over the closed strip, so the surface under the
+    /// pointer is the banner's, and it answers as the island's own does.
+    var noticeCoversIsland = true
+    /// A hover deadline this island started is waiting to run.
+    var deadlinePending = false
+    /// A press on this island keeps its next approach from opening it.
+    var suppressed = false
+    /// The person chose to open the island with the pointer at all.
+    var opensOnHover = true
+    /// The closed island is enlarged under the pointer.
+    var emphasisShows = false
+    /// The closed strip keeps something the pointer's leaving has to end.
+    var keepsStripState = false
+    /// An exit from this island closes what this island shows.
+    var closesOnExit = false
+
+    /// The closed island whose hover has an opening waiting.
+    ///
+    /// That opening grows the surface under a pointer that has not moved, and a
+    /// tracking area replaced under a stationary pointer reports no leaving: the
+    /// exit that follows an opening is the one AppKit is most likely to drop.
+    /// So the moves are followed from the entry, where the entry is always
+    /// reported, and not from an exit report that may never arrive. A press's
+    /// suppression is followed for the same reason: it ends at a leaving that
+    /// may go unreported, and a copy's window grows under its pointer exactly
+    /// as the island's own does.
+    var followsClosedHover: Bool {
+        inside && !showsPage && !peeking && noticeCoversIsland
+            && (deadlinePending || (suppressed && opensOnHover))
+    }
+
+    /// The island's own closed state, kept by the pointer's staying: an
+    /// emphasis, a strip's name, a song paused from its button, or an opening
+    /// its hover is waiting out.
+    ///
+    /// A caller that must not follow moves while a timed capture is attached
+    /// asks for these alone, and leaves the open page, which the capture's own
+    /// answers already govern, out of the question.
+    var followsClosedState: Bool {
+        emphasisShows || keepsStripState || followsClosedHover
+    }
+
+    /// Whether this island follows the pointer's moves, for this island alone.
+    ///
+    /// AppKit reports hover from the moves a window receives, and those stop
+    /// when the pointer crosses the transparent margin around the floating
+    /// controls, passes to another display, is taken by the page that grew
+    /// under it, or is delivered to a tracking area that was replaced while the
+    /// pointer rested inside it. Every island answers its own leaving the same
+    /// way from these facts, on every display, and a pointer at rest costs
+    /// nothing: the following starts with the island's own entry, where an exit
+    /// report is never needed to start it.
+    var followsPointer: Bool {
+        closesOnExit || followsClosedState
+    }
+}
+
 /// Which display's island carries the open dashboard.
 ///
 /// A display's island is a window of its own and stays on that display: the
@@ -993,6 +1065,37 @@ struct NotchStripPair: Equatable {
     /// The pair as the strip draws it, left to right: the mark at the leading
     /// end, the reading at the trailing.
     var ordered: [NotchCompactActivity] { [mark, reading].compactMap { $0 } }
+}
+
+/// What the closed island shows, answered once for the island and drawn by
+/// every window of it: the island's own, and a copy on each other display.
+///
+/// A copy is the island on another display, not a second island with an
+/// arrangement of its own, so the content is never picked per display. What
+/// stays each display's own is what belongs to a display: its screen, the
+/// window's frame, the strip's measure, the pointer's place, and which window
+/// holds the island's one open page.
+struct NotchStripContent: Equatable {
+    /// The activity whose reading the strip draws at its trailing end.
+    var activity: NotchCompactActivity?
+    /// The activity whose mark the strip draws at its leading end: the higher
+    /// standing of the two, so the strip reads left to right in their order.
+    var companion: NotchCompactActivity?
+    /// Whether the song's name is drawn between the wings.
+    ///
+    /// A simulated camera leaves room for the words where a physical camera
+    /// does not, and the island answers that once, from its own surface. No
+    /// display's width, and no window's answer to the pointer, decides what a
+    /// song is called on the strip: a copy that named the song while the
+    /// island did not would be a different island, not the same one drawn
+    /// wider.
+    var namesSongInGap = false
+
+    /// The pair the strip's rules answered, and the one layout question the
+    /// pair leaves over, answered from the island's own surface.
+    static func stripPair(_ pair: NotchStripPair, namesSongInGap: Bool = false) -> NotchStripContent {
+        NotchStripContent(activity: pair.reading, companion: pair.mark, namesSongInGap: namesSongInGap)
+    }
 }
 
 /// Two activities sharing the closed island: the primary keeps its reading

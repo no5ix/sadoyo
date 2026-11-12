@@ -39,6 +39,13 @@ Depending on the change, consider:
 - First launch, permission denied, permission granted, permission revoked, and relaunch.
 - Feature disabled/enabled and app relaunch.
 - Single and multiple displays; display sleep/wake; full-screen and Mission Control.
+- Dynamic Island on three displays: the same content on every collapsed island, one
+  island expanded at a time, a page that opens on the display whose island was used,
+  and a hover that expands on entry and collapses when the pointer leaves the whole
+  open panel - on each display, with no report of a leaving in between. The pointer's
+  path across display edges, a display unplugged mid-hover, and a display returning
+  are part of the same scenario. See
+  [0002](../decisions/0002-one-island-per-display-one-page.md).
 - One and multiple media sessions, stale sessions, player termination, and independent command targeting.
 - Dynamic content sizes, localization expansion, minimum window sizes, and scroll boundaries.
 - Menu bar destination routing and every fallback route.
