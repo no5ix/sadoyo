@@ -2382,6 +2382,82 @@ enum NotchSplashTests {
         }
     }
 
+    /// The first token's card, read where it is written.
+    ///
+    /// The card used to write a pair: the p50 in purple and the p95 in green,
+    /// over two lines. It now says one thing, and the checks below are the shape
+    /// of that promise - the p50's figure and line remain, the tail's figure and
+    /// line are gone from the card, the room the pair left is taken by the single
+    /// figure, and the reading, the history and the server's report keep
+    /// collecting both percentiles as they always did.
+    static func ttftCardChecks(_ suite: TestSuite) {
+        func source(_ path: String) -> String { (try? String(contentsOfFile: path, encoding: .utf8)) ?? "" }
+        let view = source("Sources/Vorssaint/UI/Notch/NotchSplashView.swift")
+        guard let chartsStart = view.range(of: "private var charts: some View {") else {
+            suite.expect(false, "the dashboard's row of charts is in the card's view")
+            return
+        }
+        let afterCharts = view[chartsStart.upperBound...]
+        let chartsEnd = afterCharts.range(of: "private var counts")?.lowerBound ?? afterCharts.endIndex
+        let charts = String(afterCharts[..<chartsEnd])
+        suite.expect(!charts.isEmpty, "the row of charts was read")
+        suite.expect(charts.contains("NotchSplashMetricCard(title: text.ttft,"),
+                     "the first token's card is the card of one metric")
+        suite.expect(charts.contains("values: series.compactMap(\\.ttftSeconds)"),
+                     "the first token's card draws the p50's own line")
+        suite.expect(charts.contains("value: NotchSplashSupport.ttftParts(live.ttftP50)?.value")
+                && charts.contains("unit: NotchSplashSupport.ttftParts(live.ttftP50)?.unit"),
+                     "the first token's card writes the p50's figure and its unit")
+        suite.expect(charts.contains("line: NotchSplashPalette.purple") && charts.contains("tone: .purple"),
+                     "the p50 keeps the purple its figure and line have always worn")
+        suite.expect(!charts.contains("ttftP95"),
+                     "no p95 is drawn in the row of charts, and no green line of the tail is left")
+        if let ttftStart = charts.range(of: "title: text.ttft"),
+           let cacheStart = charts.range(of: "title: text.cacheHitRate") {
+            let card = String(charts[ttftStart.lowerBound..<cacheStart.lowerBound])
+            suite.expect(!card.contains("secondFigure") && !card.contains("secondTint")
+                    && !card.contains("firstFigure") && !card.contains("currentSeries")
+                    && !card.contains("overallSeries") && !card.contains("currentTint"),
+                         "the card carries no second figure, no second tint, and no second series: the pair's room is not left empty")
+        } else {
+            suite.expect(false, "the first token's card sits before the cache's card")
+        }
+        // The room the pair used to share is taken by the single figure, which is
+        // the card of one metric's own measure.
+        suite.expect(view.contains("struct NotchSplashMetricCard")
+                && view.contains("size: NotchSplashLayout.valueSize, weight: .semibold")
+                && view.contains("size: NotchSplashLayout.pairValueSize, weight: .semibold"),
+                     "a card of one figure is drawn at the single figure's size, not at the pair's")
+        suite.expect(view.contains("NotchSplashDualMetricCard(title: text.decode")
+                && view.contains("currentSeries: series.compactMap(\\.decodeCurrent)")
+                && view.contains("NotchSplashDualMetricCard(title: text.prefill")
+                && view.contains("currentSeries: series.compactMap(\\.prefillCurrent)"),
+                     "the decode and prefill cards keep their two figures and their two lines")
+        suite.expect(charts.contains("NotchSplashMetricCard(title: text.cacheHitRate")
+                && charts.contains("values: series.compactMap(\\.cachePercent)")
+                && charts.contains("line: NotchSplashPalette.green"),
+                     "the cache's card is untouched, and keeps its own line's colour")
+        // The reading and the history are unchanged: the p50 is still collected,
+        // the p95 is still collected beside it, and the chart still draws the
+        // same window of time.
+        let metrics = source("Sources/Vorssaint/Services/Notch/NotchSplashMetrics.swift")
+        let history = source("Sources/Vorssaint/Services/Notch/NotchSplashHistory.swift")
+        suite.expect(metrics.contains("var ttftP95: Double?")
+                && metrics.contains("ttftP95: NotchSplashSupport.ttftSeconds(milliseconds: metrics.ttftP95Milliseconds)"),
+                     "the live reading still carries the p95 for every other reader it has")
+        suite.expect(history.contains("var ttftP95Seconds: Double?")
+                && history.contains("ttftSeconds: NotchSplashSupport.ttftSeconds(milliseconds: status.metrics.ttftMilliseconds)"),
+                     "the history still stores both percentiles, so the p50's line and the tail behind it are both collected")
+        suite.expect(NotchSplashSupport.chartWindowSeconds == 600,
+                     "the charts' window of time is the half hour it was")
+        suite.expect(NotchSplashSupport.ttftSeconds(milliseconds: 1700) == 1.7
+                && NotchSplashSupport.ttftParts(0.8)?.value == "0.8"
+                && NotchSplashSupport.ttftParts(0.8)?.unit == "s",
+                     "the p50's number is calculated and written exactly as it was before the tail left the card")
+        suite.expect(NotchSplashSupport.ttftPairText(1.3, 2.1, locale: Locale(identifier: "en_US")) == "1.3 / 2.1",
+                     "the pair's words remain for the readers that name both percentiles")
+    }
+
     static func run(_ suite: TestSuite) {
         suite.run("splash settings") { settingsChecks(suite) }
         suite.run("splash reading") { readingChecks(suite) }
@@ -2401,6 +2477,7 @@ enum NotchSplashTests {
         suite.run("splash dashboard") { dashboardChecks(suite) }
         suite.run("splash island activity") { islandActivityChecks(suite) }
         suite.run("splash strip throughput") { stripThroughputChecks(suite) }
+        suite.run("splash ttft card") { ttftCardChecks(suite) }
         suite.run("splash page") { pageChecks(suite) }
         suite.run("splash strings") { localizationChecks(suite) }
         suite.run("splash palette") { paletteChecks(suite) }

@@ -394,22 +394,25 @@ struct NotchSplashDashboardCard: View {
     /// Four cards, one row: the speed of the decode, the speed of the prefill,
     /// the first token's time, and the cache's hits. Each line keeps its
     /// metric's colour, and each figure takes the colour of the line it is
-    /// drawn from, so the two figures of a card name the two lines above them.
+    /// drawn from, so a figure names the line above it.
     ///
-    /// The first three cards measure, and so show two figures and two lines,
-    /// both of them the engine's own: the batch in hand, in the reference's
-    /// purple, and the average over the whole of the engine's running, in its
-    /// green. The time to first token is the one card whose figures are named by
-    /// percentiles: it writes p50 first, in purple, and p95 second, in green, and
-    /// draws its lines in the same two colours, so each figure is the colour of
-    /// its own line while the pair is read from the middle out.
+    /// The two throughput cards show two figures and two lines, both of them the
+    /// engine's own: the batch in hand, in the reference's purple, and the
+    /// average over the whole of the engine's running, in its green. The time to
+    /// first token shows one of each: its middle, the p50, written in purple
+    /// above the purple line of the same name. A glance at that card answers one
+    /// question — how long the first token usually takes — and the wider reading,
+    /// the tail included, stays in the history the card is drawn from and in the
+    /// server's own report, where the two percentiles are compared at leisure.
+    /// The single figure and its line take the room the pair used to share, so
+    /// the card is not left with a gap where its tail used to be written.
     ///
     /// The cache's card is the reading alone, and keeps the colour of how it
     /// reads: green while the hits are there, amber as they thin, red when the
     /// pages run out.
     ///
     /// The lines are not named in words. The card names what it measures, and the
-    /// two figures above the chart are the two lines.
+    /// figures above the chart are its lines.
     private var charts: some View {
         let decode = metrics?.decodeTokensPerSecond
         let prefill = metrics?.prefillTokensPerSecond
@@ -444,21 +447,17 @@ struct NotchSplashDashboardCard: View {
                                       secondTint: NotchSplashPalette.figureTints(.prefill).second,
                                       unit: live.prefill == nil && prefill == nil ? nil : text.tokensPerSecond,
                                       empty: text.noMeasurements)
-            NotchSplashDualMetricCard(title: text.ttft,
-                                      current: live.ttftP95,
-                                      overall: live.ttftP50,
-                                      currentSeries: series.compactMap(\.ttftP95Seconds),
-                                      overallSeries: series.compactMap(\.ttftSeconds),
-                                      currentTint: NotchSplashPalette.lineTints(.ttft).leading,
-                                      overallTint: NotchSplashPalette.lineTints(.ttft).average,
-                                      // Written from the middle out: p50 first, in the purple of its own
-                                      // line, and p95 second, in the green of its line.
-                                      firstFigure: NotchSplashSupport.ttftParts(live.ttftP50)?.value,
-                                      firstTint: NotchSplashPalette.figureTints(.ttft).first,
-                                      secondFigure: NotchSplashSupport.ttftParts(live.ttftP95)?.value,
-                                      secondTint: NotchSplashPalette.figureTints(.ttft).second,
-                                      unit: NotchSplashSupport.ttftParts(live.ttftP50 ?? live.ttftP95)?.unit,
-                                      empty: text.noMeasurements)
+            // One metric, one line: the p50 in the purple of its own line. The
+            // p95 stays in the reading and the history it is collected into, and
+            // is drawn nowhere here, so the card says the one thing a glance can
+            // answer.
+            NotchSplashMetricCard(title: text.ttft,
+                                  values: series.compactMap(\.ttftSeconds),
+                                  line: NotchSplashPalette.purple,
+                                  value: NotchSplashSupport.ttftParts(live.ttftP50)?.value,
+                                  unit: NotchSplashSupport.ttftParts(live.ttftP50)?.unit,
+                                  tone: .purple,
+                                  empty: text.noMeasurements)
             NotchSplashMetricCard(title: text.cacheHitRate,
                                   values: series.compactMap(\.cachePercent),
                                   line: NotchSplashPalette.green,
@@ -893,10 +892,10 @@ extension NotchSplashMetricCard where Footer == EmptyView {
 /// words when nothing has been measured. What it shows is two things and not
 /// one: the figure the app measures over a window of readings, drawn in the
 /// reference's purple, and the engine's own average over the whole of its
-/// running, drawn in its blue. The pair is written in the card's order, which is
-/// not always its lines' order - the time to first token writes p50 first and
-/// draws p95 in purple - and the two lines share the chart's scale, so a line
-/// above the other is the one that is really higher.
+/// running, drawn in its blue. The pair is written in the card's order, and the
+/// two lines share the chart's scale, so a line above the other is the one that
+/// is really higher. Only the two throughput cards are pairs: the first token's
+/// time is read as its p50 alone, and that card is the single-metric card.
 ///
 /// Each figure is drawn in the colour of the line it is drawn from, and the two
 /// lines keep the metrics' own colours: a figure and its line are the one
@@ -909,8 +908,9 @@ extension NotchSplashMetricCard where Footer == EmptyView {
 /// line, so a person reading `85.32 / 50.97 t/s` can tell which of the two the
 /// purple line is and which the blue, without a key.
 ///
-/// The card is the same size as the card it replaces, and the fourth card - the
-/// cache's hit rate, which measures one figure and has no pair - is untouched.
+/// The card is the same size as the card it replaces, and the cards that measure
+/// one figure - the cache's hit rate, and the first token's time - are their own
+/// card.
 struct NotchSplashDualMetricCard: View {
     let title: String
     /// The pair's two figures as numbers, for the accessibility reading and to
@@ -925,9 +925,8 @@ struct NotchSplashDualMetricCard: View {
     /// The figures, in the order the card writes them, each in the colour of the
     /// line it belongs to: the decode and prefill cards lead with the batch in
     /// hand, in the leading line's colour, and follow with the average over the
-    /// engine's running; the first token's card writes the p50 first in the
-    /// average's colour and the p95 second in the leading colour, because the
-    /// lower percentile is the one a person reads as the usual case.
+    /// engine's running. A card of one figure is the single-metric card, not this
+    /// one.
     let firstFigure: String?
     let firstTint: Color
     let secondFigure: String?

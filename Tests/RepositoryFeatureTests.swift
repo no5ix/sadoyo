@@ -1720,14 +1720,18 @@ enum RepositoryFeatureTests {
         // news twice, and a metric keeps its own colour. The reference's blue left
         // the measuring cards with the rates they chart: the batch in hand and the
         // first token's middle are purple, the average over the running and the
-        // first token's tail are green.
+        // first token's tail are green. Two cards are pairs (decode, prefill); the
+        // first token's card and the cache's card are the card of one metric, whose
+        // single figure is drawn at the tone and whose single line at the metric's
+        // colour, so nothing is left of the pair's two words on those cards.
         let chartLines = splashCardLines
         suite.expect(chartLines.contains { $0.contains("line: NotchSplashPalette.green") }
-                         && chartLines.filter({ $0.contains("currentTint: NotchSplashPalette.lineTints(") }).count == 3
-                         && chartLines.filter({ $0.contains("overallTint: NotchSplashPalette.lineTints(") }).count == 3
-                         && chartLines.filter({ $0.contains("firstTint: NotchSplashPalette.figureTints(") }).count == 3
-                         && chartLines.filter({ $0.contains("secondTint: NotchSplashPalette.figureTints(") }).count == 3
+                         && chartLines.filter({ $0.contains("currentTint: NotchSplashPalette.lineTints(") }).count == 2
+                         && chartLines.filter({ $0.contains("overallTint: NotchSplashPalette.lineTints(") }).count == 2
+                         && chartLines.filter({ $0.contains("firstTint: NotchSplashPalette.figureTints(") }).count == 2
+                         && chartLines.filter({ $0.contains("secondTint: NotchSplashPalette.figureTints(") }).count == 2
                          && !chartLines.contains { $0.contains("firstTint: NotchSplashPalette.lineTints(") }
+                         && !chartLines.contains { $0.contains("text.ttft") && $0.contains("Tint") }
                          && chartLines.contains { $0.contains("primaryTint: currentTint, secondaryTint: overallTint,") }
                          && chartLines.contains { $0.contains("NotchSparkline(values: values, tint: line") }
                          && chartLines.contains { $0.contains("foregroundStyle(NotchSplashPalette.tone(tone))") },

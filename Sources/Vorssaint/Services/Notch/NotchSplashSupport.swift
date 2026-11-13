@@ -1056,9 +1056,8 @@ enum NotchSplashPalette {
     /// Which of a measuring card's two lines a figure belongs to.
     ///
     /// The decode and prefill cards write the batch in hand first and the average
-    /// over the engine's running second; the first token's card writes the p50
-    /// first and the p95 second, because the lower percentile is the case a person
-    /// reads as usual and the tail is the one they read after it.
+    /// over the engine's running second. The first token's card is not a pair: it
+    /// writes the p50 alone, in purple, and names no second line.
     enum NotchSplashMeasurement {
         case decode, prefill, ttft
     }
@@ -1068,29 +1067,26 @@ enum NotchSplashPalette {
     /// the same two colours in the same two places: the figure written first is
     /// purple and the figure written second is green. The two throughput cards
     /// write the batch in hand first, in purple, and the average over the
-    /// engine's running second, in green. The first token's card writes its
-    /// percentiles in the other pair's words - p50 first, in purple, and p95
-    /// second, in green - because the lower percentile is the case a person
-    /// reads as usual and the tail is the one they read after it.
+    /// engine's running second, in green. The first token's card writes one
+    /// figure, the p50, and it is written in the purple it has always worn.
     static func figureTints(_ measurement: NotchSplashMeasurement) -> (first: Color, second: Color) {
         _ = measurement
         return (purple, green)
     }
 
     /// The colour of a card's two lines: the leading line, which is the batch in
-    /// hand for the two throughputs and the p95 for the first token's time, and
-    /// the average's line beside it, which for the first token's time is the
-    /// p50. The batch in hand and the p50 are the purple line in all three cards
-    /// and the average over the running and the p95 are the green, so a figure
-    /// is the colour of the line it is drawn from in every card: the throughput
-    /// cards' first figure is the purple batch in hand, and the first token's
-    /// card's first figure is the purple p50.
+    /// hand for the two throughputs, and the average's line beside it, which for
+    /// the first token's time is the p50. The batch in hand and the p50 are the
+    /// purple line in all three cards and the average over the running and the
+    /// p95 are the green, so a figure is the colour of the line it is drawn from
+    /// in every card: the throughput cards' first figure is the purple batch in
+    /// hand, and the first token's card's figure is the purple p50.
     static func lineTints(_ measurement: NotchSplashMeasurement) -> (leading: Color, average: Color) {
         switch measurement {
         case .decode, .prefill: return (purple, green)
-        // The first token's card draws its tail, the p95, in green and its
-        // middle, the p50, in purple, which is the way round the figures are
-        // written: p50 first in purple, p95 second in green.
+        // The first token's card draws only its middle, the p50, in purple. The
+        // tail is still collected, and it keeps the green it has always worn, so
+        // the pair's meaning does not move while only one of them is drawn.
         case .ttft: return (green, purple)
         }
     }
