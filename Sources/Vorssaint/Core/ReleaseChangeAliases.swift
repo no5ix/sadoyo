@@ -178,6 +178,8 @@ enum ReleaseChangeAliases {
         case .connectedDevices: return ["connected devices", "usb devices"]
         case .fanControl: return ["fan control", "fan curves", "fan curve", "fan speed", "fan speeds",
             "cooling curve"]
+        case .inputSourceMemory: return ["input source", "per app input source", "input source memory",
+            "keyboard layout per app", "switch input source", "input method", "im", "keyboard per application"]
         }
     }
 

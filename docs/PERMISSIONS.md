@@ -20,6 +20,8 @@ You can review or change every grant in System Settings, under Privacy and Secur
 | Automation | Yes | Finder actions and supported music playback controls |
 | App Management | Yes | App installs, updates and removal |
 
+Some features need no grant at all. Remember Input Source Per App reads the frontmost application from the workspace and selects an input source through the public Text Input Source Service, which is the same call the Input menu makes, so it asks for nothing: no Accessibility, no Input Monitoring, no Automation, and no Screen Recording. The Mac's built-in "Automatically switch to a document's input source" is your setting and Sadoyo neither reads it nor changes it.
+
 ## Accessibility
 
 **Why it comes up.** macOS keeps control of keyboard and pointer input, along with the ability to read other apps' windows, behind the Accessibility permission.

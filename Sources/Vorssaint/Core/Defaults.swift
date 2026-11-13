@@ -310,6 +310,12 @@ enum DefaultsKey {
     static let keyboardDebounceEnabled = "keyboardDebounceEnabled"
     static let keyboardDebounceWindowMs = "keyboardDebounceWindowMs"
     static let keyboardDebounceKeyWindows = "keyboardDebounceKeyWindows" // comma-separated keyCode:ms
+    static let inputSourceMemoryEnabled = "inputSourceMemoryEnabled" // restore each app's last input source
+    /// The applications remembered, as an ordered array of app/source pairs. An
+    /// application is keyed by its bundle identifier, or by the path of its
+    /// bundle when it has no identifier, and the value is the input source's
+    /// stable TIS id. Nothing a person types, opens, or names is stored here.
+    static let inputSourceMemoryPreferences = "inputSourceMemoryPreferences"
     static let panelUtilityCleaning = "panelUtilityCleaning"
     static let cleaningModeKeepScreenVisible = "cleaningModeKeepScreenVisible"
     static let panelUtilityURLCleaner = "panelUtilityURLCleaner"
@@ -1596,6 +1602,10 @@ enum Defaults {
         DefaultsKey.keyboardDebounceEnabled: false,
         DefaultsKey.keyboardDebounceWindowMs: defaultKeyboardDebounceWindowMs,
         DefaultsKey.keyboardDebounceKeyWindows: "",
+        DefaultsKey.inputSourceMemoryEnabled: false,
+        // The remembered map has no registered default: an empty map is the
+        // absence of one, and the feature writes it the first time it learns an
+        // application.
         DefaultsKey.panelUtilityCleaning: true,
         DefaultsKey.cleaningModeKeepScreenVisible: false,
         DefaultsKey.panelUtilityURLCleaner: true,

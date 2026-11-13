@@ -150,6 +150,7 @@ Reorder or hide panel sections, choose a compact layout, and export settings to 
 - **Apps to leave alone.** Exclude chosen apps from mouse enhancements.
 - **Extra click filter.** Ignore accidental rapid clicks from worn mouse buttons without delaying normal clicks.
 - **Key debounce.** Filter repeated letters caused by a worn keyboard.
+- **Remember Input Source Per App.** Restore the input source each application was last typed with when you switch to it, remembered by bundle identifier and switched off until you turn it on.
 - **Super key.** Use Caps Lock or a right-side modifier as a shortcut combination, with a separate tap action and app exclusions.
 - **Keyboard shortcuts.** Manage feature shortcuts in one place, including optional takeover of supported macOS shortcuts while a feature is active.
 

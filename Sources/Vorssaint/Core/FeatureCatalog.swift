@@ -17,7 +17,7 @@ enum AppFeature: String, CaseIterable {
     case switcher, dockPreview, dockClick, windowMaximizer, windowLayout, autoQuit, spacesOrder
     // Mouse and keyboard
     case scrollInverter, scrollHorizontal, scrollZoom, focusFollowsMouse, smoothScroll, linearScroll, mouseAcceleration, mouseNavigation, mouseButtonShortcuts, middleClick,
-         mouseClickDebounce, keyboardDebounce, textSnippets, superKey, quitWindowProtection
+         mouseClickDebounce, keyboardDebounce, textSnippets, superKey, quitWindowProtection, inputSourceMemory
     // Clipboard and files
     case clipboardHistory, pastePlain, finderCutPaste, finderRename, shelf, urlCleaner,
          diskImageInstaller
@@ -104,7 +104,7 @@ extension AppFeature {
         case .switcher, .dockPreview, .dockClick, .windowMaximizer, .windowLayout, .autoQuit, .spacesOrder:
             return .windowsDock
         case .scrollInverter, .scrollHorizontal, .scrollZoom, .focusFollowsMouse, .smoothScroll, .linearScroll, .mouseAcceleration, .mouseNavigation, .mouseButtonShortcuts, .middleClick,
-             .keyboardDebounce, .textSnippets, .superKey, .quitWindowProtection, .mouseClickDebounce:
+             .keyboardDebounce, .textSnippets, .superKey, .quitWindowProtection, .mouseClickDebounce, .inputSourceMemory:
             return .mouseKeyboard
         case .clipboardHistory, .pastePlain, .finderCutPaste, .finderRename, .shelf, .urlCleaner,
              .diskImageInstaller:
@@ -147,6 +147,7 @@ extension AppFeature {
         case .mouseButtonShortcuts: return "button.programmable"
         case .middleClick: return "hand.tap"
         case .keyboardDebounce: return "keyboard"
+        case .inputSourceMemory: return "keyboard.badge.ellipsis"
         case .textSnippets: return "text.append"
         case .superKey:
             return SuperKeySource.sanitized(
@@ -257,6 +258,7 @@ extension AppFeature {
                                             DefaultsKey.mouseSpacesGestureEnabled]
         case .middleClick: return [DefaultsKey.middleClickEnabled]
         case .keyboardDebounce: return [DefaultsKey.keyboardDebounceEnabled]
+        case .inputSourceMemory: return [DefaultsKey.inputSourceMemoryEnabled]
         case .quitWindowProtection:
             return [DefaultsKey.quitProtectionQuitEnabled, DefaultsKey.quitProtectionCloseEnabled]
         case .textSnippets: return [DefaultsKey.textSnippetsEnabled, DefaultsKey.snippetLibraryEnabled]
@@ -357,6 +359,12 @@ extension AppFeature {
         case .notchCalendar: return [.calendar]
         case .notch: return [.accessibility, .automationPlayback]
         case .mouseAcceleration, .spacesOrder:
+            return []
+        // Choosing an input source is a public Text Input Source Service call, and
+        // the two notifications are the workspace's and the text-input server's.
+        // No Accessibility, Input Monitoring, Automation, or Accessibility
+        // recording grant is asked for, and none is needed.
+        case .inputSourceMemory:
             return []
         case .scrollInverter, .scrollHorizontal, .scrollZoom, .focusFollowsMouse, .smoothScroll, .linearScroll, .mouseNavigation, .mouseButtonShortcuts, .middleClick,
              .keyboardDebounce, .textSnippets, .superKey, .mouseClickDebounce,
@@ -496,7 +504,7 @@ extension AppFeature {
             return true
         case .focusFollowsMouse, .scrollHorizontal, .scrollZoom, .linearScroll, .diskImageInstaller, .audioPriority,
              .wallpaper, .killProcess, .portManager, .fanControl, .notchMascot, .spacesOrder, .quitApps,
-             .notchSplash:
+             .notchSplash, .inputSourceMemory:
             return false
         }
     }

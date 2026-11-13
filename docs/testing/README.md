@@ -61,5 +61,7 @@ Depending on the change, consider:
 - Dynamic content sizes, localization expansion, minimum window sizes, and scroll boundaries.
 - Menu bar destination routing and every fallback route.
 - Settings backup/restore and migration.
+- Per-application input source memory, and what only a live session can show:
+  [testing per-application input source memory](input-source-memory.md).
 
 Do not run destructive permission resets or alter user data merely to make a test pass. Use a controlled test account or clearly documented test setup when appropriate.

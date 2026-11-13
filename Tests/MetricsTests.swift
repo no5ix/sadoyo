@@ -173,6 +173,7 @@ struct MetricsTests {
                 AssistiveKeyboardTests.run(suite)
                 ScreenshotToolShortcutTests.run(suite)
             }),
+            ("input-source", { InputSourceMemoryContract.run(suite) }),
             ("storage", {
                 RecentCaptureStoreTests.run(suite)
                 RecorderPresetImageStoreTests.run(suite)
