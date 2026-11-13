@@ -1557,6 +1557,14 @@ MUTATIONS = [
      "Sources/Vorssaint/Core/SettingsBackupSupport.swift",
      "        settings = exportedAppVolumes(settings)\n", "",
      "a backup saves app volumes as the gains 3.4.1 plays, at the same loudness"),
+    ("a card's click reclaims the page a hover opened", "notch",
+     "Sources/Vorssaint/Services/Notch/NotchSupport.swift",
+     "        opening ? !takeFocus : wasOpenedByHover\n", "        !takeFocus\n",
+     "the opening answers why the island is open, and a step inside the open page keeps that answer whatever keyboard it takes"),
+    ("a retired page keeps the pin set for it", "notch",
+     "Sources/Vorssaint/Services/Notch/NotchService.swift",
+     "        pinned = false\n        openedByHover = false\n", "",
+     "the page whose window has gone is closed, and the pin and the pointer's claim made for it go with it"),
 ]
 
 

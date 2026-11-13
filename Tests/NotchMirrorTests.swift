@@ -220,6 +220,9 @@ enum NotchMirrorContract {
         var collapseTitle = "Collapse"
         func collapse() {
             collapses += 1; expanded = false; peeking = false; expansion.closed()
+            // Production's collapse ends the pointer's claim on the page: the page
+            // is closed, so no navigation from it can carry that claim anywhere.
+            openedByHover = false
             // Production's collapse asks for the pointer's moves no more: the page
             // is closed everywhere, so no copy has a hover left to keep it.
             pointerWatchMonitors.forEach(NSEvent.removeMonitor)
@@ -228,14 +231,21 @@ enum NotchMirrorContract {
         func open() { opened += 1; expanded = true; expansion.asking(toOpen: displayID ?? 0) }
         func open(takeFocus: Bool, on display: CGDirectDisplayID?) {
             opened += 1
+            // The production rule, asked once at the opening: the act that opened
+            // the island owns the page, and a page reached from inside an island
+            // the pointer opened keeps the pointer's claim, whatever the page is.
+            openedByHover = NotchSupport.openedByHover(opening: !expanded,
+                                                       wasOpenedByHover: openedByHover,
+                                                       takeFocus: takeFocus)
             expanded = true
-            openedByHover = !takeFocus
             expansion.asking(toOpen: display ?? (displayID ?? 0))
         }
         func open(takeFocus: Bool, wholeDashboard: Bool, on display: CGDirectDisplayID?) {
             opened += 1
+            openedByHover = NotchSupport.openedByHover(opening: !expanded,
+                                                       wasOpenedByHover: openedByHover,
+                                                       takeFocus: takeFocus)
             expanded = true
-            openedByHover = !takeFocus
             wholeDashboardAsked = wholeDashboard
             expansion.asking(toOpen: display ?? (displayID ?? 0))
         }
@@ -642,6 +652,58 @@ enum NotchMirrorContract {
         copy?.host.hoverHandler?(false)
         suite.expect(copy?.hoverWork == nil && service.expansion.owner == 2 && service.pointerWatchMonitors.isEmpty,
                      "leaving a page a click opened closes nothing and follows nothing")
+
+        // A card inside the page this copy's *hover* opened: the page grows, the
+        // keyboard moves to it, and the pointer's claim on this display's page is
+        // kept - so this copy's own leaving closes it at the pause the person chose,
+        // and the pointer's moves are followed for it. A card is not a second
+        // opening, and a card is not the pin: the external display lives the same
+        // lifecycle the island's own display does.
+        let carded = wired()
+        let itsCopy = carded.mirrors[2]
+        itsCopy?.over = true
+        itsCopy?.host.hoverHandler?(true)
+        itsCopy?.runHoverWork()
+        carded.syncMirrors()
+        suite.expect(carded.expansion.owner == 2 && carded.openedByHover && itsCopy?.model.expanded == true,
+                     "precondition: the copy's hover owns the page on its own display")
+        carded.open(takeFocus: true, on: 2)
+        suite.expect(carded.openedByHover && carded.expansion.owner == 2 && itsCopy?.model.expanded == true
+                         && carded.mirrors.values.filter { $0.model.expanded }.count == 1,
+                     "a card inside a copy's page keeps the pointer's claim, that display, and one page in the whole system")
+        suite.expect(carded.pointerWatchMonitors.count == 2,
+                     "the copy keeps following the pointer's moves for a page a card opened, as for a page its hover opened")
+        itsCopy?.over = false
+        itsCopy?.host.hoverHandler?(false)
+        suite.expect(itsCopy?.hoverWork != nil, "leaving the page a card opened asks this copy for its close")
+        itsCopy?.runHoverWork()
+        carded.syncMirrors()
+        suite.expect(carded.expansion.owner == nil && itsCopy?.model.expanded == false,
+                     "the page a card opened closes with this copy's page at the chosen pause, and the copy is a closed island again")
+
+        // The pin is the Keep Open the person chose, and it outlasts the leaving of
+        // the copy that carries the page; a card's click never reaches it.
+        let pinned = wired()
+        let held = pinned.mirrors[2]
+        held?.over = true
+        held?.host.hoverHandler?(true)
+        held?.runHoverWork()
+        pinned.syncMirrors()
+        pinned.pinned = true
+        pinned.open(takeFocus: true, on: 2)
+        suite.expect(pinned.pinned && pinned.expansion.owner == 2 && pinned.openedByHover,
+                     "a card inside a pinned page keeps the page and the pin, and answers no click of its own")
+        // The copy follows no pointer once the page is pinned, and the close its
+        // own leaving asks for declines to fire: the pin is checked when the pause
+        // is up, as the island's own close checks it.
+        let kept = pinned.collapses
+        held?.over = false
+        held?.host.hoverHandler?(false)
+        suite.expect(pinned.pointerWatchMonitors.isEmpty,
+                     "a pinned page stops following the copy's pointer at its leaving")
+        held?.runHoverWork()
+        suite.expect(pinned.expansion.owner == 2 && pinned.collapses == kept,
+                     "a pinned page answers no copy's leaving: the close it asks for declines to fire")
 
         // A page another display carries is not this copy's to close.
         service.expansion.asking(toOpen: 1)

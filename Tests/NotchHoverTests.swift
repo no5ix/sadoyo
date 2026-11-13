@@ -253,7 +253,16 @@ enum NotchHoverTests {
             requestedModule = module
             askedWholeDashboard = wholeDashboard
             askedDisplay = display
-            openings += 1; expanded = true; openedByHover = !takeFocus
+            openings += 1
+            // The production rule: the act that opened the island answers why it
+            // is open, and a page reached from inside an island the pointer
+            // opened is still the pointer's page. `takeFocus` is the keyboard's
+            // answer, which a card, a tile, the gallery, the panel and the pad
+            // each ask for; it answers the opening, never the navigation.
+            openedByHover = NotchSupport.openedByHover(opening: !expanded,
+                                                       wasOpenedByHover: openedByHover,
+                                                       takeFocus: takeFocus)
+            expanded = true
             _ = expansion.asking(toOpen: display ?? (displayID ?? 0))
             mirrors[display ?? 0]?.hover.open()
             if display == nil || display == displayID { hoverState.open() }
@@ -510,6 +519,202 @@ enum NotchHoverTests {
                      "the island's own pointer opens the page on the island's own display")
         away()
         hoverParityChecks(suite)
+        pageLifecycleChecks(suite)
+    }
+
+    /// The lifecycle of a page the pointer opened, through the pages it opens.
+    ///
+    /// The hover opened the island, and a step inside the open page - a reading's
+    /// card, a gallery tile, the panel, the pad, the whole dashboard - is a step
+    /// inside the page the pointer asked for. It is not a second opening and it is
+    /// not the pin, so it keeps the pointer's claim on the page while taking the
+    /// keyboard for itself, and the leaving of the whole surface the island answers
+    /// closes it at the pause the person chose. The pin is the Keep Open the person
+    /// chose, and it is the only thing that outlasts that leaving; an island opened
+    /// by a click keeps its own answer through the same steps.
+    static func pageLifecycleChecks(_ suite: TestSuite) {
+        func away() { NSEvent.mouseLocation = CGPoint(x: -12_000, y: -12_000) }
+        func fresh() -> Service {
+            DispatchQueue.main = NotchScreenRefreshContract.Scheduler()
+            UserDefaults.standard = UserDefaults.Preferences()
+            UserDefaults.standard.delay = 0.2
+            UserDefaults.standard.closeDelay = 0.3
+            NSEvent.global = [:]
+            NSEvent.local = [:]
+            AssistiveKeyboard.active = false
+            NSWorkspace.shared.accessibilityDisplayShouldReduceMotion = true
+            away()
+            let service = Service()
+            service.displayID = 1
+            service.updateBounds()
+            return service
+        }
+        func overIsland(_ service: Service) {
+            NSEvent.mouseLocation = CGPoint(x: service.geometry.screen.midX,
+                                            y: service.geometry.screen.maxY - service.geometry.collapsed.height / 2)
+        }
+        /// The pointer resting in the open page: the surface the island's window
+        /// grew to, which is the region its leaving has to cross.
+        func overPage(_ service: Service) {
+            guard let host = service.windowHost else { return }
+            NSEvent.mouseLocation = CGPoint(x: host.rect.midX, y: host.rect.midY)
+        }
+        func over(_ mirror: Mirror) {
+            NSEvent.mouseLocation = CGPoint(x: mirror.host.rect.midX, y: mirror.host.rect.midY)
+        }
+        func pages(_ service: Service) -> Int {
+            (service.pageIsOnIslandDisplay ? 1 : 0) + service.mirrors.values.filter { $0.model.expanded }.count
+        }
+
+        // The rule, stated once, for every way into a page: the opening answers
+        // why the island is open, and a step inside the open page keeps that
+        // answer however much of the keyboard it takes.
+        suite.expect(NotchSupport.openedByHover(opening: true, wasOpenedByHover: false, takeFocus: false)
+                     && !NotchSupport.openedByHover(opening: true, wasOpenedByHover: false, takeFocus: true)
+                     && NotchSupport.openedByHover(opening: false, wasOpenedByHover: true, takeFocus: true)
+                     && NotchSupport.openedByHover(opening: false, wasOpenedByHover: true, takeFocus: false)
+                     && !NotchSupport.openedByHover(opening: false, wasOpenedByHover: false, takeFocus: false)
+                     && !NotchSupport.openedByHover(opening: false, wasOpenedByHover: false, takeFocus: true),
+                     "the opening answers why the island is open, and a step inside the open page keeps that answer whatever keyboard it takes")
+
+        // A hover, a card's click, and the pointer's leaving: one page, one close.
+        let service = fresh()
+        overIsland(service)
+        service.hover(true)
+        DispatchQueue.main.advance(0.26)
+        suite.expect(service.expanded && service.openedByHover && service.expansion.owner == 1,
+                     "the hover opens the island's page on its own display")
+        overPage(service)
+        service.hover(true)
+        suite.expect(service.hoverWork == nil && service.expanded && service.closures == 0,
+                     "the pointer resting inside the open page asks for no close")
+        service.open(nil, takeFocus: true, on: nil)
+        suite.expect(service.openedByHover && service.expanded,
+                     "a card's click inside the pointer's page does not turn it into a click's page")
+        away()
+        service.hover(false)
+        suite.expect(service.hoverWork != nil, "leaving the page a card opened asks for the close")
+        DispatchQueue.main.advance(0.1)
+        suite.expect(service.expanded && service.closures == 0, "the pause the person chose is kept")
+        DispatchQueue.main.advance(0.25)
+        suite.expect(service.closures == 1 && !service.expanded && service.expansion.owner == nil,
+                     "the page a card opened closes with the island at the chosen pause")
+
+        // Coming back over the pause takes the close back, whatever page is open.
+        let returning = fresh()
+        overIsland(returning)
+        returning.hover(true)
+        DispatchQueue.main.advance(0.26)
+        returning.open(nil, takeFocus: true, on: nil)
+        away()
+        returning.hover(false)
+        suite.expect(returning.hoverWork != nil, "leaving the page asks for the close")
+        overPage(returning)
+        returning.hover(true)
+        suite.expect(returning.hoverWork == nil, "the pointer coming back over the pause takes the close back")
+        DispatchQueue.main.advance(1)
+        suite.expect(returning.closures == 0 && returning.expanded, "and the page the pointer returned to stays open")
+
+        // The pin outlasts the leaving, and taking it back returns the page to it.
+        let pinned = fresh()
+        overIsland(pinned)
+        pinned.hover(true)
+        DispatchQueue.main.advance(0.26)
+        pinned.open(nil, takeFocus: true, on: nil)
+        pinned.pinned = true
+        away()
+        pinned.hover(false)
+        suite.expect(pinned.hoverWork == nil && pinned.expanded, "a pinned page is open over the pointer's leaving")
+        DispatchQueue.main.advance(1)
+        suite.expect(pinned.closures == 0 && pinned.expanded, "the pause closes nothing while the pin holds")
+        pinned.pinned = false
+        overIsland(pinned)
+        pinned.hover(true)
+        away()
+        pinned.hover(false)
+        suite.expect(pinned.hoverWork != nil, "unpinning gives the pointer's leaving its close back")
+        DispatchQueue.main.advance(0.36)
+        suite.expect(pinned.closures == 1, "and the page goes at the chosen pause")
+
+        // An island the person opened with a click keeps its pages over a leaving,
+        // as the strip it opened from keeps them, and a step inside changes nothing.
+        let clicked = fresh()
+        clicked.open(nil, takeFocus: true, on: nil)
+        clicked.open(nil, takeFocus: true, on: nil)
+        suite.expect(!clicked.openedByHover && clicked.expanded, "a click's opening, and every step inside it, answer no pointer")
+        away()
+        clicked.hover(false)
+        suite.expect(clicked.hoverWork == nil && clicked.expanded, "leaving a click's page asks for no close")
+
+        // The same lifecycle on a copy: the page stays on the display whose island
+        // was used, is the only page, and closes at that display's own leaving.
+        let island = fresh()
+        let copy = island.addMirror(2, screen: CGRect(x: 0, y: 0, width: 1920, height: 1080))
+        over(copy)
+        island.mirrorHover(2, entered: true)
+        copy.runHoverWork()
+        island.syncExpansion()
+        suite.expect(island.expansion.owner == 2 && copy.model.expanded && island.openedByHover,
+                     "a copy's hover opens its own page and records the pointer's claim")
+        island.open(nil, takeFocus: true, on: 2)
+        suite.expect(island.expansion.owner == 2 && island.askedDisplay == 2 && island.openedByHover
+                     && pages(island) == 1,
+                     "a page reached inside a copy's page stays on that display, keeps the pointer's claim, and is the only page")
+        away()
+        island.mirrorHover(2, entered: false)
+        suite.expect(copy.hoverWork != nil, "leaving the copy's page asks for its close")
+        let closed = island.closures
+        copy.runHoverWork()
+        suite.expect(island.closures == closed + 1 && island.expansion.owner == nil && pages(island) == 0,
+                     "the page a copy's hover opened, opened wider by a card, closes at that copy's own pause")
+
+        // The pointer crossing to another island retires the page the first display
+        // owned and leaves no stale expansion behind: one page, on the island the
+        // pointer is on, answered by that island's own leaving.
+        let carried = island.closures
+        away()
+        over(copy)
+        island.mirrorHover(2, entered: true)
+        copy.runHoverWork()
+        island.syncExpansion()
+        suite.expect(island.expansion.owner == 2 && pages(island) == 1, "precondition: the copy carries the page")
+        overIsland(island)
+        island.hover(true)
+        island.hoverWork?.perform()
+        island.syncExpansion()
+        suite.expect(island.expansion.owner == 1 && island.pageIsOnIslandDisplay && !copy.model.expanded
+                     && pages(island) == 1 && island.openedByHover,
+                     "the display the pointer reached takes the page, the copy keeps none, and one page is open")
+        away()
+        island.hover(false)
+        suite.expect(island.hoverWork != nil, "the display that took the page answers its own leaving")
+        DispatchQueue.main.advance(0.36)
+        suite.expect(island.closures == carried + 1 && island.expansion.owner == nil,
+                     "and closes the page it carries at its own pause")
+
+        // A display unplugged while its page was pinned leaves no pin, and no
+        // pointer's claim, to hold every island's hover shut.
+        let unplugged = fresh()
+        let second = unplugged.addMirror(3, screen: CGRect(x: 1920, y: 0, width: 1920, height: 1080))
+        over(second)
+        unplugged.mirrorHover(3, entered: true)
+        second.runHoverWork()
+        unplugged.syncExpansion()
+        unplugged.pinned = true
+        suite.expect(unplugged.expansion.owner == 3 && unplugged.pinned, "precondition: a copy's page is pinned")
+        unplugged.showsOnAllDisplays = false
+        unplugged.retireExpansion()
+        unplugged.syncExpansion()
+        suite.expect(unplugged.expansion.owner == nil && !unplugged.expanded && !unplugged.pinned
+                     && !unplugged.openedByHover && pages(unplugged) == 0,
+                     "the page whose window has gone is closed, and the pin and the pointer's claim made for it go with it")
+        unplugged.showsOnAllDisplays = true
+        overIsland(unplugged)
+        unplugged.hover(true)
+        suite.expect(unplugged.hoverWork != nil, "the island's hover answers again with nothing left holding it shut")
+        DispatchQueue.main.advance(0.26)
+        suite.expect(unplugged.expanded && unplugged.expansion.owner == 1,
+                     "and the island opens on its own display, where its window stands")
     }
 
     /// One hover lifecycle, asked of the island's own window and of each copy's

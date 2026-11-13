@@ -38,3 +38,4 @@ Decisions must reflect an explicit design choice, not a guess about the code. Up
 - 0003. Splash strip throughput only when at work
 - 0004. A page opens on the display whose island was used
 - 0005. Sadoyo owns its bundle identifier
+- 0006. A page the pointer opened stays the pointer's page

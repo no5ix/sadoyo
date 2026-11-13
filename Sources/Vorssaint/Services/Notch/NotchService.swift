@@ -1177,6 +1177,15 @@ final class NotchService: ObservableObject {
               !showsOnAllDisplays || mirrors[owner] == nil else { return }
         expansion.closed()
         expanded = false
+        // The page is gone, and the choices made for that page go with it. A pin
+        // set for a page a display was drawing keeps the hover of every island
+        // shut, so a display unplugged while its page was pinned would leave the
+        // island answering no pointer at all, with no page on screen to unpin;
+        // the pointer's claim on a page that is closed is no claim either. Both
+        // belong to a page, and this is where a page dies without its own
+        // `collapse()` to clear them.
+        pinned = false
+        openedByHover = false
     }
 
     /// The panel that holds the keyboard for the open page, whoever draws it.
@@ -2057,7 +2066,18 @@ final class NotchService: ObservableObject {
             if pinned { self.pinned = true }
             selectedMetric = metric
             peeking = false
-            openedByHover = !takeFocus
+            // The act that opened the island owns the page, and it is answered
+            // once, at the opening. A page reached from inside an island the
+            // pointer opened is still the pointer's page - the card, the tile,
+            // the gallery, the panel and the pad each take the keyboard, which
+            // is a separate question from who opened the island - so the
+            // pointer's leaving closes the page it opened, whatever page that
+            // page has become. Only an opening from the closed strip answers to
+            // the keyboard: a click's page stays, and the pin is the way to
+            // keep a page the pointer has left.
+            openedByHover = NotchSupport.openedByHover(opening: !expanded,
+                                                       wasOpenedByHover: openedByHover,
+                                                       takeFocus: takeFocus)
             expanded = true
             // The open island covers a mirrored banner, and the inbox keeps
             // the message; a held one must not reappear after collapsing.

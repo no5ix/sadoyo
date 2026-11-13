@@ -100,7 +100,7 @@ enum NotchDestinationContract {
         var acceptsUserInteraction = true
         /// Closing is the island closing everywhere: no display carries the page, so
         /// every window of the island goes back to its own closed strip.
-        func collapse() { expanded = false; expansion.closed() }
+        func collapse() { expanded = false; expansion.closed(); openedByHover = false }
         var settingsOpens = 0
         /// Settings is a window of the app, not a page of the island: reaching it from the
         /// island closes the page and asks for the settings window.
@@ -227,6 +227,7 @@ enum NotchDestinationContract {
         stepBackContracts(suite)
         pageDisplayContracts(suite)
         menuBarDisplayContracts(suite)
+        pageProvenanceContracts(suite)
         // A page opened while the Command Bar is in the island takes its place.
         let barHost = Service()
         barHost.expanded = true
@@ -1332,5 +1333,127 @@ enum NotchDestinationContract {
         panel.openAppPanel(toggle: true, metric: .disk, on: panel.pageDisplay(forMenuBar: 3))
         suite.expect(panel.showingAppPanel && panel.selectedMetric == .disk && drawing(panel) == [3],
                      "the panel page opened at a reading by a bar click opens on that display")
+    }
+
+    /// Why the island is open, kept through every page it opens.
+    ///
+    /// The pointer's hover opened the island. A reading's card, a gallery tile,
+    /// Explorer, the app panel, the whole dashboard, the pad, the clipboard, the
+    /// shelf and the quick panel each take the keyboard for themselves, and none
+    /// of them is a click on the strip and none is the pin. The page they open is
+    /// therefore still the page the pointer opened, and the leaving of the whole
+    /// surface the island answers is the leaving that closes it - which is what
+    /// `closesOnPointerExit` answers for the island's own hover and for every
+    /// copy's. A page that answers false after a card was tapped is the bug this
+    /// contract keeps, and it is the same answer on every display.
+    private static func pageProvenanceContracts(_ suite: TestSuite) {
+        let current = ReviewDefaults.current!
+        /// The island on its own display, with a copy's window on each of two
+        /// others, opened as the pointer opens it: no keyboard taken.
+        func hovered(_ display: CGDirectDisplayID) -> Service {
+            let service = Service()
+            service.displayID = 1
+            service.mirrors = [2: Service.Copy(), 3: Service.Copy()]
+            service.syncWithPreferences()
+            service.open(takeFocus: false, on: display)
+            return service
+        }
+        /// An island the person opened with a click: the same routes, the other
+        /// answer, kept as the strip it was opened from keeps it.
+        func clicked(_ display: CGDirectDisplayID) -> Service {
+            let service = Service()
+            service.displayID = 1
+            service.mirrors = [2: Service.Copy(), 3: Service.Copy()]
+            service.syncWithPreferences()
+            service.open(on: display)
+            return service
+        }
+        func drawing(_ service: Service) -> [CGDirectDisplayID] {
+            [1, 2, 3].filter { service.presentsExpansion(on: $0) }
+        }
+        /// What the island answers when the pointer leaves the whole surface: the
+        /// answer the island's own hover and each copy's hover ask.
+        func closesOnLeaving(_ service: Service) -> Bool {
+            NotchSupport.closesOnPointerExit(expanded: service.expanded, peeking: service.peeking,
+                                             openedByHover: service.openedByHover)
+        }
+        func metricAvailable(_ metric: MetricDetailKind) -> Bool {
+            MenuBarMetric.allCases.contains { $0.detailKind == metric && $0.feature.isAvailable(in: current) }
+        }
+        let routes: [(name: String, gate: () -> Bool, route: (Service, CGDirectDisplayID) -> Void, shown: (Service) -> Bool)] = [
+            ("Explorer", { true }, { $0.toggleSections(on: $1) }, { $0.showingSections }),
+            ("the whole dashboard", { true }, { $0.open(wholeDashboard: true, on: $1) }, { $0.dashboardRequested }),
+            ("the app panel", { true }, { $0.openAppPanel(on: $1) }, { $0.showingAppPanel }),
+            ("the pad", { NotchSupport.routesScratchpad(in: current) },
+             { _ = $0.showScratchpad(on: $1) }, { $0.selected == .scratchpad }),
+            ("the clipboard page", { NotchSupport.routesClipboardWindow(in: current) },
+             { _ = $0.showClipboard(on: $1) }, { $0.selected == .clipboard }),
+            ("the shelf", { NotchSupport.routesShelf(in: current) },
+             { _ = $0.openShelf(on: $1) }, { $0.selected == .files }),
+            ("the quick panel", { NotchSupport.routesQuickPanel(in: current) },
+             { _ = $0.openQuickPanel(on: $1) }, { $0.selected == .tools }),
+        ]
+
+        // RAM and DISK, the cards the report named, and every reading the island
+        // can show: a detail opened from the pointer's page is the pointer's page.
+        let readings: [MetricDetailKind] = [.cpu, .gpu, .memory, .disk, .network, .battery, .power, .fan, .connectedDevices]
+        let shown = readings.filter { metricAvailable($0) }
+        suite.expect(shown.contains(.memory) && shown.contains(.disk),
+                     "the readings the report named, RAM and DISK, have details the island can open")
+        for display: CGDirectDisplayID in [1, 2, 3] {
+            for metric in shown {
+                let page = hovered(display)
+                _ = page.showMetric(metric, on: display)
+                suite.expect(page.expanded && page.selectedMetric == metric && page.openedByHover
+                             && closesOnLeaving(page) && page.expansion.owner == display && drawing(page) == [display],
+                             "the \(metric.rawValue) detail opened from the pointer's page on display \(display) keeps the pointer's claim and that display")
+            }
+            for (name, gate, route, opened) in routes {
+                let page = hovered(display)
+                route(page, display)
+                if gate() {
+                    suite.expect(page.expanded && opened(page) && page.openedByHover && closesOnLeaving(page)
+                                 && page.expansion.owner == display && drawing(page) == [display],
+                                 "the \(name) opened from the pointer's page on display \(display) keeps the pointer's claim and that display")
+                } else {
+                    suite.expect(page.openedByHover, "a \(name) the preferences keep off leaves the pointer's page the pointer's")
+                }
+            }
+            // Every section of the gallery, the tiles a card opens.
+            for module in hovered(display).modules {
+                let page = hovered(display)
+                page.select(module, on: display)
+                suite.expect(page.expanded && page.selected == module && page.openedByHover && closesOnLeaving(page)
+                             && page.expansion.owner == display && drawing(page) == [display],
+                             "the \(module.rawValue) page opened from the pointer's page on display \(display) is closed by the pointer's leaving")
+            }
+            // The same routes from a click's island keep the click's answer: a step
+            // inside an open page answers no pointer, and closes nothing.
+            for (name, gate, route, opened) in routes {
+                let page = clicked(display)
+                route(page, display)
+                if gate() {
+                    suite.expect(page.expanded && opened(page) && !page.openedByHover && !closesOnLeaving(page)
+                                 && page.expansion.owner == display && drawing(page) == [display],
+                                 "the \(name) opened from a click's page on display \(display) keeps the click's answer and that display")
+                } else {
+                    suite.expect(!page.openedByHover, "a \(name) the preferences keep off changes nothing on a click's page")
+                }
+            }
+        }
+
+        // The pin is the Keep Open the person chose, reached from the page's own
+        // menu. A card's click is not it, and taking the pin back leaves the page
+        // exactly as the pointer's hover opened it.
+        let page = hovered(1)
+        _ = page.showMetric(.memory)
+        suite.expect(page.openedByHover && !page.pinned && closesOnLeaving(page),
+                     "a reading's card opens its detail and pins nothing")
+        page.islandMenuActions(on: 1).togglePin()
+        suite.expect(page.pinned && page.expanded && page.selectedMetric == .memory,
+                     "the page's own menu keeps the open page open")
+        page.islandMenuActions(on: 1).togglePin()
+        suite.expect(!page.pinned && page.openedByHover && closesOnLeaving(page),
+                     "and taking the pin back leaves the page the pointer's, at the pointer's leaving")
     }
 }
