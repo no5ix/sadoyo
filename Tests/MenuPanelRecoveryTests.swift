@@ -26,6 +26,19 @@ enum MenuPanelRecoveryTests {
         var visibleFrame = CGRect(x: 0, y: 0, width: 1920, height: 1050)
         var isStillAttached = true
         var displayID = 1
+        /// The identity of the display this screen stands on, named the way the
+        /// production screen names it, so the desk a test arranges answers the
+        /// same question an arranged Mac does.
+        var notchDisplayID: CGDirectDisplayID { CGDirectDisplayID(displayID) }
+    }
+    /// A screen of one display, at a frame of its own, as an arranged desk puts
+    /// its menu bars: `id` is the display, `frame` where it sits beside the others.
+    static func screen(id: Int, frame: CGRect) -> NSScreen {
+        let screen = NSScreen()
+        screen.displayID = id
+        screen.frame = frame
+        screen.visibleFrame = CGRect(x: frame.minX, y: frame.minY, width: frame.width, height: frame.height - 30)
+        return screen
     }
     final class NSWindow {
         static let didMoveNotification = Notification.Name("move")
@@ -183,6 +196,22 @@ enum MenuPanelRecoveryTests {
         var islandOpens = true
         var metricOpens: [String] = []
         var appPanelOpens: [String] = []
+        /// The displays that have an island window to draw a page: the island's
+        /// own, and a copy's where the copies of the island are switched on. A
+        /// page cannot open on a display with no window to draw it.
+        var islandDisplays: Set<CGDirectDisplayID> = [1]
+        /// The display each page request carried, in the order the requests came,
+        /// so a test can read which display a click named — and that a click on
+        /// an external display's bar named that display and not the primary.
+        var metricOpenDisplays: [CGDirectDisplayID?] = []
+        var appPanelOpenDisplays: [CGDirectDisplayID?] = []
+        func hasIslandWindow(on display: CGDirectDisplayID?) -> Bool {
+            guard let display else { return false }
+            return islandDisplays.contains(display)
+        }
+        func pageDisplay(forMenuBar display: CGDirectDisplayID?) -> CGDirectDisplayID? {
+            hasIslandWindow(on: display) ? display : nil
+        }
         /// The production rule, read as the panel reads it: the island takes the
         /// click while it accepts system feedback, and the panel takes it, at the
         /// same detail, when it does not.
@@ -190,10 +219,15 @@ enum MenuPanelRecoveryTests {
             guard metricAvailable else { return (.nothing, "metric-off") }
             return acceptsSystemFeedback ? (.islandDetail, nil) : (.panelDetail, "island-off")
         }
-        @discardableResult func showMetric(_ metric: String, toggle: Bool) -> Bool {
-            metricOpens.append(metric); return islandOpens
+        @discardableResult func showMetric(_ metric: String, toggle: Bool, on display: CGDirectDisplayID?) -> Bool {
+            metricOpens.append(metric)
+            metricOpenDisplays.append(display)
+            return islandOpens
         }
-        func openAppPanel(toggle: Bool, metric: String) { appPanelOpens.append(metric) }
+        func openAppPanel(toggle: Bool, metric: String, on display: CGDirectDisplayID?) {
+            appPanelOpens.append(metric)
+            appPanelOpenDisplays.append(display)
+        }
     }
     final class MenuPanelFocus {
         static var shared = MenuPanelFocus()
@@ -702,6 +736,114 @@ enum MenuPanelRecoveryTests {
             host.showMetricPanel(for: MenuBarMetric(detailKind: "memory"), anchoredTo: host.statusController.button!)
             expect(NotchService.shared.appPanelOpens == ["memory"] && !host.popover.isShown,
                    "the island's panel opens at the reading's detail page")
+        }
+        // A reading's indicator — RAM, DISK, CPU, GPU, network, battery — stands
+        // in the menu bar of *every* display. Unlike the island's own controls it
+        // has no island window behind it to carry a display, so the click itself
+        // has to name the display its bar stands on, and that display is the one
+        // whose island expands. The desk: a built-in primary holding the menu bar,
+        // an external to its left, and an external stacked above it, so the upper
+        // pair share their x and only the click tells their bars apart. The bug:
+        // the indicator named no display, the island answered with the display of
+        // its own window — the primary — and the external whose bar was clicked
+        // stayed shut while the primary expanded.
+        let primaryBar = CGRect(x: 0, y: 0, width: 1512, height: 982)
+        let leftBar = CGRect(x: -1920, y: 0, width: 1920, height: 1080)
+        let aboveBar = CGRect(x: 0, y: 982, width: 1920, height: 1080)
+        /// The bar of a three-display desk, with the island's windows on the
+        /// displays named: a copy's window is what lets an external display draw
+        /// a page at all.
+        func desk(islandOn displays: [CGDirectDisplayID]) -> Host {
+            let host = setup(present: false)
+            NSScreen.screens = [
+                screen(id: 1, frame: primaryBar),
+                screen(id: 2, frame: leftBar),
+                screen(id: 3, frame: aboveBar),
+            ]
+            NotchService.shared.islandDisplays = Set(displays)
+            NotchService.shared.acceptsSystemFeedback = true
+            return host
+        }
+        /// A click in the menu bar band of one display's screen, captured as the
+        /// bar captures it.
+        func clickBar(_ host: Host, _ bar: CGRect) {
+            host.lastStatusClick = (CGPoint(x: bar.minX + 400, y: bar.maxY - 12), Date())
+        }
+        do {
+            let host = desk(islandOn: [1, 2, 3])
+            clickBar(host, leftBar)
+            host.showMetricPanel(for: MenuBarMetric(detailKind: "memory"), anchoredTo: host.statusController.button!)
+            expect(NotchService.shared.metricOpens == ["memory"] && NotchService.shared.metricOpenDisplays == [2],
+                   "RAM clicked in an external display's menu bar opens the RAM page on that display's island")
+        }
+        do {
+            let host = desk(islandOn: [1, 2, 3])
+            clickBar(host, aboveBar)
+            host.showMetricPanel(for: MenuBarMetric(detailKind: "disk"), anchoredTo: host.statusController.button!)
+            expect(NotchService.shared.metricOpenDisplays == [3],
+                   "DISK clicked above the primary, sharing its x, opens the DISK page on that display")
+        }
+        do {
+            let host = desk(islandOn: [1, 2, 3])
+            clickBar(host, primaryBar)
+            host.showMetricPanel(for: MenuBarMetric(detailKind: "memory"), anchoredTo: host.statusController.button!)
+            expect(NotchService.shared.metricOpenDisplays == [1],
+                   "RAM clicked in the primary display's own menu bar opens the page on the primary display")
+        }
+        do {
+            // A replicated menu bar reports the status item's window on another
+            // display: the click names the bar, and the window's report does not
+            // move the page to the display it names.
+            let host = desk(islandOn: [1, 2, 3])
+            host.statusController.button!.window!.frame = CGRect(x: 682, y: 952, width: 36, height: 30)
+            clickBar(host, leftBar)
+            host.showMetricPanel(for: MenuBarMetric(detailKind: "disk"), anchoredTo: host.statusController.button!)
+            expect(NotchService.shared.metricOpenDisplays == [2],
+                   "a status window reporting the primary display does not move a click made on another bar")
+        }
+        do {
+            // A click that was never captured — a keyboard, a restored state —
+            // falls to the display the status window sits on.
+            let host = desk(islandOn: [1, 2, 3])
+            host.lastStatusClick = nil
+            host.statusController.button!.window!.frame = CGRect(x: 40, y: 2040, width: 36, height: 30)
+            host.showMetricPanel(for: MenuBarMetric(detailKind: "disk"), anchoredTo: host.statusController.button!)
+            expect(NotchService.shared.metricOpenDisplays == [3],
+                   "an uncaptured click opens the page on the display the status item's window sits on")
+        }
+        do {
+            // The page belongs to the display the click named, not to where the
+            // pointer is when the page opens: the click is captured on the
+            // external, and the primary display holds the pointer, the key window
+            // and the island's own window when the page is asked for.
+            let host = desk(islandOn: [1, 2, 3])
+            clickBar(host, leftBar)
+            NSApp.currentEvent = event(location: CGPoint(x: 400, y: 970))
+            NSApp.keyWindow = host.statusController.button!.window
+            host.showMetricPanel(for: MenuBarMetric(detailKind: "disk"), anchoredTo: host.statusController.button!)
+            expect(NotchService.shared.metricOpenDisplays == [2],
+                   "the display named at the click survives the pointer's travel to the primary display")
+        }
+        do {
+            // A display with no island window cannot be handed the page: naming it
+            // would open a page no window draws. The request names no display, and
+            // the island keeps the page where it is.
+            let host = desk(islandOn: [1])
+            clickBar(host, leftBar)
+            host.showMetricPanel(for: MenuBarMetric(detailKind: "memory"), anchoredTo: host.statusController.button!)
+            expect(NotchService.shared.metricOpens == ["memory"] && NotchService.shared.metricOpenDisplays == [nil],
+                   "a bar click on a display with no island names no display, so the page stays where it is")
+        }
+        do {
+            // The rule is the same for the page the same click opens in the
+            // island's app panel.
+            let host = desk(islandOn: [1, 2, 3])
+            NotchSupport.routesPanel = true
+            NotchService.shared.islandOpens = false
+            clickBar(host, leftBar)
+            host.showMetricPanel(for: MenuBarMetric(detailKind: "memory"), anchoredTo: host.statusController.button!)
+            expect(NotchService.shared.appPanelOpens == ["memory"] && NotchService.shared.appPanelOpenDisplays == [2],
+                   "the panel page the same bar click opens opens on that display")
         }
         do {
             let host = setup(present: false)

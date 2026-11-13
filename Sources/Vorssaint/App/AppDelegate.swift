@@ -513,7 +513,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
 
     private func toggleMainPopover() {
         if NotchSupport.routesAppPanel(), NotchService.shared.acceptsSystemFeedback {
-            NotchService.shared.openAppPanel(toggle: true); return
+            // The bar that was clicked names the display the panel's page opens
+            // on, as the island's own controls name theirs.
+            NotchService.shared.openAppPanel(toggle: true,
+                                             on: NotchService.shared.pageDisplay(
+                                                 forMenuBar: statusDisplayID(for: statusController?.button)))
+            return
         }
         if !popoverIsOpen {
             MenuPanelFocus.shared.showNormalPanel()
@@ -534,10 +539,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         // conditions are written down, so a click that lands on the panel says
         // which state of the island sent it there.
         let (route, reason) = island.menuBarMetricRoute(for: detailKind)
-        Self.menuBarLog.warning("metric \(metric.rawValue, privacy: .public) route=\(route.logName, privacy: .public) blockedBy=\(reason ?? "none", privacy: .public) appPanel=\(NotchSupport.routesAppPanel(), privacy: .public) islandAccepts=\(island.acceptsSystemFeedback, privacy: .public) panelOpen=\(island.showingAppPanel, privacy: .public) detail=\(island.selectedMetric.map { String(describing: $0) } ?? "none", privacy: .public)")
-        Self.traceMenuBar("metric \(detailKind) route=\(route.logName) blockedBy=\(reason ?? "none")"
-            + " appPanel=\(NotchSupport.routesAppPanel()) islandRunning=\(island.running)")
-        if route == .islandDetail, island.showMetric(detailKind, toggle: true) { return }
+        // The display whose menu bar this click happened on, carried into every
+        // page the click opens. A reading's indicator lives in the bar of every
+        // display, and clicking RAM on an external display opens the RAM page on
+        // that display's island; the primary display never takes the page. The
+        // answer goes to the log with the route, so a click that opened a page
+        // somewhere other than the bar it was clicked on says so by itself.
+        let origin = island.pageDisplay(forMenuBar: statusDisplayID(for: button))
+        let blockedBy = reason ?? "none"
+        let detailPage = island.selectedMetric.map { String(describing: $0) } ?? "none"
+        let originName = origin.map { String($0) } ?? "unknown"
+        Self.menuBarLog.warning("metric \(metric.rawValue, privacy: .public) route=\(route.logName, privacy: .public) blockedBy=\(blockedBy, privacy: .public) appPanel=\(NotchSupport.routesAppPanel(), privacy: .public) islandAccepts=\(island.acceptsSystemFeedback, privacy: .public) panelOpen=\(island.showingAppPanel, privacy: .public) detail=\(detailPage, privacy: .public) display=\(originName, privacy: .public)")
+        Self.traceMenuBar("metric \(detailKind) route=\(route.logName) blockedBy=\(blockedBy)"
+            + " appPanel=\(NotchSupport.routesAppPanel()) islandRunning=\(island.running) display=\(originName)")
+        if route == .islandDetail, island.showMetric(detailKind, toggle: true, on: origin) { return }
         if route == .islandDetail {
             Self.menuBarLog.log("metric \(metric.rawValue, privacy: .public) island refused the detail; opening the panel's")
             Self.traceMenuBar("metric \(detailKind) island refused the detail; opening the panel's")
@@ -546,7 +561,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         // The panel opens at the reading's own detail page, not at the section
         // the reading is one card in.
         if NotchSupport.routesAppPanel(), island.acceptsSystemFeedback {
-            island.openAppPanel(toggle: true, metric: detailKind); return
+            island.openAppPanel(toggle: true, metric: detailKind, on: origin); return
         }
         if popoverIsOpen {
             if MenuPanelFocus.shared.activeMetric == detailKind {
@@ -727,25 +742,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         .leftMouseDown, .leftMouseUp, .rightMouseDown, .rightMouseUp,
     ]
 
+    /// The menu bars of the screens AppKit reports, in its own order, so an
+    /// index from `MenuBarDisplayRouting.barIndex` names the same screen here.
+    private func menuBarBars(for screens: [NSScreen]) -> [MenuBarDisplayRouting.Bar] {
+        screens.map { MenuBarDisplayRouting.Bar(displayID: $0.notchDisplayID, frame: $0.frame) }
+    }
+
     /// The screen the menu bar icon lives on, for the panel's height cap and
     /// for clamping it once it is open.
     private func statusScreen(for button: NSStatusBarButton) -> NSScreen? {
+        let screens = NSScreen.screens
         // Replicated menu bars (including Sidecar) can report the status
         // window on a different display. The captured click identifies the
         // actual bar, including vertically arranged screens with the same x.
-        if let click = freshStatusClick,
-           let clicked = NSScreen.screens.first(where: { NSMouseInRect(click, $0.frame, false) }) {
-            return clicked
-        }
-        if let frame = button.window?.frame,
-           let hosting = NSScreen.screens.first(where: { $0.frame.intersects(frame) }) {
-            return hosting
+        if let index = MenuBarDisplayRouting.barIndex(click: freshStatusClick,
+                                                      windowFrame: button.window?.frame,
+                                                      bars: menuBarBars(for: screens)) {
+            return screens[index]
         }
         // A window parked out of the visible area reports no screen of its own,
         // and that is exactly the state this path exists for, so fall back to
         // the display that owns the bar rather than to whichever one happens to
         // hold the key window.
         return button.window?.screen ?? NSScreen.withMenuBar
+    }
+
+    /// The display whose menu bar a status-item click belongs to, for the
+    /// island's page: `nil` when the click cannot be placed on a display at all.
+    ///
+    /// A reading's indicator (RAM, DISK, CPU …) stands in every display's menu
+    /// bar, and the island page it opens belongs to the display whose bar was
+    /// clicked. Unlike the island's own controls, the indicator has no window of
+    /// the island behind it to carry a display, so the click names it here, at
+    /// the moment it happens, and the answer is carried into the page request.
+    /// Where it cannot be answered, naming no display keeps the page where it is
+    /// — borrowing the primary display for a click that may have happened on
+    /// another bar is what this route must never do.
+    private func statusDisplayID(for button: NSStatusBarButton?) -> CGDirectDisplayID? {
+        let screens = NSScreen.screens
+        guard let index = MenuBarDisplayRouting.barIndex(click: freshStatusClick,
+                                                         windowFrame: button?.window?.frame,
+                                                         bars: menuBarBars(for: screens)) else { return nil }
+        return screens[index].notchDisplayID
     }
 
     /// Whether the item the panel hangs off still reports a frame that sits in

@@ -1133,6 +1133,34 @@ final class NotchService: ObservableObject {
         return owner == id
     }
 
+    /// Whether a display has an island window that can draw a page now: the
+    /// island's own, or a copy's that is on the screen. A page cannot live on a
+    /// display with no window to draw it, and this is the question a request
+    /// that starts outside every island window asks before it names a display.
+    func hasIslandWindow(on display: CGDirectDisplayID?) -> Bool {
+        guard let display else { return false }
+        if display == displayID { return true }
+        guard let mirror = mirrors[display] else { return false }
+        return mirror.model.shown
+    }
+
+    /// The display a menu bar click opens its page on.
+    ///
+    /// The island's own views name the display they stand on, because the window
+    /// drawing them was built for that display. A menu bar reading indicator —
+    /// RAM, DISK, CPU and the rest — stands in no island window, so the click
+    /// answers for it: the display whose menu bar was clicked (see
+    /// `MenuBarDisplayRouting`). That display takes the page where it has an
+    /// island to draw it. Where it has none — the copies are switched off, that
+    /// display is in full screen, the bar cannot be placed — the request names no
+    /// display, and `destinationDisplay` keeps the page where it is. The primary
+    /// display is never handed a page that a click on another display's bar asked
+    /// for: it draws one only when its own bar, or its own island, was the thing
+    /// that was used.
+    func pageDisplay(forMenuBar display: CGDirectDisplayID?) -> CGDirectDisplayID? {
+        hasIslandWindow(on: display) ? display : nil
+    }
+
     /// The window that draws the open page: the island's own while the page
     /// belongs to its display, and the copy's when its display was opened.
     private var expansionHost: NotchWindowHost? {

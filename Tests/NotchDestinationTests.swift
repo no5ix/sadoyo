@@ -132,6 +132,14 @@ enum NotchDestinationContract {
         var expansionHost: Host? { windowHost }
         struct Copy {
             var hover = NotchHoverState()
+            /// The copy's own surface. A copy that is on the screen can draw a
+            /// page; a copy the island has taken off the screen (full screen, a
+            /// bar that hides until the pointer) can draw none.
+            var model = Model()
+            struct Model {
+                var shown = true
+                var peeking = false
+            }
         }
         var mirrors: [CGDirectDisplayID: Copy] = [:]
         func presentsExpansion(on id: CGDirectDisplayID?) -> Bool {
@@ -218,6 +226,7 @@ enum NotchDestinationContract {
         menuBarMetricContracts(suite)
         stepBackContracts(suite)
         pageDisplayContracts(suite)
+        menuBarDisplayContracts(suite)
         // A page opened while the Command Bar is in the island takes its place.
         let barHost = Service()
         barHost.expanded = true
@@ -1125,5 +1134,203 @@ enum NotchDestinationContract {
                          && !dismissed.showingSections && !dismissed.showingAppPanel,
                      "a menu opened on a copy and dismissed with nothing chosen leaves the page on that copy and opens nothing elsewhere")
         _ = dismissedMenu
+    }
+
+    /// A reading's menu bar control — RAM, DISK, CPU, GPU, network, battery —
+    /// stands in the menu bar of *every* display, and unlike the island's own
+    /// controls it has no island window behind it to carry a display. So the
+    /// click itself has to name the display its bar stands on, and that display —
+    /// never the primary — is the one whose island expands to show the reading's
+    /// page. The page stays one across the whole system: a click on another
+    /// display's bar takes it, and the display that carried it closes.
+    private static func menuBarDisplayContracts(_ suite: TestSuite) {
+        /// The desk the reports name: a built-in primary holding the menu bar,
+        /// and two externals, one to its left and one stacked above it, so the
+        /// upper pair share their x and only the click tells their bars apart.
+        let primary = CGRect(x: 0, y: 0, width: 1512, height: 982)
+        let left = CGRect(x: -1920, y: 0, width: 1920, height: 1080)
+        let above = CGRect(x: 0, y: 982, width: 1920, height: 1080)
+        let bars = [
+            MenuBarDisplayRouting.Bar(displayID: 1, frame: primary),
+            MenuBarDisplayRouting.Bar(displayID: 2, frame: left),
+            MenuBarDisplayRouting.Bar(displayID: 3, frame: above),
+        ]
+        /// A click in the menu bar band of one display's screen.
+        func barClick(_ frame: CGRect) -> CGPoint {
+            CGPoint(x: frame.minX + 400, y: frame.maxY - 12)
+        }
+        func routed(click: CGPoint?, windowFrame: CGRect?) -> CGDirectDisplayID? {
+            MenuBarDisplayRouting.barIndex(click: click, windowFrame: windowFrame, bars: bars).map { bars[$0].displayID }
+        }
+
+        suite.expect(routed(click: barClick(primary), windowFrame: nil) == 1,
+                     "a click in the primary's menu bar names the primary display")
+        suite.expect(routed(click: barClick(left), windowFrame: nil) == 2,
+                     "a click in the external to the left names that display")
+        suite.expect(routed(click: barClick(above), windowFrame: nil) == 3,
+                     "a click in the external above names that display, sharing the primary's x")
+        suite.expect(routed(click: barClick(left), windowFrame: primary) == 2,
+                     "a status window reporting the primary display does not move a click made on another display's bar")
+        suite.expect(routed(click: nil, windowFrame: left) == 2,
+                     "a click that was never captured falls to the display the status window sits on")
+        suite.expect(routed(click: nil, windowFrame: nil) == nil,
+                     "a click that cannot be placed on a bar names no display")
+        suite.expect(routed(click: CGPoint(x: 400, y: 982), windowFrame: nil) == 1,
+                     "a click on the shared top edge of two arranged displays belongs to the display whose bar is there, the lower screen's own")
+
+        /// The island on the primary display, with a copy's window on each of
+        /// two externals, as the desk above arranges them.
+        func island() -> Service {
+            let service = Service()
+            service.displayID = 1
+            service.mirrors = [2: Service.Copy(), 3: Service.Copy()]
+            return service
+        }
+        /// The windows that draw a page now: one page in the whole system.
+        func drawing(_ service: Service) -> [CGDirectDisplayID] {
+            [1, 2, 3].filter { service.presentsExpansion(on: $0) }
+        }
+        /// One click on a reading's menu bar indicator, as the app routes it: the
+        /// bar names the display it was clicked on, the island accepts it only
+        /// where that display has an island to draw on, and the reading's detail
+        /// opens there.
+        @discardableResult
+        func clickIndicator(_ service: Service, _ reading: MetricDetailKind, on display: CGDirectDisplayID?) -> Bool {
+            service.showMetric(reading, toggle: true, on: service.pageDisplay(forMenuBar: display))
+        }
+
+        // Every reading, on every display: the island of the display that was
+        // clicked expands and shows that reading, and no other display's island
+        // opens with it.
+        for (display, name) in [(CGDirectDisplayID(1), "the primary display"),
+                                (CGDirectDisplayID(2), "the first external"),
+                                (CGDirectDisplayID(3), "the second external")] {
+            for reading in [MetricDetailKind.memory, .disk, .cpu, .gpu, .network] {
+                let desk = island()
+                let opened = clickIndicator(desk, reading, on: display)
+                suite.expect(opened && desk.expanded && desk.selectedMetric == reading
+                                 && !desk.showingAppPanel && desk.expansion.owner == display
+                                 && drawing(desk) == [display],
+                             "the \(reading.rawValue) indicator on \(name) opens the \(reading.rawValue) page on \(name), and on no other display")
+            }
+        }
+
+        // The bug this contract keeps: the indicator named no display, so the
+        // island's own — the primary — took the page, and the external whose bar
+        // was clicked stayed shut.
+        let lost = island()
+        lost.showMetric(.memory, toggle: true, on: nil)
+        suite.expect(lost.expansion.owner == 1 && drawing(lost) == [1],
+                     "an indicator that names no display is the old route: the primary display takes the page")
+        let named = island()
+        clickIndicator(named, .memory, on: 2)
+        suite.expect(named.expansion.owner == 2 && drawing(named) == [2] && !named.presentsExpansion(on: 1),
+                     "the same click, naming the display it happened on, opens that external's island and leaves the primary shut")
+
+        // The display is captured where the click happens, and survives what
+        // runs later: the pointer travels to the primary, the island's own record
+        // is the primary's, and the page still opens on the bar that was clicked.
+        let travelled = island()
+        let travelledDisplay = travelled.pageDisplay(forMenuBar: 3)
+        travelled.displayID = 1
+        travelled.inside = false
+        travelled.showMetric(.disk, toggle: true, on: travelledDisplay)
+        suite.expect(travelled.expansion.owner == 3 && drawing(travelled) == [3] && travelled.selectedMetric == .disk,
+                     "the display named by a bar click outlives the pointer's travel and opens the page on that display")
+
+        // A page route that runs after the primary's island was opened still
+        // carries the clicked display, rather than asking where the island is now.
+        let deferred = island()
+        let deferredDisplay = deferred.pageDisplay(forMenuBar: 2)
+        deferred.open(.music, on: 1)
+        suite.expect(deferred.expansion.owner == 1 && deferred.selected == .music,
+                     "the primary display's island is opened first, and carries the page")
+        deferred.showMetric(.disk, toggle: true, on: deferredDisplay)
+        suite.expect(deferred.expansion.owner == 2 && drawing(deferred) == [2] && deferred.selectedMetric == .disk,
+                     "the reading opens on the display the bar named, after the primary had the page")
+
+        // One page in the whole system, moved by clicks on bars: RAM on the first
+        // external, DISK on the second, RAM on the primary. Each click expands its
+        // own display and closes the one that carried the page.
+        let desk = island()
+        clickIndicator(desk, .memory, on: 2)
+        suite.expect(drawing(desk) == [2] && desk.selectedMetric == .memory,
+                     "RAM on the first external leaves that display expanded alone")
+        clickIndicator(desk, .disk, on: 3)
+        suite.expect(drawing(desk) == [3] && desk.selectedMetric == .disk && !desk.presentsExpansion(on: 2),
+                     "DISK on the second external closes the first and expands the second alone")
+        clickIndicator(desk, .memory, on: 1)
+        suite.expect(drawing(desk) == [1] && desk.selectedMetric == .memory && !desk.presentsExpansion(on: 3),
+                     "RAM on the primary closes the second external and expands the primary alone")
+        for (display, reading) in zip([CGDirectDisplayID(3), 2, 1, 2, 3],
+                                      [MetricDetailKind.disk, .memory, .network, .cpu, .gpu]) {
+            clickIndicator(desk, reading, on: display)
+            suite.expect(drawing(desk) == [display] && desk.selectedMetric == reading,
+                         "the page is on display \(display) alone, and on no other, at every step of the desk")
+        }
+
+        // The indicator is a toggle, as it has always been: the same reading's
+        // indicator, clicked again while its page is open, closes the page, and
+        // no display is left expanded. The reading's own click never moves a page
+        // it opened; a click on a different reading is what carries it to a bar on
+        // another display.
+        clickIndicator(desk, .memory, on: 2)
+        suite.expect(drawing(desk) == [2] && desk.selectedMetric == .memory,
+                     "RAM on the first external opens RAM there again")
+        clickIndicator(desk, .memory, on: 2)
+        suite.expect(!desk.expanded && desk.expansion.owner == nil && drawing(desk).isEmpty,
+                     "the same reading's indicator, clicked again on the same display, closes the page and leaves no display expanded")
+        clickIndicator(desk, .memory, on: 3)
+        suite.expect(drawing(desk) == [3] && desk.selectedMetric == .memory,
+                     "RAM on another display's bar opens the page there once the page is closed")
+
+        // A display with no island to draw on is handed no page: naming it would
+        // open a page no window draws. The request names no display, and the page
+        // stays where it is, as a keyboard move in an open page leaves it.
+        let copies = island()
+        suite.expect(copies.hasIslandWindow(on: 1) && copies.hasIslandWindow(on: 2) && copies.hasIslandWindow(on: 3),
+                     "the island's own display and each copy's display can draw a page")
+        suite.expect(copies.pageDisplay(forMenuBar: 2) == 2 && copies.pageDisplay(forMenuBar: 1) == 1,
+                     "a bar click on a display that has an island names that display")
+        suite.expect(copies.pageDisplay(forMenuBar: nil) == nil,
+                     "a bar click that names no display names none to the island either")
+        let noCopies = island()
+        noCopies.mirrors = [:]
+        noCopies.open(sections: true, on: 1)
+        suite.expect(noCopies.pageDisplay(forMenuBar: 2) == nil,
+                     "with the copies switched off, a bar click on another display names no display")
+        clickIndicator(noCopies, .disk, on: 2)
+        suite.expect(noCopies.expansion.owner == 1 && noCopies.selectedMetric == .disk && drawing(noCopies) == [1],
+                     "a bar click on a display with no island keeps the page on the display that carries it")
+        let fullscreen = island()
+        fullscreen.mirrors[3]?.model.shown = false
+        suite.expect(fullscreen.pageDisplay(forMenuBar: 3) == nil,
+                     "a display whose copy is off the screen is handed no page")
+
+        // The routes that already knew their display keep knowing it, and take
+        // the page from a bar click on another display: the island's menu, and a
+        // System Monitoring card on a copy's page.
+        let mixed = island()
+        clickIndicator(mixed, .disk, on: 3)
+        mixed.islandMenuActions(on: 2).openSections()
+        suite.expect(mixed.showingSections && mixed.expansion.owner == 2 && drawing(mixed) == [2],
+                     "Explorer opened from a copy's menu takes the page from a bar click on another display")
+        clickIndicator(mixed, .memory, on: 3)
+        suite.expect(drawing(mixed) == [3] && !mixed.showingSections && mixed.selectedMetric == .memory,
+                     "a bar click on a third display takes the page back from the copy's menu")
+        let card = island()
+        card.open(on: 3)
+        card.showMetric(.memory, on: 3)
+        suite.expect(card.expansion.owner == 3 && card.selectedMetric == .memory && drawing(card) == [3],
+                     "a System Monitoring card on a copy's page opens on that copy's display")
+
+        // The app panel page, opened by the same bar, belongs to the same display.
+        let panel = island()
+        panel.openAppPanel(toggle: true, on: panel.pageDisplay(forMenuBar: 2))
+        suite.expect(panel.showingAppPanel && panel.expansion.owner == 2 && drawing(panel) == [2],
+                     "the panel page opened from a bar click opens on that display")
+        panel.openAppPanel(toggle: true, metric: .disk, on: panel.pageDisplay(forMenuBar: 3))
+        suite.expect(panel.showingAppPanel && panel.selectedMetric == .disk && drawing(panel) == [3],
+                     "the panel page opened at a reading by a bar click opens on that display")
     }
 }

@@ -41,6 +41,9 @@ Depending on the change, consider:
 - Single and multiple displays; display sleep/wake; full-screen and Mission Control.
 - Dynamic Island on three displays: the same content on every collapsed island, one
   island expanded at a time, a page that opens on the display whose island was used,
+  a page that opens on the display whose *menu bar* was used (RAM, DISK, CPU clicked in an
+  external display's bar expand that display's island, never the primary's, and the page
+  moves to the display of the newest click while staying one page in the whole system),
   and a hover that expands on entry and collapses when the pointer leaves the whole
   open panel - on every display alike, and on every display *automatically*: a page a
   copy's hover opened closes at the person's close delay when that copy's pointer

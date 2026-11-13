@@ -278,7 +278,9 @@ def main():
           + "extension MenuPanelRecoveryTests {\nfinal class Host: Fixture {\n"
           + "".join(declaration(panel, prefix).replace("private ", "") for prefix in [
               "    private struct PanelAnchor", "    private func statusButtonMidX(",
-              "    private func statusScreen(", "    private func positionSettingsWindow(",
+              "    private func statusScreen(", "    private func statusDisplayID(",
+              "    private func menuBarBars(",
+              "    private func positionSettingsWindow(",
               "    private var freshStatusClick:", "    private func captureStatusClick(",
               "    private func correctedPopoverMidX(", "    private func resolvePanelAnchor(",
               "    private func frameStillDescribesMenuBar(", "    private func statusFrameNeedsAnchorOverride(",
@@ -1668,6 +1670,8 @@ def main():
           + declaration(notch, "    func setPageLayer(")
           + declaration(notch, "    func openAppPanel(")
           + declaration(notch, "    func showMetric(")
+          + declaration(notch, "    func hasIslandWindow(")
+          + declaration(notch, "    func pageDisplay(forMenuBar")
           + declaration(notch, "    func openingDestination(")
               .replace("UserDefaults.standard", "ReviewDefaults.current!")
           + declaration(notch, "    var reopeningDestination:")

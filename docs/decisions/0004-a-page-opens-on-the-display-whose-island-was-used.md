@@ -17,6 +17,13 @@
   after the pointer has travelled and the app's key window has changed, so the display
   cannot be read from the pointer, the key window, `NSScreen.main`, the primary display,
   or any "display the island is on now" at the moment an item is chosen.
+
+  The same shape came back a second time outside the island's windows. A reading's menu bar
+  indicator (RAM, DISK, CPU …) is drawn in the menu bar of every display, and its click
+  opened the reading's page with no display named. `destinationDisplay` then answered the
+  island's own window — the primary — so clicking RAM in an external display's bar expanded
+  the primary's island, and the external whose bar was clicked stayed shut: the mirror image
+  of the menu case, with the surface outside the island instead of inside its page.
 - Decision: The display a page belongs to is the display whose island the interaction
   happened on, named by the window that drew the thing that was used, and the primary
   display is never an automatic destination.
@@ -37,6 +44,19 @@
     a `NotchIslandMenu` of closures that each carry the display. The display is decided
     where the menu is built, never where an item is chosen, so a menu opened on display 2
     opens its page on display 2 after the pointer has moved to display 1.
+  - A surface that stands in no island window names the display its *click* happened on.
+    A reading's menu bar indicator — RAM, DISK, CPU, GPU, network, battery — is drawn in
+    the menu bar of every display, so it carries no display of its own and `on: nil` reads
+    as "wherever the island is": the island's own window, the primary. The indicator's click
+    belongs to the display that bar stands on, and its reading's page opens there.
+    `MenuBarDisplayRouting` answers which bar a click is on — the captured click first, the
+    status window's reported frame only where there was no click to ask, since a replicated
+    menu bar (Sidecar, mirroring, a bar parked off screen) reports the window on another
+    display — and it answers nil when neither can say. `NotchService.pageDisplay(forMenuBar:)`
+    accepts that display where it has an island window to draw a page
+    (`hasIslandWindow(on:)`: the island's own, or a copy's that is on the screen), and names
+    no display where it has none, which keeps the page where it is. The primary display
+    therefore draws a reading's page only when its own bar, or its own island, was used.
   - One resolution rule, in `destinationDisplay(_:)`: the display the request names, then
     the display already carrying the page, then the island's own. A request that names no
     display - a keyboard move in an open page, a global shortcut, a service, a
@@ -55,6 +75,12 @@
     a view that forgets it opens on the display that already carries the page rather than
     jumping to the primary, so the fault is quiet. The contract test below is what keeps
     the set complete.
+  - A new menu bar surface that opens a page must name the display its click landed on, the
+    same way, and take the answer through `pageDisplay(forMenuBar:)`. A surface that names
+    no display is not wrong on its own — a keyboard move, a global shortcut and a service
+    are meant to name none — so the fault is quiet here too: the page stays where it is, or,
+    with no page open, lands on the island's own display. That last case is exactly the
+    failure this record was written for, and `menuBarDisplayContracts` is what keeps it shut.
   - A request that names no display keeps the page where it is. The pages that follow a
     keyboard (`Command-K`, `Command-Option-<module>`, the section arrows, Escape) are
     therefore bound to the display that carries the page, which is where the keyboard is.
@@ -64,18 +90,30 @@
     The automated coverage drives the production bodies with display, window and pointer
     doubles: `NotchDestinationContract.pageDisplayContracts` (the menu on a copy, the menu
     after the pointer has travelled, every page route, one page at a time, and a request
-    that names no display) and `NotchMirrorContract.ownershipContracts` (a copy knows its
-    display, an unplug retires the page, a return brings a closed island, a switched-off
-    display opens nothing). The real hover, the real menu and the real pointer across three
+    that names no display), `NotchDestinationContract.menuBarDisplayContracts` (a bar click
+    on each of three displays, the click outranking a status window that reports another
+    display, a display stacked above the primary sharing its x, the display surviving an
+    action that runs after the pointer travelled, one page moved across the desk, and a
+    display with no island window handed nothing) and `NotchMirrorContract.ownershipContracts`
+    (a copy knows its display, an unplug retires the page, a return brings a closed island,
+    a switched-off display opens nothing). `MenuPanelRecoveryTests` drives the production
+    menu bar route (`AppDelegate.showMetricPanel(for:anchoredTo:)`, `statusScreen(for:)`,
+    `statusDisplayID(for:)`) over the same desk, so RAM and DISK clicked in an external
+    display's bar are answered by that display, and the panel's anchor follows the same
+    click. The real hover, the real menu, the real bar and the real pointer across three
     displays need the Release app.
 - Related code: `Sources/Vorssaint/Services/Notch/NotchSupport.swift`
   (`NotchDisplayExpansion`, `NotchIslandMenu`, `NotchMirrorModel.displayID`),
   `Sources/Vorssaint/Services/Notch/NotchService.swift` (`destinationDisplay`,
   `islandMenuActions(on:)`, `open(_:…on:)`, `toggleSections(on:)`, `select(_:on:)`,
   `showMetric(_:toggle:on:)`, `openAppPanel(toggle:metric:on:)`, `expand(on:)`,
-  `retireExpansion`), `Sources/Vorssaint/UI/Notch/NotchComponents.swift`
+  `hasIslandWindow(on:)`, `pageDisplay(forMenuBar:)`, `retireExpansion`),
+  `Sources/Vorssaint/App/MenuBarDisplayRouting.swift` (which bar a click is on),
+  `Sources/Vorssaint/App/AppDelegate.swift` (`statusDisplayID(for:)`, `statusScreen(for:)`,
+  `showMetricPanel(for:anchoredTo:)`),
+  `Sources/Vorssaint/UI/Notch/NotchComponents.swift`
   (`EnvironmentValues.notchPageDisplay`), `Sources/Vorssaint/UI/Notch/NotchMirrorView.swift`,
   `Sources/Vorssaint/UI/Notch/NotchView.swift`, and the page, card, tile and strip views
   that pass `on: pageDisplay`. Tests: `Tests/NotchDestinationTests.swift`,
   `Tests/NotchMirrorTests.swift`, `Tests/NotchHoverTests.swift` (`displayExpansionChecks`),
-  `Tests/generate_sources.py`.
+  `Tests/MenuPanelRecoveryTests.swift`, `Tests/generate_sources.py`.

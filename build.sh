@@ -483,6 +483,7 @@ if (( TEST )); then
         Sources/Vorssaint/App/MenuBarAllowanceSupport.swift
         Sources/Vorssaint/App/ReopenRequestSupport.swift
         Sources/Vorssaint/App/StatusItemAnchorSupport.swift
+        Sources/Vorssaint/App/MenuBarDisplayRouting.swift
         Sources/Vorssaint/Services/DockClick/DockClickSupport.swift
         Sources/Vorssaint/Services/Finder/CutPasteProgressSupport.swift
         Sources/Vorssaint/Services/Finder/CutPastePrivilegeSupport.swift
