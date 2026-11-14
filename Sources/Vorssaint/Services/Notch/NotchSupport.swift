@@ -1145,6 +1145,8 @@ final class NotchMirrorModel: ObservableObject {
     /// belongs to the island's display; a copy's peek belongs to the copy whose
     /// pointer waited out the delay, and one copy's peek is not another's.
     @Published private(set) var peeking = false
+    /// A volume/brightness reading copied to this display while another island owns the page.
+    @Published private(set) var levelNotice: NotchNotice?
     var shown = false
     /// The outline last drawn around it, and whether a timer's color tinted it.
     var outline: Bool?
@@ -1179,6 +1181,11 @@ final class NotchMirrorModel: ObservableObject {
     func beginPeek() { peeking = true }
 
     func endPeek() { peeking = false }
+
+    func setLevelNotice(_ notice: NotchNotice?) {
+        guard levelNotice != notice else { return }
+        levelNotice = notice
+    }
 }
 
 /// A choice outlives the gaps in what was chosen, such as a song changing
@@ -1949,6 +1956,16 @@ enum NotchQuickAccessLayout {
             let center = center(index: index, progress: 1, edge: edge, top: top, side: side)
             return hypot(point.x - center.x, point.y - center.y) <= diameter / 2
         }
+    }
+}
+
+/// Routes Sadoyo's own volume/brightness feedback to every island except the one
+/// whose expanded page already presents that reading in its header.
+enum NotchLevelHUDRouting {
+    static func shows(_ event: NotchEvent, on displayID: CGDirectDisplayID,
+                      expandedDisplayID: CGDirectDisplayID?) -> Bool {
+        guard event == .volume || event == .brightness else { return false }
+        return expandedDisplayID != displayID
     }
 }
 

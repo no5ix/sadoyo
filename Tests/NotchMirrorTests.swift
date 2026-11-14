@@ -484,7 +484,56 @@ enum NotchMirrorContract {
         hoverCollapseChecks(suite)
         hoverLifecycleContracts(suite)
         pointerSweepChecks(suite)
+        levelNoticeContracts(suite)
         stripContentContracts(suite)
+    }
+
+    /// Volume and brightness feedback is visible on every island except the one
+    /// whose expanded page already presents the same reading in its header.
+    private static func levelNoticeContracts(_ suite: TestSuite) {
+        for event in [NotchEvent.volume, .brightness] {
+            suite.expect(NotchLevelHUDRouting.shows(event, on: 1, expandedDisplayID: nil)
+                         && NotchLevelHUDRouting.shows(event, on: 2, expandedDisplayID: nil)
+                         && NotchLevelHUDRouting.shows(event, on: 3, expandedDisplayID: nil),
+                         "\(event.rawValue) feedback reaches every display while the island is collapsed")
+            suite.expect(!NotchLevelHUDRouting.shows(event, on: 2, expandedDisplayID: 2)
+                         && NotchLevelHUDRouting.shows(event, on: 1, expandedDisplayID: 2)
+                         && NotchLevelHUDRouting.shows(event, on: 3, expandedDisplayID: 2),
+                         "\(event.rawValue) feedback is suppressed only on the expanded owner, not on its neighbours")
+            suite.expect(!NotchLevelHUDRouting.shows(event, on: 1, expandedDisplayID: 1)
+                         && NotchLevelHUDRouting.shows(event, on: 2, expandedDisplayID: 1)
+                         && NotchLevelHUDRouting.shows(event, on: 3, expandedDisplayID: 1),
+                         "\(event.rawValue) feedback follows the owner when the primary display expands")
+        }
+        suite.expect(!NotchLevelHUDRouting.shows(.battery, on: 2, expandedDisplayID: 1)
+                     && !NotchLevelHUDRouting.shows(.keyboardLight, on: 2, expandedDisplayID: nil),
+                     "level mirroring is limited to volume and display brightness notices")
+
+        let geometry = NotchGeometry(screen: CGRect(x: 100, y: 0, width: 1280, height: 800),
+                                     safeAreaTop: 0, cameraWidth: 0, menuBarHeight: 24, silhouette: .capsule)
+        let mirror = NotchMirrorModel(displayID: 2, geometry: geometry,
+                                      size: geometry.restingSize(showsContent: false))
+        let notice = NotchNotice(event: .volume, title: "Volume", detail: "54%",
+                                 symbol: "speaker.wave.2.fill", level: 0.54)
+        mirror.setLevelNotice(notice)
+        suite.expect(mirror.levelNotice == notice,
+                     "a display mirror publishes its local volume feedback")
+        mirror.setLevelNotice(nil)
+        suite.expect(mirror.levelNotice == nil,
+                     "a display mirror removes level feedback when the reading expires")
+
+        func source(_ path: String) -> String {
+            (try? String(contentsOfFile: path, encoding: .utf8)) ?? ""
+        }
+        let mirrorView = source("Sources/Vorssaint/UI/Notch/NotchMirrorView.swift")
+        let service = source("Sources/Vorssaint/Services/Notch/NotchService.swift")
+        suite.expect(mirrorView.contains("if let notice = mirror.levelNotice")
+                     && mirrorView.contains("NotchCapsuleNoticeView(notice: notice")
+                     && mirrorView.contains("NotchNoticeView(notice: notice"),
+                     "mirrors render the same level notice in both capsule and camera-notch geometry")
+        suite.expect(service.contains("NotchLevelHUDRouting.shows(notice.event, on: displayID")
+                     && service.contains("mirror.model.setLevelNotice(levelNotice)"),
+                     "the service routes one shared reading to all non-owner mirrors")
     }
 
     /// A page cannot outlive the window that drew it, and a display with no copy of

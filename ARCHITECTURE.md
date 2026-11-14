@@ -109,6 +109,8 @@ The page's display is carried by the window that draws it, not by the pointer. E
 
 The Splash strip on the closed island shows only a throughput the engine is measuring in the reading that answers work in hand. A last batch's rate and the lifetime averages are figures of what the engine has done: they belong to the Complete Dashboard, and are never drawn in the closed island. See [0003](docs/decisions/0003-splash-strip-throughput-only-when-at-work.md).
 
+Sadoyo's volume and display-brightness feedback is a shared level notice, not a private macOS HUD: the own island window and every collapsed mirror show it, while the one display carrying an expanded page omits its separate notice because that page's header already presents the reading. The other displays continue to show their local level notice. Keyboard volume and brightness changes enter the same `showVolume` / `showBrightness` path, so they obey the same owner-only suppression rule. Do not globally suppress system feedback or use private HUD APIs; keep the policy scoped to Sadoyo's own per-display island surfaces.
+
 The dashboard's first token's card answers one question, the p50, and draws it as one figure above one purple line. The tail, the p95, is still read from the server, still collected into the live reading, the history, and the chart's window, and is drawn nowhere on the card: the card of one metric (`NotchSplashMetricCard`) draws the figure at the single measure, and no room is kept for the pair that used to sit there. The two throughput cards keep their figure pair and their two lines, and the cache's card is its own reading alone.
 
 ### Menu bar and app panel

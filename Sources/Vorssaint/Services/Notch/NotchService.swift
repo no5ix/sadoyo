@@ -1541,16 +1541,36 @@ final class NotchService: ObservableObject {
     }
 
     /// A notice's own capsule, which it keeps while the island closes around it.
-    func capsuleNoticeSurface(_ notice: NotchNotice) -> CGSize {
+    func capsuleNoticeSurface(_ notice: NotchNotice, geometry override: NotchGeometry? = nil) -> CGSize {
         let layout = NotchCapsuleLayout.self
+        let targetGeometry = override ?? geometry
         guard let content = notice.notification else {
             return layout.surface(content: layout.noticeContent(title: notice.title, detail: notice.detail,
                                                                 level: notice.level != nil),
-                                  maximum: layout.Maximum.notice, geometry: geometry)
+                                  maximum: layout.Maximum.notice, geometry: targetGeometry)
         }
         return layout.surface(content: layout.notificationContent(title: content.compactTitle, message: content.compactDetail,
-                                                                 geometry: geometry),
-                              maximum: layout.Maximum.notification, geometry: geometry)
+                                                                 geometry: targetGeometry),
+                              maximum: layout.Maximum.notification, geometry: targetGeometry)
+    }
+
+    /// A collapsed mirror carries the same level feedback as the island's own
+    /// window. The expanded owner is the only display that does not get a second
+    /// notice: its page already draws this reading in the integrated header.
+    private func mirroredLevelNotice(on displayID: CGDirectDisplayID) -> NotchNotice? {
+        guard let notice,
+              NotchLevelHUDRouting.shows(notice.event, on: displayID, expandedDisplayID: expansion.owner)
+        else { return nil }
+        return notice
+    }
+
+    private func mirrorLevelNoticeSurfaceSize(_ notice: NotchNotice, geometry: NotchGeometry) -> CGSize {
+        if geometry.floats {
+            return capsuleNoticeSurface(notice, geometry: geometry)
+        }
+        let wings = notice.wings(in: geometry)
+        return CGSize(width: wings.leading + geometry.noticeCameraGap + wings.trailing,
+                      height: geometry.stripHeight)
     }
 
     /// The closed strip an activity takes on its own: a capsule as wide as
@@ -4121,10 +4141,12 @@ final class NotchService: ObservableObject {
             // and a copy naming it while another display draws it is a name over
             // a page that has gone.
             let peeking = !presents && expansion.owner == nil && mirrors[id]?.model.peeking == true
-            let (strip, size) = presents
+            let (strip, restingSize) = presents
                 ? (base, expandedSize)
                 : peeking ? (base, base.peek)
                 : mirrorSurface(on: base, activity: activity)
+            let levelNotice = presents ? nil : mirroredLevelNotice(on: id)
+            let size = levelNotice.map { mirrorLevelNoticeSurfaceSize($0, geometry: base) } ?? restingSize
             let mirror = mirrors[id] ?? makeMirror(id: id, geometry: base, size: size)
             mirrors[id] = mirror
             if mirror.model.outline != outline || mirror.model.timerOutline != (activity == .timer) {
@@ -4138,6 +4160,7 @@ final class NotchService: ObservableObject {
             let previous = mirror.model.activity
             let changed = mirror.model.update(geometry: base, strip: strip, size: size, activity: activity,
                                               expanded: presents, peeking: peeking)
+            mirror.model.setLevelNotice(levelNotice)
             let grewUnderPointer = mirror.lastSize != size
             mirror.lastSize = size
             mirror.host.panel.acceptsKeyFocus = presents
