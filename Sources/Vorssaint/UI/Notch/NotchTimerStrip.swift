@@ -186,13 +186,6 @@ struct NotchCompanionMark: View {
                 .onChange(of: NotchAgentSupport.readingShape(splashSpeedText)) { _, _ in
                     DispatchQueue.main.async { service.refreshPresentation() }
                 }
-        case .timer:
-            // The countdown's own mark, as the timer strip leads with it: the
-            // finished check, the paused clock, the count up, the countdown.
-            Image(systemName: timer.session.completed ? "checkmark.circle"
-                  : timer.session.isPaused ? "pause.circle" : timer.session.countsUp ? "stopwatch" : "timer")
-                .font(.system(size: Self.iconSize(geometry), weight: .medium))
-                .foregroundStyle(.orange)
         case .watch:
             // The watch's mark, as its own strip leads with it.
             Image(systemName: NotchModule.watch.symbol)
