@@ -1,3 +1,10 @@
+
+# no5ix - how to build and path
+
+1. in the project root path, `./build.sh`
+2. then `open "./build/stage/Sadoyo.app"`
+
+
 # Sadoyo (a Vorssaint fork)
 
 This repository builds **Sadoyo**, a fork of Vorssaint. The installed app carries
