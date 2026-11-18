@@ -88,6 +88,9 @@ final class MiddleClickService: ObservableObject {
     private var tapStartPosition: (x: Float, y: Float)?
     private var tapStartSpread: Float?
     private var tapMaxMovement: Float = 0
+    private var tapMaxHorizontalMovement: Float = 0
+    private var tapMaxVerticalMovement: Float = 0
+    private var tapSwipeDismissed = false
     private var tapMaxSpreadChange: Float = 0
     private var tapExceededCount = false
     private var tapSawButton = false
@@ -418,15 +421,33 @@ final class MiddleClickService: ObservableObject {
                 tapStartPosition = geometry?.center
                 tapStartSpread = geometry?.spread
                 tapMaxMovement = 0
+                tapMaxHorizontalMovement = 0
+                tapMaxVerticalMovement = 0
+                tapSwipeDismissed = false
                 tapMaxSpreadChange = 0
                 tapSawButton = false
                 tapPositionUnavailable = geometry == nil
             } else if count < tapCandidateFingers {
                 // A finger lifting from a larger tap leaves the candidate alone.
             } else if let start = tapStartPosition, let geometry {
-                tapMaxMovement = max(tapMaxMovement,
-                                     max(abs(geometry.center.x - start.x),
-                                         abs(geometry.center.y - start.y)))
+                let horizontalMovement = abs(geometry.center.x - start.x)
+                let verticalMovement = abs(geometry.center.y - start.y)
+                tapMaxHorizontalMovement = max(tapMaxHorizontalMovement, horizontalMovement)
+                tapMaxVerticalMovement = max(tapMaxVerticalMovement, verticalMovement)
+                tapMaxMovement = max(tapMaxMovement, max(horizontalMovement, verticalMovement))
+
+                // A four-finger horizontal swipe is the native Spaces gesture.
+                // Cancel the tap as soon as horizontal travel clearly wins, and
+                // dismiss an already-open wheel before macOS starts sliding.
+                if tapCandidateFingers == 4, !tapSwipeDismissed,
+                   tapMaxHorizontalMovement > MiddleClickSupport.tapMovementLimit,
+                   tapMaxHorizontalMovement > tapMaxVerticalMovement {
+                    tapSwipeDismissed = true
+                    tapExceededCount = true
+                    DispatchQueue.main.async {
+                        RadialMenuService.shared.dismissForTrackpadSpaceSwipe()
+                    }
+                }
                 if let startSpread = tapStartSpread {
                     tapMaxSpreadChange = max(tapMaxSpreadChange,
                                              abs(geometry.spread - startSpread))
@@ -446,6 +467,9 @@ final class MiddleClickService: ObservableObject {
         tapStartPosition = nil
         tapStartSpread = nil
         tapMaxMovement = 0
+        tapMaxHorizontalMovement = 0
+        tapMaxVerticalMovement = 0
+        tapSwipeDismissed = false
         tapMaxSpreadChange = 0
         tapExceededCount = false
         tapSawButton = false
