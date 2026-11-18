@@ -666,9 +666,10 @@ final class RadialMenuService: ObservableObject {
             // A short grace period avoids closing while the pointer is crossing
             // the edge between adjacent slices or returning from a small miss.
             let dismissal = DispatchWorkItem { [weak self] in
-                guard let self, self.sessionActive,
-                      !Self.pointerInsideWheel(self.wheelCenter) else { return }
+                guard let self else { return }
                 self.pointerExitDismissal = nil
+                guard self.sessionActive,
+                      !Self.pointerInsideWheel(self.wheelCenter) else { return }
                 self.endSession()
             }
             pointerExitDismissal = dismissal
