@@ -6,13 +6,12 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 /// Settings > Radial menu: profiles, colors, shortcuts, the master switch,
-/// opening behavior, placement and list of actions per profile.
+/// opening behavior and list of actions per profile.
 struct RadialMenuSettings: View {
     @ObservedObject private var l10n = L10n.shared
     @ObservedObject private var permissions = Permissions.shared
     @ObservedObject private var service = RadialMenuService.shared
     @AppStorage(DefaultsKey.radialMenuEnabled) private var enabled = false
-    @AppStorage(DefaultsKey.radialMenuAtPointer) private var atPointer = true
     @AppStorage(DefaultsKey.radialMenuActivationMode) private var activationModeRaw =
         RadialMenuActivationMode.pressOrHold.rawValue
     @AppStorage(DefaultsKey.middleClickEnabled) private var middleClickEnabled = false
@@ -85,11 +84,6 @@ struct RadialMenuSettings: View {
                 Text(text.activationModeCaption)
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Picker(text.positionLabel, selection: $atPointer) {
-                    Text(text.positionPointer).tag(true)
-                    Text(text.positionCenter).tag(false)
-                }
-                .pickerStyle(.segmented)
                 Button(text.tryButton) {
                     RadialMenuService.shared.presentPreview(for: selectedProfile)
                 }
