@@ -71,6 +71,7 @@ final class RadialMenuService: ObservableObject {
     private var mouseTap: CFMachPort?
     private var mouseTapSource: CFRunLoopSource?
     private var eventMonitors: [Any] = []
+    private var pointerExitDismissal: DispatchWorkItem?
     private var activationObserver: NSObjectProtocol?
     private var promptedForAccessibility = false
     private let dismissal = PanelDismissal()
@@ -438,6 +439,8 @@ final class RadialMenuService: ObservableObject {
     private func endSession() {
         // A closing already under way finishes on its own.
         if dismissal.isActive { return }
+        pointerExitDismissal?.cancel()
+        pointerExitDismissal = nil
         removeMonitors()
         stopTrackingSuperKeyHold()
         guard let panel, panel.isVisible, !stack.isEmpty else {
@@ -514,6 +517,14 @@ final class RadialMenuService: ObservableObject {
                                                         deadZoneRadius: RadialMenuLayout.deadZoneRadius,
                                                         itemCount: currentItems.count)
         if index != highlightedIndex { highlightedIndex = index }
+    }
+
+    /// A horizontal four-finger trackpad swipe belongs to macOS Spaces, not
+    /// the radial menu. Dismiss any wheel already visible before the Space
+    /// transition begins.
+    func dismissForTrackpadSpaceSwipe() {
+        guard sessionActive else { return }
+        endSession()
     }
 
     /// The wheel view's tap. Where the click lands decides: past the wheel's
@@ -647,6 +658,30 @@ final class RadialMenuService: ObservableObject {
         // settles it. Button-held sessions end through the tap instead.
         if holdPhase, holdButton == nil { handleFlagsChanged(NSEvent.modifierFlags) }
         refreshHighlight()
+
+        if Self.pointerInsideWheel(wheelCenter) {
+            pointerExitDismissal?.cancel()
+            pointerExitDismissal = nil
+        } else if pointerExitDismissal == nil {
+            // A short grace period avoids closing while the pointer is crossing
+            // the edge between adjacent slices or returning from a small miss.
+            let dismissal = DispatchWorkItem { [weak self] in
+                guard let self, self.sessionActive,
+                      !Self.pointerInsideWheel(self.wheelCenter) else { return }
+                self.pointerExitDismissal = nil
+                self.endSession()
+            }
+            pointerExitDismissal = dismissal
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: dismissal)
+        }
+    }
+
+    private static func pointerInsideWheel(_ center: CGPoint) -> Bool {
+        let pointer = NSEvent.mouseLocation
+        let dx = pointer.x - center.x
+        let dy = pointer.y - center.y
+        let radius = RadialMenuLayout.wheelDiameter / 2 + 8
+        return dx * dx + dy * dy <= radius * radius
     }
 
     private func handleFlagsChanged(_ flags: NSEvent.ModifierFlags) {
