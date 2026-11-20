@@ -1438,7 +1438,8 @@ final class NotchService: ObservableObject {
         // the surface is the closed strip, and its notice, and its rest.
         if expanded, presentsExpansion(on: displayID) { return showingCommandBar ? commandBarSurfaceSize : expandedSize }
         if dragPlaceholder { return CGSize(width: geometry.peek.width, height: geometry.safeContentTop + 66) }
-        if let notice {
+        if let notice,
+           NotchLevelHUDRouting.shows(notice.event, on: displayID ?? 0, expandedDisplayID: expansion.owner) {
             guard noticeExpanded else { return geometry.noticeSize(wings: notice.wings(in: geometry)) }
             return geometry.notificationPreviewSize(
                 contentHeight: notice.previewContentHeight(width: geometry.notificationPreviewContentWidth))
@@ -3463,7 +3464,14 @@ final class NotchService: ObservableObject {
             removeScreenEdgeClickMonitors()
             return
         }
-        let open = (expanded && presentsExpansion(on: displayID)) || peeking || notice != nil
+        // The expanded owner's page already presents the level reading in its
+        // integrated controls. Keep the shared notice for collapsed displays, but
+        // do not let it create a second standalone HUD on the page's display.
+        let showsOwnLevelNotice = notice.map {
+            NotchLevelHUDRouting.shows($0.event, on: displayID ?? 0, expandedDisplayID: expansion.owner)
+        } ?? false
+        let open = (expanded && presentsExpansion(on: displayID)) || peeking
+            || (notice != nil && showsOwnLevelNotice)
             || dragPlaceholder || captureControls != nil
         guard open || (!hiddenAtRestInFullscreen && (geometry.isNotched || geometry.compactSideRoom != nil)) else {
             finishMusicDeparture()

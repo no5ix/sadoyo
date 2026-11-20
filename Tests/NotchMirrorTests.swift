@@ -508,6 +508,11 @@ enum NotchMirrorContract {
         suite.expect(!NotchLevelHUDRouting.shows(.battery, on: 2, expandedDisplayID: 1)
                      && !NotchLevelHUDRouting.shows(.keyboardLight, on: 2, expandedDisplayID: nil),
                      "level mirroring is limited to volume and display brightness notices")
+        suite.expect(!NotchLevelHUDRouting.shows(.volume, on: 1, expandedDisplayID: 1)
+                     && NotchLevelHUDRouting.shows(.volume, on: 2, expandedDisplayID: 1)
+                     && NotchLevelHUDRouting.shows(.brightness, on: 1, expandedDisplayID: 2)
+                     && !NotchLevelHUDRouting.shows(.brightness, on: 2, expandedDisplayID: 2),
+                     "the own island and every mirror suppress only the expanded owner's standalone level HUD")
 
         let geometry = NotchGeometry(screen: CGRect(x: 100, y: 0, width: 1280, height: 800),
                                      safeAreaTop: 0, cameraWidth: 0, menuBarHeight: 24, silhouette: .capsule)
@@ -534,6 +539,10 @@ enum NotchMirrorContract {
         suite.expect(service.contains("NotchLevelHUDRouting.shows(notice.event, on: displayID")
                      && service.contains("mirror.model.setLevelNotice(levelNotice)"),
                      "the service routes one shared reading to all non-owner mirrors")
+        suite.expect(service.contains("let showsOwnLevelNotice = notice.map")
+                     && service.contains("notice != nil && showsOwnLevelNotice")
+                     && service.contains("NotchLevelHUDRouting.shows(notice.event, on: displayID ?? 0"),
+                     "the primary island applies the same expanded-owner suppression as mirrored islands")
     }
 
     /// A page cannot outlive the window that drew it, and a display with no copy of
