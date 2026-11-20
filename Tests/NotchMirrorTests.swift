@@ -946,7 +946,7 @@ enum NotchMirrorContract {
         suite.expect(facts(inside: true, deadline: false, suppressed: true).followsPointer,
                      "a press's suppression ends at a leaving that may go unreported, so it is followed")
         suite.expect(facts(inside: false, deadline: false, page: true, openedByPointer: false).followsPointer,
-                     "a click-opened page continues following the pointer so exit can collapse it")
+                     "a click-opened page continues following the pointer after an exit so the close deadline can settle")
         suite.expect(facts(inside: true, deadline: false, peek: true).followsPointer,
                      "a page's name is kept by the pointer's staying, on every display alike")
 

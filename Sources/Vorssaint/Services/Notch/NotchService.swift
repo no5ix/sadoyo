@@ -4311,13 +4311,13 @@ final class NotchService: ObservableObject {
         if wasInside == mirror.inside, let work = mirror.hoverWork, !work.isCancelled { return }
         mirror.cancelHoverWork()
         if !mirror.inside {
-            // Out of a copy, the answer the island's own pointer exit gets: the
-            // peek taken back, and the page this copy's hover opened closed. A
-            // page this copy's click opened stays, as it stays on the island, and
-            // a page another display carries is not this copy's to close. Like the
-            // island's own exit, this is asked whenever the pointer is found out of
-            // the island with something to close, so a leaving AppKit dropped is
-            // still closed by the next report of the pointer.
+            // Out of a copy, the answer the island's own pointer exit gets:
+            // the peek taken back, or any expanded page this display carries
+            // closed. Opening by click is not Keep Open, and a page another display
+            // carries is not this copy's to close. Like the island's own exit, this
+            // is asked whenever the pointer is found out of the island with
+            // something to close, so a leaving AppKit dropped is still closed by
+            // the next report of the pointer.
             guard NotchSupport.closesOnPointerExit(expanded: carriesPage(mirror),
                                                    peeking: mirror.model.peeking,
                                                    openedByHover: openedByHover) else { return }
@@ -4369,10 +4369,9 @@ final class NotchService: ObservableObject {
                 self.provideHapticFeedback()
                 return
             }
-            // The page, opened the way the island opens it on a hover: no focus
-            // taken, and the page records that a pointer asked for it. That record
-            // is what lets this copy's pointer leaving close it, and a click's
-            // opening stay open - the one distinction the island's own hover keeps.
+            // Open without taking focus, but use the same dismissal lifecycle
+            // as every other page: the copy's pointer exit closes it, regardless
+            // of how a page was opened elsewhere.
             self.open(takeFocus: false, wholeDashboard: true, on: mirror.id)
             self.provideHapticFeedback()
         }
@@ -4407,12 +4406,9 @@ final class NotchService: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
     }
 
-    /// The close a copy's pointer asked for: the peek taken back, or the page that
-    /// copy's hover opened closed, after the pause the person chose. The island's
-    /// own close asks its questions again when the deadline fires, and so do these,
-    /// of this copy: the pointer is not back on that island, that island's news is
-    /// still one a pointer may close, and the page is still the display's that
-    /// asked for it.
+    /// The close a copy's pointer asked for: the peek taken back, or any expanded
+    /// page this copy carries closed after the configured pause. Opening by click
+    /// does not exempt the page; the explicit pin is checked separately.
     private func scheduleMirrorClose(_ mirror: NotchMirror) {
         mirror.cancelHoverWork()
         let work = DispatchWorkItem { [weak self] in

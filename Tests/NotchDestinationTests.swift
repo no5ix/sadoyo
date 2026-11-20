@@ -1342,7 +1342,7 @@ enum NotchDestinationContract {
     private static func pageProvenanceContracts(_ suite: TestSuite) {
         let current = ReviewDefaults.current!
         /// The island on its own display, with a copy's window on each of two
-        /// others, opened as the pointer opens it: no keyboard taken.
+        /// others, opened by hover without taking keyboard focus.
         func hovered(_ display: CGDirectDisplayID) -> Service {
             let service = Service()
             service.displayID = 1
