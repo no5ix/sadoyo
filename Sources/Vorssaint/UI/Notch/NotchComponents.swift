@@ -771,9 +771,9 @@ struct NotchSectionMark: View {
     /// The size of the mark, which the surface names: a card's title line, a
     /// gallery's tile, a page's empty state.
     var size: CGFloat
-    /// The colour, where the surface has one of its own. `nil` leaves the mark
-    /// the colour of the thing it stands for - the Codex knot its blue, a
-    /// symbol the tint the gallery's tiles wear.
+    /// The colour, where the surface has one of its own. `nil` leaves a section
+    /// mark in its provider's own colour, as with Splash's warm orange Claude mark;
+    /// ordinary SF Symbols use the tint the gallery's tiles wear.
     var tint: Color? = nil
 
     /// The gap a surface leaves between a mark and the name beside it, or under

@@ -2,7 +2,7 @@
 
 - Status: accepted
 - Date: 2026-11-20
-- Affects: `NotchSupport.closesOnPointerExit`, the island's `hover(_:) `, every
+- Affects: `NotchSupport.closesOnPointerExit`, the island's `hover(_:)`, every
   copy's `mirrorHover(_:entered:)`, `NotchService.syncHoverExitMonitoring`,
   `NotchService.mirrorFollowsPointer`, and explicit Keep Open handling
 - Supersedes: the hover-versus-click dismissal distinction in [0006](0006-a-page-the-pointer-opened-stays-the-pointers-page.md)
