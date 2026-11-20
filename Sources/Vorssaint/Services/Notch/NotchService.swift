@@ -2087,15 +2087,11 @@ final class NotchService: ObservableObject {
             if pinned { self.pinned = true }
             selectedMetric = metric
             peeking = false
-            // The act that opened the island owns the page, and it is answered
-            // once, at the opening. A page reached from inside an island the
-            // pointer opened is still the pointer's page - the card, the tile,
-            // the gallery, the panel and the pad each take the keyboard, which
-            // is a separate question from who opened the island - so the
-            // pointer's leaving closes the page it opened, whatever page that
-            // page has become. Only an opening from the closed strip answers to
-            // the keyboard: a click's page stays, and the pin is the way to
-            // keep a page the pointer has left.
+            // Keep opening provenance for activation handling, but do not let
+            // it change pointer-exit behavior. Hover-opened pages, click-opened
+            // pages, and every page reached from inside one all collapse when
+            // the pointer leaves the complete interactive surface. Keep Open is
+            // the only intentional way to keep a page after the pointer leaves.
             openedByHover = NotchSupport.openedByHover(opening: !expanded,
                                                        wasOpenedByHover: openedByHover,
                                                        takeFocus: takeFocus)

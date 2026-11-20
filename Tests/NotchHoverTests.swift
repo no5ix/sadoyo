@@ -576,6 +576,11 @@ enum NotchHoverTests {
                      && !NotchSupport.openedByHover(opening: false, wasOpenedByHover: false, takeFocus: false)
                      && !NotchSupport.openedByHover(opening: false, wasOpenedByHover: false, takeFocus: true),
                      "the opening answers why the island is open, and a step inside the open page keeps that answer whatever keyboard it takes")
+        suite.expect(NotchSupport.closesOnPointerExit(expanded: true, peeking: false, openedByHover: true)
+                     && NotchSupport.closesOnPointerExit(expanded: true, peeking: false, openedByHover: false)
+                     && NotchSupport.closesOnPointerExit(expanded: false, peeking: true, openedByHover: false)
+                     && !NotchSupport.closesOnPointerExit(expanded: false, peeking: false, openedByHover: false),
+                     "every expanded page collapses on pointer exit regardless of opening method or page content")
 
         // A hover, a card's click, and the pointer's leaving: one page, one close.
         let service = fresh()
@@ -636,15 +641,18 @@ enum NotchHoverTests {
         DispatchQueue.main.advance(0.36)
         suite.expect(pinned.closures == 1, "and the page goes at the chosen pause")
 
-        // An island the person opened with a click keeps its pages over a leaving,
-        // as the strip it opened from keeps them, and a step inside changes nothing.
+        // A page opened by a click follows the same pointer-exit rule as a
+        // page opened by hover. Opening is not Keep Open.
         let clicked = fresh()
         clicked.open(nil, takeFocus: true, on: nil)
         clicked.open(nil, takeFocus: true, on: nil)
-        suite.expect(!clicked.openedByHover && clicked.expanded, "a click's opening, and every step inside it, answer no pointer")
+        suite.expect(!clicked.openedByHover && clicked.expanded, "a click's opening retains its provenance")
         away()
         clicked.hover(false)
-        suite.expect(clicked.hoverWork == nil && clicked.expanded, "leaving a click's page asks for no close")
+        suite.expect(clicked.hoverWork != nil, "leaving a click-opened page schedules the same automatic close")
+        DispatchQueue.main.advance(0.36)
+        suite.expect(clicked.closures == 1 && !clicked.expanded && clicked.expansion.owner == nil,
+                     "a click-opened page collapses after the configured pointer-exit delay")
 
         // The same lifecycle on a copy: the page stays on the display whose island
         // was used, is the only page, and closes at that display's own leaving.

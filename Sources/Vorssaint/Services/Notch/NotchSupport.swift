@@ -2434,31 +2434,21 @@ enum NotchSupport {
             + (AppFeature.connectedDevices.isAvailable(in: defaults) ? 1 : 0)
     }
 
-    /// Direct openings are dismissed explicitly, never by the pointer's
-    /// initial position at the menu bar or in the application being used.
-    static func closesOnPointerExit(expanded: Bool, peeking: Bool, openedByHover: Bool) -> Bool {
-        peeking || (expanded && openedByHover)
+    /// Every expanded page follows the pointer out of its complete interactive
+    /// surface, regardless of whether it was opened by hover, a click on the
+    /// strip, or navigation inside another page. Content and opening provenance
+    /// never turn an ordinary page into Keep Open; the explicit pin is checked
+    /// by the owning service before it schedules or performs a collapse.
+    static func closesOnPointerExit(expanded: Bool, peeking: Bool, openedByHover _: Bool) -> Bool {
+        peeking || expanded
     }
 
-    /// Why the island is open, kept as the person moves through its pages.
-    ///
-    /// The act that opened the island answers this, and the pages reached from
-    /// inside an open island are that act's pages. A page the pointer's hover
-    /// opened stays the pointer's page: the leaving that closes the island
-    /// closes it too, and the page it grew into - a reading's detail, the
-    /// gallery, a section, the panel, the pad - is no less the pointer's for
-    /// having been asked for by a card. `takeFocus` answers a different
-    /// question, who is handed the keyboard, and a card, a tile, the gallery,
-    /// the panel and the pad are each handed it without any of them being a
-    /// click on the strip. Reading the reason for the opening from `takeFocus`
-    /// again on every navigation turned a page the pointer opened into a page a
-    /// click opened, and the island stayed grown after the pointer left it:
-    /// opening a page is not pinning it, and a click on a card is not Keep Open.
-    ///
-    /// A page opened from the closed strip keeps its own answer, unchanged: a
-    /// click's page stays while the person leaves it, as the strip it was
-    /// opened from stays, and only the pin - the Keep Open the person chose -
-    /// keeps a page the pointer left open.
+    /// Records how the island was first opened. This provenance remains useful
+    /// for application-activation handling, but it does not control pointer-exit
+    /// dismissal: every expanded page follows the same exit rule, regardless of
+    /// whether the user hovered or clicked to open it. `takeFocus` is a separate
+    /// keyboard-focus choice, and a step inside an open page preserves the
+    /// original provenance rather than treating that step as a new opening.
     static func openedByHover(opening: Bool, wasOpenedByHover: Bool, takeFocus: Bool) -> Bool {
         opening ? !takeFocus : wasOpenedByHover
     }

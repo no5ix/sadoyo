@@ -28,10 +28,11 @@
     click, or a hover that stayed past the chosen delay. It clears nothing by force and
     moves nothing: the copy keeps its display and draws the page there.
     `bringIsland(to:)` is gone, and no window changes display.
-  - A copy answers the pointer's leaving as the island answers its own. A page a copy's
-    *hover* opened closes, at the person's close delay, when that copy's pointer leaves;
-    a page its *click* opened stays, as it stays on the island's own strip; and a page
-    another display carries is not this copy's to close. The same choice the island reads
+  - A copy answers the pointer's leaving as the island answers its own. Every
+    expanded page it carries closes, at the person's close delay, when that copy's
+    pointer leaves the whole interactive region, regardless of whether hover, a click,
+    or navigation inside a page opened it. Only an explicit Keep Open pin holds it open;
+    a page another display carries is not this copy's to close. The same choice the island reads
     (`notchHoverExpands`) is read for the copy: the whole dashboard, or the peek of the
     page's name - which a copy draws at its own display's measure, keeps as its own door,
     and takes back when the pointer leaves. A surface that grew under a pointer that has
@@ -81,9 +82,9 @@
   - Leaving is measured against the whole interactive region, not the compact strip:
     `NotchWindowHost.containsHover` asks a window's *destination* bounds, so the open page
     and a peek are part of the region the pointer is inside. A pointer that moves from the
-    closed strip into the page a hover opened is inside, and the page stays; it closes
-    when the pointer leaves the whole of it. Every display answers this the same, and no
-    display is given a collapse timer of its own.
+    closed strip into an expanded page is inside, and the page stays; it collapses when the
+    pointer leaves the whole of it, whether that page was opened by hover or click. Every
+    display answers this the same, and no display is given a collapse timer of its own.
   - The closed island's content is one answer, in `NotchService.stripContent`
     (`NotchStripContent`): the pair of activities, and whether the song is named between
     the wings. Every window of the island draws that content, so the strip a person sees

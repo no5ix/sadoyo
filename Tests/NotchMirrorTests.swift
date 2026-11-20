@@ -486,6 +486,7 @@ enum NotchMirrorContract {
         pointerSweepChecks(suite)
         levelNoticeContracts(suite)
         stripContentContracts(suite)
+        splashMarkContracts(suite)
     }
 
     /// Volume and brightness feedback is visible on every island except the one
@@ -619,10 +620,9 @@ enum NotchMirrorContract {
                      "a page opened on a second copy closes the first, and no two copies draw a page")
     }
 
-    /// A copy's pointer, and what its leaving closes: the page its hover opened,
-    /// and the peek it asked for. A page its click opened is a deliberate act and
-    /// stays, as it stays on the island's own strip, and a page another display
-    /// carries is not this copy's to close.
+    /// A copy's pointer, and what its leaving closes: every page it carries,
+    /// regardless of whether hover, a click, or navigation inside a page opened it.
+    /// A page another display carries is not this copy's to close.
     private static func pointerExitContracts(_ suite: TestSuite) {
         let builtIn = NSScreen(1, CGRect(x: 0, y: 0, width: 1470, height: 956), notched: true)
         let external = NSScreen(2, CGRect(x: 1470, y: -86, width: 1920, height: 1080))
@@ -699,17 +699,22 @@ enum NotchMirrorContract {
         suite.expect(service.pointerWatchMonitors.isEmpty,
                      "the pointer's moves are followed no more when no copy has anything left to close")
 
-        // A page this copy's click opened is a deliberate act: leaving it closes
-        // nothing, and nothing is followed.
+        // A page this copy's click opened follows the same pointer-exit rule.
+        // Its origin remains recorded, but opening by click is not Keep Open.
         copy?.over = true
         copy?.host.activate?()
         service.syncMirrors()
         suite.expect(service.expansion.owner == 2 && !service.openedByHover && copy?.model.expanded == true,
-                     "a click on a copy opens the page there as a deliberate act")
+                     "a click on a copy opens the page there and retains its origin")
         copy?.over = false
         copy?.host.hoverHandler?(false)
-        suite.expect(copy?.hoverWork == nil && service.expansion.owner == 2 && service.pointerWatchMonitors.isEmpty,
-                     "leaving a page a click opened closes nothing and follows nothing")
+        suite.expect(copy?.hoverWork != nil && service.pointerWatchMonitors.count == 2,
+                     "leaving a click-opened copy schedules collapse and follows the pointer")
+        copy?.runHoverWork()
+        service.syncMirrors()
+        suite.expect(service.expansion.owner == nil && copy?.model.expanded == false
+                     && service.pointerWatchMonitors.isEmpty,
+                     "the click-opened page collapses on its own display after pointer exit")
 
         // A card inside the page this copy's *hover* opened: the page grows, the
         // keyboard moves to it, and the pointer's claim on this display's page is
@@ -936,6 +941,8 @@ enum NotchMirrorContract {
                      "an open page is followed while the pointer rests inside the whole island")
         suite.expect(!facts(inside: false, deadline: false).followsPointer,
                      "a pointer that has gone, with nothing left open, is followed no more")
+        suite.expect(facts(inside: true, deadline: false, page: true, openedByPointer: false).followsPointer,
+                     "a click-opened page is followed too, so its pointer exit can collapse it")
         suite.expect(facts(inside: true, deadline: false, suppressed: true).followsPointer,
                      "a press's suppression ends at a leaving that may go unreported, so it is followed")
         suite.expect(!facts(inside: false, deadline: false, page: true, openedByPointer: false).followsPointer,
@@ -1471,6 +1478,14 @@ enum NotchMirrorContract {
     /// surface. The screen, the window's frame, the strip's measure, the
     /// pointer's place, and which window holds the one open page stay each
     /// display's own.
+    private static func splashMarkContracts(_ suite: TestSuite) {
+        let source = (try? String(contentsOfFile: "Sources/Vorssaint/UI/Notch/NotchComponents.swift",
+                                  encoding: .utf8)) ?? ""
+        suite.expect(source.contains("AgentProvider.claude.markScale")
+                     && source.contains("NotchAgentMark(provider: .claude, size: size, tint: nil)"),
+                     "Splash reuses the same orange Claude mark used by the AI Agents page")
+    }
+
     private static func stripContentContracts(_ suite: TestSuite) {
         func source(_ path: String) -> String { (try? String(contentsOfFile: path, encoding: .utf8)) ?? "" }
 

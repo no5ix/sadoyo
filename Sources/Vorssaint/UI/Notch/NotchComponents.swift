@@ -762,12 +762,10 @@ private final class NotchTranslucentView: NSVisualEffectView {
 /// The mark a section wears, in one view, at the size the surface asks for.
 ///
 /// Most sections wear the SF Symbol the section has always carried. Splash
-/// wears the Codex mark the AI page draws — the mark that app shows in the
-/// Mac's menu bar, or its icon where the app is not installed, and a symbol
-/// where neither is to be had — because the section reads that machine's
-/// engine, and the reference draws it with that knot. The same view is used by
-/// the card, the gallery's tile and the page's empty state, so the size,
-/// colour and alignment of one section are one answer everywhere.
+/// reuses Claude's mark from the AI Agents page — the same menu-bar artwork or
+/// app icon, with the same sparkle fallback when the Claude app is unavailable.
+/// The same view is used by the card, the gallery's tile, the page's empty state,
+/// and the collapsed strip, so Splash has one mark everywhere.
 struct NotchSectionMark: View {
     let module: NotchModule
     /// The size of the mark, which the surface names: a card's title line, a
@@ -791,14 +789,14 @@ struct NotchSectionMark: View {
     /// surface left for it. Reserving what is drawn keeps the gap the surface's
     /// own, at every size and in every surface.
     static func side(size: CGFloat, module: NotchModule) -> CGFloat {
-        module == .splash ? size * AgentProvider.codex.markScale : size
+        module == .splash ? size * AgentProvider.claude.markScale : size
     }
 
     var body: some View {
         let side = Self.side(size: size, module: module)
         Group {
             if module == .splash {
-                NotchAgentMark(provider: .codex, size: size, tint: tint)
+                NotchAgentMark(provider: .claude, size: size, tint: nil)
                     .frame(width: side, height: side)
             } else {
                 Image(systemName: module.symbol)

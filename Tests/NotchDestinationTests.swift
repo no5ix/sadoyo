@@ -1335,17 +1335,10 @@ enum NotchDestinationContract {
                      "the panel page opened at a reading by a bar click opens on that display")
     }
 
-    /// Why the island is open, kept through every page it opens.
-    ///
-    /// The pointer's hover opened the island. A reading's card, a gallery tile,
-    /// Explorer, the app panel, the whole dashboard, the pad, the clipboard, the
-    /// shelf and the quick panel each take the keyboard for themselves, and none
-    /// of them is a click on the strip and none is the pin. The page they open is
-    /// therefore still the page the pointer opened, and the leaving of the whole
-    /// surface the island answers is the leaving that closes it - which is what
-    /// `closesOnPointerExit` answers for the island's own hover and for every
-    /// copy's. A page that answers false after a card was tapped is the bug this
-    /// contract keeps, and it is the same answer on every display.
+    /// Every expanded page follows the pointer out of the complete interactive
+    /// surface, whether the island was first opened by hover or click and whatever
+    /// page was reached inside it. Keep Open is the explicit exception. The display
+    /// that owns the page remains the only display that may close it.
     private static func pageProvenanceContracts(_ suite: TestSuite) {
         let current = ReviewDefaults.current!
         /// The island on its own display, with a copy's window on each of two
@@ -1358,8 +1351,8 @@ enum NotchDestinationContract {
             service.open(takeFocus: false, on: display)
             return service
         }
-        /// An island the person opened with a click: the same routes, the other
-        /// answer, kept as the strip it was opened from keeps it.
+        /// An island the person opened with a click: the same routes and the
+        /// same pointer-exit rule as an island first opened by hover.
         func clicked(_ display: CGDirectDisplayID) -> Service {
             let service = Service()
             service.displayID = 1
@@ -1427,15 +1420,15 @@ enum NotchDestinationContract {
                              && page.expansion.owner == display && drawing(page) == [display],
                              "the \(module.rawValue) page opened from the pointer's page on display \(display) is closed by the pointer's leaving")
             }
-            // The same routes from a click's island keep the click's answer: a step
-            // inside an open page answers no pointer, and closes nothing.
+            // The same routes from a click's island still close when the
+            // pointer leaves. Opening a page by click is not Keep Open.
             for (name, gate, route, opened) in routes {
                 let page = clicked(display)
                 route(page, display)
                 if gate() {
-                    suite.expect(page.expanded && opened(page) && !page.openedByHover && !closesOnLeaving(page)
+                    suite.expect(page.expanded && opened(page) && !page.openedByHover && closesOnLeaving(page)
                                  && page.expansion.owner == display && drawing(page) == [display],
-                                 "the \(name) opened from a click's page on display \(display) keeps the click's answer and that display")
+                                 "the \(name) opened from a click's page on display \(display) keeps its display and collapses on pointer exit")
                 } else {
                     suite.expect(!page.openedByHover, "a \(name) the preferences keep off changes nothing on a click's page")
                 }

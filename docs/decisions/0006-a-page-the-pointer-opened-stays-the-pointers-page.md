@@ -1,9 +1,11 @@
 # 0006. A page the pointer opened stays the pointer's page
 
-- Status: accepted
+- Status: superseded by [0008](0008-every-expanded-page-collapses-on-pointer-exit.md)
 - Date: 2026-11-13
 - Affects: `NotchService.open`, `NotchService.retireExpansion`, `NotchSupport.openedByHover`,
   `NotchSupport.closesOnPointerExit`, the island's hover and every copy's hover, the pin
+
+- Superseded by: [0008. Every expanded page collapses on pointer exit](0008-every-expanded-page-collapses-on-pointer-exit.md). The provenance distinction remains useful for activation handling, but no longer changes pointer-exit dismissal.
 
 ## Context
 
