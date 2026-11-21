@@ -219,8 +219,7 @@ final class NotchService: ObservableObject {
     private var musicDepartureWork: DispatchWorkItem?
     private var presentedMusic: NotchCompactMusicSnapshot?
     private var trackWork: DispatchWorkItem?
-    /// A new song with no strip song to keep in its place stays out of the
-    /// closed island until its notice, as scheduleTrackNotice() explains.
+    /// Track changes leave the music strip visible and update it in place.
     private var awaitsTrackNotice = false
     private var powerSource: CFRunLoopSource?
     private var powerSampler: PowerSampler?
@@ -329,8 +328,6 @@ final class NotchService: ObservableObject {
     /// Every other display has its own island window: it answers the pointer on
     /// its own display, and draws the open page where that display was opened.
     private var showsOnAllDisplays = false
-    /// A capsule names a song only for a moment as it starts.
-    @Published private(set) var capsuleMusicTitleShown = false
     /// The part of the closed music strip under the pointer, as the strip reports it.
     @Published private(set) var musicStripPointer: NotchMusicStripPart?
     /// The pointer rested on the strip's cover, so the strip names the song
@@ -445,8 +442,6 @@ final class NotchService: ObservableObject {
     @Published private var commandBarHeight: CGFloat?
     /// The bar's height as SwiftUI measured it, until the next turn of the main loop.
     private var measuredCommandBarHeight: CGFloat?
-    private var musicTitleWork: DispatchWorkItem?
-    private static let musicTitleDuration: TimeInterval = 4
     /// Every other display shows a copy of the closed island, and answers the
     /// pointer on its own display.
     private var mirrors: [CGDirectDisplayID: NotchMirror] = [:]
@@ -1587,7 +1582,7 @@ final class NotchService: ObservableObject {
                                   geometry: NotchGeometry? = nil) -> CGSize {
         // Only the island's own capsule is under the pointer. Its copies name a song as it starts.
         let ownDisplay = geometry == nil
-        let named = capsuleMusicTitleShown || ownDisplay && musicStripNamesSong
+        let named = ownDisplay && musicStripNamesSong
         let geometry = geometry ?? self.geometry
         let layout = NotchCapsuleLayout.self
         let language = L10n.shared.language
@@ -1931,7 +1926,6 @@ final class NotchService: ObservableObject {
         removePointerMonitors()
         releaseMonitor()
         musicTitleWork?.cancel(); musicTitleWork = nil
-        capsuleMusicTitleShown = false
         closeMirrors()
         windowHost?.close()
         windowHost = nil
@@ -3824,15 +3818,6 @@ final class NotchService: ObservableObject {
         for mirror in mirrors.values { mirror.host.releaseWave() }
     }
 
-    /// Track metadata never changes the closed capsule's geometry.
-    private func nameCapsuleSong() {
-        musicTitleWork?.cancel()
-        musicTitleWork = nil
-        guard capsuleMusicTitleShown else { return }
-        capsuleMusicTitleShown = false
-        refreshCapsuleMusic()
-    }
-
     /// A capsule is as wide as what it shows of the song, here or on another display.
     private func refreshCapsuleMusic() {
         guard compactActivity == .music,
@@ -5372,12 +5357,6 @@ final class NotchService: ObservableObject {
             music.$playback.map { $0?.isPlaying == true }
                 .removeDuplicates().dropFirst().filter { $0 }.receive(on: DispatchQueue.main)
                 .sink { [weak self] _ in self?.mascotHearsMusic() }
-                .store(in: &subscriptions)
-            // Song metadata updates redraw the existing strip; they never
-            // trigger a temporary title presentation or width recalculation.
-            music.$playback.map { $0?.track.title }.removeDuplicates()
-                .receive(on: DispatchQueue.main)
-                .sink { [weak self] _ in self?.nameCapsuleSong() }
                 .store(in: &subscriptions)
         }
         if NotchSupport.routes(.track) {
