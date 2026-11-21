@@ -503,6 +503,22 @@ enum NotchLayout {
         }
     }
 
+    /// A capture preview's header row, measured: the preview hands the row its
+    /// actions in 28-point slots two apart - at the most the nine the toolbar
+    /// can carry, from deleting the capture to opening it in the editor - and
+    /// the page leads the row with its way back and its own name. Counted at
+    /// the most the row can show, so a name is never spent on an action that
+    /// only appeared once a code was recognised, and is never spent at all.
+    static func capturePreviewRowWidth(titleWidth: CGFloat) -> CGFloat {
+        // The island's row keeps 28-point targets, and the preview hands it
+        // nine of them, two apart. The page leads the row with its way back,
+        // 28 points with the 6 after it, and its name, with the row's one gap
+        // between the two sides.
+        let action: CGFloat = 28
+        let actions: CGFloat = 9 * action + 8 * 2
+        return action + 6 + titleWidth + 12 + actions
+    }
+
     /// The island as a preset presents it on a display whose camera leaves
     /// the usual clearance; custom keeps the chosen height.
     static func nominalHeight(_ layout: NotchSize, custom: CGFloat) -> CGFloat {
@@ -2740,6 +2756,11 @@ struct NotchGeometry: Equatable {
     /// with its row of actions across the top of the island, on every display -
     /// the island's own and each of its copies alike. The preset stays the limit.
     var capturePreviewPageWidth: CGFloat? = nil
+    /// The row of actions a capture preview hands the island's header, plus
+    /// the page's way back and its name. Row and page are measured apart
+    /// because a narrow page squeezes the row, and a squeezed row spends the
+    /// page's name before it spends an action.
+    var capturePreviewRowWidth: CGFloat = 0
     /// Nothing floating beside the island leads to its sections, so the
     /// open page's row starts with the island's own button for them.
     var sectionsButtonInRow = false
@@ -3157,8 +3178,12 @@ struct NotchGeometry: Equatable {
         let page = min(max(preferred, cameraWidth + 36), screen.width - 24 - NotchQuickAccessLayout.gutter * 2)
         guard let preview = capturePreviewPageWidth else { return page }
         // The preview's own measure, inside the page width this display allows,
-        // and never so narrow that the preview's row of actions is cut.
-        return min(page, max(400, preview))
+        // and never so narrow that the preview's row of actions is cut, nor so
+        // narrow that the row spends the page's name on its actions.
+        let row = capturePreviewRowWidth > 0
+            ? capturePreviewRowWidth + NotchLayout.horizontalInset * 2
+            : 0
+        return min(page, max(400, preview, row))
     }
     var contentWidth: CGFloat { max(0, expandedWidth - NotchLayout.horizontalInset * 2) }
 

@@ -498,6 +498,7 @@ enum NotchMirrorContract {
                      "a copy is only redrawn when what it shows changes, and the page it draws is such a change")
         ownershipContracts(suite)
         capturePreviewDisplayContracts(suite)
+        capturePreviewPageGeometryContracts(suite)
         pointerExitContracts(suite)
         hoverCollapseChecks(suite)
         hoverLifecycleContracts(suite)
@@ -636,6 +637,58 @@ enum NotchMirrorContract {
                          && service.mirrors[2]?.model.expanded == false
                          && service.mirrors[3]?.model.expanded == true,
                      "a page opened on a second copy closes the first, and no two copies draw a page")
+    }
+
+    /// A capture preview's page is planned from the preview's picture and from
+    /// the row of actions the preview hands the island's header. The row is
+    /// counted whole, so it keeps the page's name on a display that draws a
+    /// camera as it does on a display that draws none, the page keeps the
+    /// island's shape on both, and a page width set by hand stays the limit.
+    private static func capturePreviewPageGeometryContracts(_ suite: TestSuite) {
+        let builtIn = NSScreen(1, CGRect(x: 0, y: 0, width: 1728, height: 1117), notched: true)
+        let external = NSScreen(2, CGRect(x: 1728, y: -531, width: 1920, height: 1080))
+        // The row as the island draws it: nine actions of 28 points two apart -
+        // delete, code, Copy text, save, copy, share, share link, pin, edit -
+        // the page's way back, and its name, taken here as long as the page's
+        // name is in English, and measured from the strings in the screenshots
+        // suite.
+        let titleWidth: CGFloat = 108
+        let row = NotchLayout.capturePreviewRowWidth(titleWidth: titleWidth)
+        let actions: CGFloat = 9 * 28 + 8 * 2
+        let leading: CGFloat = 28 + 6 + 12
+        suite.expect(NotchLayout.capturePreviewRowWidth(titleWidth: 0) == actions + leading,
+            "the preview's row counts every action the toolbar can carry, and the way back")
+        suite.expect(row == actions + leading + titleWidth,
+            "the preview's row keeps the page's name beside its actions")
+        let picture = 350 + NotchLayout.horizontalInset * 2
+        func previewPage(on screen: NSScreen, layout: NotchSize,
+                         customWidth: Double = NotchSize.defaultWidth) -> NotchGeometry {
+            var geometry = NotchGeometry(screen: screen.frame, safeAreaTop: screen.notched ? 32 : 0,
+                                         cameraWidth: screen.notched ? 185 : 0, layout: layout,
+                                         menuBarHeight: screen.notched ? 32 : 24, customWidth: customWidth,
+                                         silhouette: .capsule)
+            geometry.requiresFullWidthHeader = true
+            geometry.capturePreviewPageWidth = picture
+            geometry.capturePreviewRowWidth = row
+            return geometry
+        }
+        let camera = previewPage(on: builtIn, layout: .spacious)
+        let copy = previewPage(on: external, layout: .spacious)
+        suite.expect(camera.isNotched && !copy.isNotched, "the two displays differ about a camera")
+        suite.expect(camera.expandedWidth == copy.expandedWidth,
+            "the preview's page is as wide on a display with a camera as on a display without one")
+        suite.expect(camera.contentWidth >= row && copy.contentWidth >= row,
+            "the row of actions keeps the page's name where there is a camera, not only where there is none")
+        suite.expect(camera.expandedWidth < 560 && copy.expandedWidth < 560,
+            "the preview's page keeps the island's shape, not the wide display's page width")
+        suite.expect(camera.headerTopInset == camera.safeContentTop
+            && copy.headerTopInset < copy.safeContentTop,
+            "the row sits under a camera that is physical, and at the top of an island that draws none")
+        let compact = previewPage(on: builtIn, layout: .compact)
+        suite.expect(compact.expandedWidth == row + NotchLayout.horizontalInset * 2,
+            "the compact preset opens to the width the preview's row asks for, and no wider")
+        suite.expect(previewPage(on: builtIn, layout: .custom, customWidth: 360).expandedWidth == 360,
+            "a page width set by hand stays the limit for a preview's row of actions")
     }
 
     /// The capture preview is the page of the display its capture was taken on:

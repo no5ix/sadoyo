@@ -777,7 +777,7 @@ MUTATIONS = [
      "a caller that protects the island keeps it out even when it shows in captures"),
     ("capture controls photographed in the island", "screenshots",
      "Sources/Vorssaint/Services/QuickTools/ScreenshotCapturePolicy.swift",
-     "        guard showsCaptureTool, let mainWindowID else { return islandWindowIDs }",
+     "        guard showsCaptureControls, let mainWindowID else { return islandWindowIDs }",
      "        guard let mainWindowID else { return islandWindowIDs }",
      "the island at rest, or open on a page, is in the picture when it shows in captures"),
     ("tool switch keeps a stale picture of own windows", "screenshots",

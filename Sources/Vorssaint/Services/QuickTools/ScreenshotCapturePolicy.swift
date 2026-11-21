@@ -39,16 +39,20 @@ enum ScreenshotCapturePolicy {
     }
 
     /// The island windows that show in captures, as the island normally looks.
-    /// While the main island offers the capture controls or shows a capture
-    /// just taken, it is the tool taking the picture and stays out of it, even
-    /// with the preference on (issue #2501). Copies on other displays only
-    /// ever show activities.
+    /// While the main island draws the capture controls it is the tool taking
+    /// the picture, so it stays out of the picture even with the preference on
+    /// (issue #2501). A preview of a capture already taken is a page like any
+    /// other page: the island that shows one is the subject a person aims the
+    /// tool at, not the tool, and the exclusion is per window for the whole
+    /// stream, so keeping the island out there would hide the island on the
+    /// display that draws the page. Copies draw that preview on the display
+    /// their own capture was taken on.
     static func islandCaptureWindowIDs(islandWindowIDs: Set<CGWindowID>,
                                        mainWindowID: CGWindowID?,
                                        showsInCaptures: Bool,
-                                       showsCaptureTool: Bool) -> Set<CGWindowID> {
+                                       showsCaptureControls: Bool) -> Set<CGWindowID> {
         guard showsInCaptures else { return [] }
-        guard showsCaptureTool, let mainWindowID else { return islandWindowIDs }
+        guard showsCaptureControls, let mainWindowID else { return islandWindowIDs }
         return islandWindowIDs.subtracting([mainWindowID])
     }
 

@@ -1467,6 +1467,11 @@ enum ScreenshotFeatureTests {
             contentsOfFile: "Sources/Vorssaint/Services/QuickTools/ScreenshotQuickPreviewController.swift",
             encoding: .utf8)) ?? ""
         suite.expect(!quickPreviewSource.isEmpty, "the screenshot preview source reads back for its shape check")
+        // The island's preview page, and the suites' fixtures that plan a page,
+        // are built around the preview's own measure. That measure is written
+        // out in a fixture, so it is named here from the source that owns it.
+        suite.expect(quickPreviewSource.contains("static let previewWidth: CGFloat = 350"),
+            "the preview's measure stays the number the island's page and the fixtures are planned around")
         let quickPreviewCode = quickPreviewSource.components(separatedBy: "\n")
             .filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//") }
             .joined(separator: "\n")
@@ -4299,12 +4304,12 @@ enum ScreenshotFeatureTests {
         func shown(preference: Bool, tool: Bool) -> Set<CGWindowID> {
             ScreenshotCapturePolicy.islandCaptureWindowIDs(
                 islandWindowIDs: islandWindows, mainWindowID: island,
-                showsInCaptures: preference, showsCaptureTool: tool)
+                showsInCaptures: preference, showsCaptureControls: tool)
         }
         suite.expect(shown(preference: true, tool: false) == islandWindows,
                      "the island at rest, or open on a page, is in the picture when it shows in captures")
         suite.expect(shown(preference: true, tool: true) == [copy],
-                     "the capture controls or a capture just taken stay out; copies on other displays stay in")
+                     "only the capture controls keep the island's own window out; copies on other displays stay in")
         suite.expect(shown(preference: false, tool: false).isEmpty && shown(preference: false, tool: true).isEmpty,
                      "the island stays out of every capture when it does not show in captures")
 

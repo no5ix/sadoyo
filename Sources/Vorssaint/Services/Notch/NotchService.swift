@@ -1401,6 +1401,12 @@ final class NotchService: ObservableObject {
         if selected == .captures, captureContent != nil, !showingSections, !showingAppPanel, selectedMetric == nil {
             result.capturePreviewPageWidth = ScreenshotQuickPreviewController.previewWidth
                 + NotchLayout.horizontalInset * 2
+            // The row of actions the preview hands the header, with the page's
+            // way back and its name beside them. The page is at least as wide
+            // as its row, so the page's name keeps its letters on a display
+            // that draws a camera, as it does on an island that draws none.
+            result.capturePreviewRowWidth = NotchLayout.capturePreviewRowWidth(
+                titleWidth: NotchCaptureControlsLayout.titleWidth(selected.title(L10n.shared.language)))
         }
         result.pageTop = expandedPageTop
         if result.pageTop == .wrapsCamera { result.pageTrailingControls = playerToggleCount }
@@ -1722,7 +1728,9 @@ final class NotchService: ObservableObject {
             islandWindowIDs: islandWindowIDs,
             mainWindowID: panel.flatMap { $0.windowNumber > 0 ? CGWindowID($0.windowNumber) : nil },
             showsInCaptures: NotchSupport.showsInCaptures(),
-            showsCaptureTool: captureControls != nil || captureID.map(isCaptureVisible(id:)) == true)
+            // Only the controls are the tool. The island drawing a capture it
+            // has just taken is a page, and the page is the thing to photograph.
+            showsCaptureControls: captureControls != nil)
     }
 
     /// The island's window and its copies on other displays, as shown.

@@ -42,3 +42,4 @@ Decisions must reflect an explicit design choice, not a guess about the code. Up
 - 0007. Per-application input source memory is a pure machine over bundle identity
 - 0008. Every expanded page collapses on pointer exit
 - 0009. A capture preview opens on the display it was taken on
+- 0010. The island that shows a capture preview is in the picture
