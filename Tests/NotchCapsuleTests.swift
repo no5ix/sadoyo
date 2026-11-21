@@ -235,6 +235,24 @@ enum NotchCapsuleTests {
         let longMusic = Layout.musicSurface(title: String(repeating: "Song ", count: 40), geometry: geometry)
         suite.expect(music.width < longMusic.width && longMusic.width == (Layout.Maximum.music + side * 2).rounded(.down),
                      "a song's capsule fits its title up to the widest music strip, which then truncates the title")
+        for title in ["A very long English song title that must truncate cleanly",
+                      "愛一個人好難 - 國語歌曲與更長的中文標題"] {
+            let surface = Layout.musicSurface(title: title, geometry: geometry)
+            let titleWidth = Layout.musicTitleWidth(title, surfaceWidth: surface.width, geometry: geometry)
+            let required = Layout.width(title, font: Layout.titleFont)
+            let fixed = side * 2 + Layout.artworkInset(geometry) + Layout.artworkSide(geometry)
+                + Layout.barsWidth + Layout.endPadding * 3
+            suite.expect(titleWidth >= 0 && titleWidth <= required + 0.001
+                         && fixed + titleWidth <= surface.width + 0.001,
+                         "the measured English and CJK title frames fit between the artwork and equalizer")
+        }
+        let cappedTitle = String(repeating: "Long song title ", count: 30)
+        let cappedSurface = Layout.musicSurface(title: cappedTitle, geometry: geometry)
+        let cappedWidth = Layout.musicTitleWidth(cappedTitle, surfaceWidth: cappedSurface.width, geometry: geometry)
+        suite.expect(cappedWidth < Layout.width(cappedTitle, font: Layout.titleFont)
+                     && side * 2 + Layout.artworkInset(geometry) + Layout.artworkSide(geometry)
+                        + Layout.barsWidth + Layout.endPadding * 3 + cappedWidth <= cappedSurface.width + 0.001,
+                     "a title at the maximum capsule width yields space to the equalizer instead of overflowing")
         let cover = Layout.artworkSide(geometry)
         suite.expect(abs(Layout.artworkInset(geometry) + cover / 2 - geometry.stripBodyHeight / 2) < 0.001 && cover >= 12,
                      "the cover is a circle concentric with the capsule's round end, an even gap inside it")

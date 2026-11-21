@@ -1400,14 +1400,33 @@ enum NotchCapsuleLayout {
     /// Beside another activity, the one that stands above the song keeps the
     /// capsule's leading end as its mark, and the song's cover and bars follow
     /// it, so the row reads in the order of their standing.
+    /// The exact text width the row can render inside a measured music surface.
+    /// Reserve the title's two insets and the equalizer's trailing inset too.
+    /// This is shared by surface measurement and rendering so a capped title
+    /// cannot consume the equalizer's space.
+    static func musicTitleWidth(_ title: String?, surfaceWidth: CGFloat,
+                                companion: NotchCompactActivity? = nil, workingAgents: Int = 1,
+                                geometry: NotchGeometry, language: AppLanguage = .enUS,
+                                timerCountsUp: Bool = false) -> CGFloat {
+        guard let title else { return 0 }
+        let mark = companion.map {
+            timerMarkWidth(companion: $0, workingAgents: workingAgents, downloadPercent: false,
+                           geometry: geometry, language: language, timerCountsUp: timerCountsUp) + markGap($0)
+        } ?? 0
+        let fixed = side(geometry) * 2 + artworkInset(geometry) + artworkSide(geometry)
+            + barsWidth + mark + endPadding * 3
+        return min(width(title, font: titleFont), max(0, surfaceWidth - fixed))
+    }
+
     static func musicSurface(title: String?, companion: NotchCompactActivity? = nil,
                              geometry: NotchGeometry, language: AppLanguage = .enUS,
                              timerCountsUp: Bool = false) -> CGSize {
-        let named = title.map { endPadding + width($0, font: titleFont) + endPadding } ?? endPadding
-        let mark = companion == nil ? 0
-            : timerMarkWidth(companion: companion, workingAgents: 1, downloadPercent: false,
-                             geometry: geometry, language: language, timerCountsUp: timerCountsUp) + markGap(companion)
-        let content = mark + artworkSide(geometry) + named + barsWidth
+        let titleWidth = title.map { width($0, font: titleFont) } ?? 0
+        let mark = companion.map {
+            timerMarkWidth(companion: $0, workingAgents: 1, downloadPercent: false,
+                           geometry: geometry, language: language, timerCountsUp: timerCountsUp) + markGap($0)
+        } ?? 0
+        let content = mark + artworkSide(geometry) + endPadding * 2 + titleWidth + barsWidth
         return surface(content: content, leading: artworkInset(geometry), maximum: Maximum.music, geometry: geometry)
     }
 
