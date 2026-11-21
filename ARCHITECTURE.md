@@ -126,4 +126,6 @@ Before changing a subsystem:
 - Identify permission, lifecycle, preference, localization, and privacy implications.
 - Read `docs/decisions/` when the change touches an ownership, navigation, permission, or data-flow boundary, and update it when such a rule changes.
 
-This guide is intentionally high-level. The implementation and feature-specific documentation remain authoritative.\n\nFor named capsule music strips, the title is measured once against the exact surface width. The shared calculation reserves the artwork, equalizer, companion mark, the title's two insets and the equalizer's trailing inset; the rendered text and padded group receive explicit widths rather than an unbounded flexible frame. The capsule window and silhouette remain centred on the physical notch anchor through width transitions.
+This guide is intentionally high-level. The implementation and feature-specific documentation remain authoritative.
+
+For named capsule music strips, the title is measured once against the exact surface width. The shared calculation reserves the artwork, equalizer, companion mark, the title's two insets and the equalizer's trailing inset; the rendered text and padded group receive explicit widths rather than an unbounded flexible frame. The capsule window and silhouette remain centred on the physical notch anchor through width transitions.
