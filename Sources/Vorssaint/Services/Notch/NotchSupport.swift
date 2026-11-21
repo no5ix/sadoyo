@@ -1411,9 +1411,9 @@ enum NotchCapsuleLayout {
             timerMarkWidth(companion: $0, workingAgents: workingAgents, downloadPercent: false,
                            geometry: geometry, language: language, timerCountsUp: timerCountsUp) + markGap($0)
         } ?? 0
-        let contentWidth = max(0, surfaceWidth - side * 2 - artworkInset(geometry) - endPadding * 2
-                                 - mark - artworkSide(geometry) - barsWidth - endPadding * 2)
-        return contentWidth
+        let used = artworkInset(geometry) + artworkSide(geometry) + barsWidth
+            + mark + endPadding * 2
+        return max(0, surfaceWidth - side * 2 - used)
     }
 
     static func musicSurface(title: String?, companion: NotchCompactActivity? = nil,

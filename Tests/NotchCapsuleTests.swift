@@ -249,6 +249,9 @@ enum NotchCapsuleTests {
         suite.expect(compactNamed.width == compactNamed.width.rounded()
                      && Layout.musicTitleWidth(surfaceWidth: compactNamed.width, geometry: geometry) >= 0,
                      "music title width and capsule surface stay on whole points without a negative text frame")
+        suite.expect(abs(geometry.frame(for: namedSize).midX - geometry.screen.midX - geometry.surfaceShift) < 0.001
+                     && abs(geometry.frame(for: unnamed).midX - geometry.frame(for: namedSize).midX) < 0.001,
+                     "a music capsule remains centred on the same notch anchor as its width changes")
                 let cover = Layout.artworkSide(geometry)
         suite.expect(abs(Layout.artworkInset(geometry) + cover / 2 - geometry.stripBodyHeight / 2) < 0.001 && cover >= 12,
                      "the cover is a circle concentric with the capsule's round end, an even gap inside it")
