@@ -1393,6 +1393,15 @@ final class NotchService: ObservableObject {
         // Capture editing has a full toolbar whose actions must stay reachable.
         result.requiresFullWidthHeader = selected == .captures && captureActions != nil
             && !showingSections && !showingAppPanel && selectedMetric == nil
+        // A capture preview is a picture of a fixed measure, so its page is as wide
+        // as that picture and its row of actions, on every display that draws it -
+        // the island's own and each copy alike - and not as wide as the display's
+        // page width, which on a wide display leaves the actions at the far corners
+        // of a panel with a small picture in the middle of it.
+        if selected == .captures, captureContent != nil, !showingSections, !showingAppPanel, selectedMetric == nil {
+            result.capturePreviewPageWidth = ScreenshotQuickPreviewController.previewWidth
+                + NotchLayout.horizontalInset * 2
+        }
         result.pageTop = expandedPageTop
         if result.pageTop == .wrapsCamera { result.pageTrailingControls = playerToggleCount }
         // Under a preset each page takes the width it needs, up to the
@@ -5034,7 +5043,11 @@ final class NotchService: ObservableObject {
         guard identifier != Bundle.main.bundleIdentifier, identifier != AssistiveKeyboard.bundleID else { return }
         panel?.resignKey()
         if expanded, modules.contains(.clipboard) { ClipboardHistoryService.shared.rememberPasteTarget() }
-        if expanded, !pinned, !keepsWorkingSurface, captureControls == nil,
+        // A capture preview on the island is the thing being captured. The capture
+        // UI takes the app out of the foreground while its freeze screen is up, and
+        // an island that closed on that would vanish from the very frame the person
+        // is taking - the same reason the interactive chooser below is exempt.
+        if expanded, !pinned, !keepsWorkingSurface, captureControls == nil, !showsCapturePreview,
            NotchSupport.closesOnActivation(openedByHover: openedByHover, clicked: clickedSinceOpening,
                                            pointerInside: windowHost?.containsHover(NSEvent.mouseLocation) == true) {
             collapse()

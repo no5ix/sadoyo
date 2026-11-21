@@ -415,8 +415,13 @@ final class ScreenshotQuickPreviewController {
         }
     }
 
+    /// The preview's own measure. The picture is drawn at this width on every
+    /// surface that shows it, so the page that shows it in the island is as wide
+    /// as this and its row of actions, and no wider.
+    static let previewWidth: CGFloat = 350
+
     fileprivate static func size(showingLink: Bool) -> CGSize {
-        CGSize(width: 350, height: showingLink ? 268 : 210)
+        CGSize(width: previewWidth, height: showingLink ? 268 : 210)
     }
 
     private func previewFrame(for size: CGSize) -> CGRect {

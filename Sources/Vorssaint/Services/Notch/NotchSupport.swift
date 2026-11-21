@@ -2735,6 +2735,11 @@ struct NotchGeometry: Equatable {
     /// which stays the limit; nil takes all of it, as lists do. A width set
     /// by hand is the island's on every page.
     var pageContentWidth: CGFloat? = nil
+    /// A capture preview is as wide as the picture it shows, not as wide as the
+    /// display's page width: the preview's page keeps the island's compact shape,
+    /// with its row of actions across the top of the island, on every display -
+    /// the island's own and each of its copies alike. The preset stays the limit.
+    var capturePreviewPageWidth: CGFloat? = nil
     /// Nothing floating beside the island leads to its sections, so the
     /// open page's row starts with the island's own button for them.
     var sectionsButtonInRow = false
@@ -3149,7 +3154,11 @@ struct NotchGeometry: Equatable {
         let preferred = layout == .custom ? chosen : pageContentWidth.map { natural in
             min(chosen, max(natural, isNotched ? cameraWidth + wing * 2 : 0) + NotchLayout.horizontalInset * 2)
         } ?? chosen
-        return min(max(preferred, cameraWidth + 36), screen.width - 24 - NotchQuickAccessLayout.gutter * 2)
+        let page = min(max(preferred, cameraWidth + 36), screen.width - 24 - NotchQuickAccessLayout.gutter * 2)
+        guard let preview = capturePreviewPageWidth else { return page }
+        // The preview's own measure, inside the page width this display allows,
+        // and never so narrow that the preview's row of actions is cut.
+        return min(page, max(400, preview))
     }
     var contentWidth: CGFloat { max(0, expandedWidth - NotchLayout.horizontalInset * 2) }
 
