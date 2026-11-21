@@ -3832,21 +3832,11 @@ final class NotchService: ObservableObject {
             && compactActivityGeometry.compactActivityWingWidth > 0
     }
 
-    /// The strip shows the song's name for the pointer resting on its cover.
-    var musicStripNamesSong: Bool {
-        musicStripNamed && musicStripAnswers(.cover)
-    }
+    /// The closed music capsule always keeps the artwork-and-bars layout.
+    var musicStripNamesSong: Bool { false }
 
-    /// Beside a camera, the sides of a strip naming its song: the words and
-    /// the cover on the camera's left, the bars alone on its right. Nil while
-    /// it shows only the cover and the bars, or already shows the song.
-    var namedMusicWings: NotchNoticeWings? {
-        guard musicStripNamesSong, !geometry.floats else { return nil }
-        // The song the strip shows, which may still be the one a skip left.
-        let live = NotchMusicService.shared.playback
-        let track = (heldMusic ?? musicStripStandIn(for: live))?.playback.track ?? live?.track
-        return nil
-    }
+    /// The closed music capsule has no title-driven wings.
+    var namedMusicWings: NotchNoticeWings? { nil }
 
     /// Whether a reading is the song paused from the strip's button, or one
     /// from its player without a name, which some players send for a moment.
@@ -3871,12 +3861,9 @@ final class NotchService: ObservableObject {
         return musicStripStandIn(for: reading.playback) ?? reading
     }
 
-    /// A strip beside a camera naming its song fits the name it shows now in place.
-    private func fitNamedMusicStrip() {
-        guard musicStripNamesSong, !geometry.floats else { return }
-        musicStripFitsInPlace = true
-        refreshPresentation()
-    }
+    /// Kept as a no-op for existing metadata observers; track changes do not
+    /// resize the closed music strip.
+    private func fitNamedMusicStrip() {}
 
     /// The bars show the play or pause button: the pointer rests on them, the
     /// strip shows the song playing now, and its player takes the command.
@@ -3891,7 +3878,7 @@ final class NotchService: ObservableObject {
     }
 
     /// The strip reports the pointer resting on its cover or its bars, or
-    /// leaving them. A rest on the cover names the song after a moment.
+    /// leaving them. Hover keeps the artwork-and-bars layout unchanged.
     func hoverMusicStrip(_ part: NotchMusicStripPart, entered: Bool) {
         guard entered else {
             if musicStripPointer == part { musicStripPointer = nil }
@@ -3905,9 +3892,7 @@ final class NotchService: ObservableObject {
             guard let self else { return }
             self.musicNamingWork = nil
             guard self.inside, self.musicStripPointer == .cover, self.musicStripAnswers(.cover) else { return }
-            self.musicStripNamed = true
-            self.musicStripFitsInPlace = true
-            if self.geometry.floats { self.refreshCapsuleMusic() } else { self.refreshPresentation() }
+            self.musicStripNamed = false
             self.syncHoverExitMonitoring(entered: true, point: NSEvent.mouseLocation)
         }
         musicNamingWork = work
