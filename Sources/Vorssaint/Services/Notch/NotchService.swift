@@ -497,7 +497,7 @@ final class NotchService: ObservableObject {
     /// A Mac without a battery has no charge to show, so a saved battery
     /// choice rests empty there; playing music still shows as before.
     var idleContent: NotchIdleContent {
-        let content = NotchSupport.visibleIdleContent(isPlaying: !awaitsTrackNotice && NotchMusicService.shared.playback?.isPlaying == true)
+        let content = NotchSupport.visibleIdleContent(isPlaying: NotchMusicService.shared.playback?.isPlaying == true)
         return content == .battery && !PowerSampler.hasInternalBattery ? .none : content
     }
 
@@ -616,7 +616,7 @@ final class NotchService: ObservableObject {
     /// The activities running now, with a new song that is waiting for its notice
     /// left out: that song is drawn when its notice is told.
     private var stripCandidates: [NotchCompactActivity] {
-        awaitsTrackNotice ? compactActivityCandidates.filter { $0 != .music } : compactActivityCandidates
+        compactActivityCandidates
     }
 
     /// The activity whose reading the closed strip draws at its trailing end.
