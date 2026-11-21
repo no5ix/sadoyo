@@ -20,6 +20,10 @@ enum NotchPresentationRefreshContract {
         struct Accessibility { var accessibilityDisplayShouldReduceMotion = false }
     }
     enum NotchPanel { static let normalLevel = 1, fullscreenLevel = 0 }
+    /// The preview's measure, which the open page's width is planned around.
+    /// The preview's own contracts read the production constant; here the page
+    /// only needs a number of the same kind.
+    enum ScreenshotQuickPreviewController { static let previewWidth: CGFloat = 350 }
     enum NotificationCenter {
         enum Name { case notchMascotRestYields }
         static var `default` = Center()
@@ -78,11 +82,13 @@ enum NotchPresentationRefreshContract {
         static func current() -> Self { Self() }
     }
     enum FeatureStrings {
-        static func notch(_ language: Int) -> (collapse: String, open: String) { ("Close", "Open") }
+        static func notch(_ language: AppLanguage) -> (collapse: String, open: String) { ("Close", "Open") }
     }
     enum L10n {
         static let shared = SelfValue()
-        struct SelfValue { let language = 0 }
+        // The island measures a page's name for its header row, so the fixture
+        // names a language of the kind the island names a page in.
+        struct SelfValue { let language = AppLanguage.enUS }
     }
     final class Panel {
         var isVisible = true

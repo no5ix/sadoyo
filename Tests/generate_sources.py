@@ -1958,6 +1958,11 @@ def main():
           + declaration(preview, "private struct ScreenshotPreviewActionStyle:").replace("private struct", "struct", 1)
           + declaration("Sources/Vorssaint/UI/Notch/NotchComponents.swift", "struct NotchButtonStyle:")
           + "enum ScreenshotQuickPreviewController {\n"
+          # The preview's own measure, which the island's preview page is planned
+          # around. Written here as the fixture's number, kept honest by the
+          # preview's shape check in ScreenshotFeatureTests, which reads the
+          # number out of the source that owns it.
+          + "static let previewWidth: CGFloat = 350\n"
           + declaration(preview, "    enum Action {")
           + declaration(preview, "    fileprivate static func size(").replace("fileprivate", "", 1)
           + "}\n}\nextension View {\n"

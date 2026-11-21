@@ -135,6 +135,8 @@ enum NotchScreenRefreshContract {
         /// Hidden until hover and set to show activity, as Settings has it.
         var hiddenShowsActivity = false
         var captureControls: Bool?
+        /// A capture preview is open on the island, as production reports it.
+        var showsCapturePreview = false
         var idleContent = NotchIdleContent.music
         var compactActivity: Bool?
         var mascotWantsRoom = false
