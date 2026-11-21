@@ -328,7 +328,11 @@ struct NotchCapsuleMusicStrip: View {
                             .capsuleTitle()
                             .lineLimit(1)
                             .truncationMode(.tail)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .frame(width: CapsuleLayout.musicTitleWidth(
+                                surfaceWidth: rowSize.width, companion: companion, workingAgents: agentWorking,
+                                geometry: geometry, language: l10n.language,
+                                timerCountsUp: NotchTimerService.shared.session.countsUp),
+                                   alignment: .leading)
                             .clipped()
                             .transition(.opacity)
                     } else {

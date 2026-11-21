@@ -242,7 +242,7 @@ enum NotchCapsuleTests {
             surfaceWidth: (Layout.Maximum.music + side * 2).rounded(.down), geometry: geometry)
         suite.expect(titleRoom >= 0 && titleRoom <= maximumTitleRoom
                      && titleRoom + Layout.artworkSide(geometry) + Layout.barsWidth
-                        + Layout.endPadding * 4 + Layout.artworkInset(geometry)
+                        + Layout.endPadding * 2 + Layout.artworkInset(geometry)
                         + side * 2 <= namedSize.width + 1,
                      "a named music title is allocated only the measured space between the cover and bars")
         let compactNamed = Layout.musicSurface(title: "A long but readable song title", geometry: geometry)

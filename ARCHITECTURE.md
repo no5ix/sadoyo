@@ -129,4 +129,4 @@ Before changing a subsystem:
 This guide is intentionally high-level. The implementation and feature-specific documentation remain authoritative.
 
 
-For named capsule music strips, the title receives only the width remaining between the artwork and playback controls. Capsule/window width changes stay centred on the physical notch anchor and must grow or shrink symmetrically.
+For named capsule music strips, the title receives only the width remaining between the artwork and playback controls, measured against the exact row surface width. Its SwiftUI frame must use that same calculation rather than intrinsic text width. Capsule/window width changes stay centred on the physical notch anchor and must grow or shrink symmetrically through `geometry.frame(for:)`.
