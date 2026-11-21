@@ -3146,18 +3146,15 @@ final class NotchService: ObservableObject {
              : selectedNotice.event == .watch ? .watch : .controls, on: displayID)
     }
 
-    /// Track changes update the existing strip in place; they do not
-    /// create a temporary notice or hold the previous song's presentation.
+    /// Track changes update the live playback information without presenting
+    /// a temporary notice or holding the previous song in the closed capsule.
     private func scheduleTrackNotice() {
         trackWork?.cancel()
         trackWork = nil
         heldMusic = nil
         awaitsTrackNotice = false
-        if notice == nil { refreshPresentation() }
     }
 
-    /// Track changes do not hold the previous song; the live metadata and
-    /// artwork update directly in the existing music strip.
     private func holdEndingTrack() {
         heldMusic = nil
     }
