@@ -481,8 +481,7 @@ enum NotchMusicVisibilityTests {
                      && service.compactGeometry(for: .calendar).compactActivityWingWidth == 72,
                      "an event beside music takes the wings its pair needs, and alone keeps room for its title")
 
-        // The music strip naming its song reaches further on its cover's side
-        // only, and the camera keeps the gap between its sides.
+        // A song's title never creates extra wings or shifts the closed capsule.
         let naming = Service()
         naming.geometry = NotchGeometry(screen: CGRect(x: 0, y: 0, width: 1470, height: 956), safeAreaTop: 32,
                                         cameraWidth: 180, menuBarHeight: 32, compactSideRoom: 100)
@@ -491,36 +490,24 @@ enum NotchMusicVisibilityTests {
         defaults.set(true, forKey: DefaultsKey.notchShowPlayingMusic)
         reader.playback = .init(isPlaying: true)
         let plainStrip = naming.surfaceSize
-        let musicWing = naming.compactActivityGeometry.compactActivityWingWidth
-        suite.expect(naming.compactActivity == .music && musicWing > 0 && naming.surfaceShift == 0,
+        suite.expect(naming.compactActivity == .music && naming.surfaceShift == 0,
                      "precondition: the music strip rests beside the camera with even wings")
-        naming.namedMusicWings = NotchNoticeWings(leading: musicWing + 120, trailing: musicWing)
-        suite.expect(naming.surfaceSize == CGSize(width: plainStrip.width + 120, height: plainStrip.height)
-                     && naming.surfaceShift == -60,
-                     "a strip naming its song grows only toward its cover, and its centre moves half as far")
+        naming.namedMusicWings = nil
+        suite.expect(naming.surfaceSize == plainStrip && naming.surfaceShift == 0,
+                     "a long or short song title never changes the closed music capsule's width or position")
         naming.hoverEmphasized = true
-        suite.expect(naming.surfaceSize == NotchHoverEmphasis.size(
-                        from: CGSize(width: plainStrip.width + 120, height: plainStrip.height), geometry: naming.geometry,
-                        reach: 60)
-                     && naming.surfaceShift == -60,
-                     "the hover emphasis grows around the named strip without moving its centre")
-        // Four points short of the menus on the named side, the pulse grows by those four.
-        let room = naming.geometry.compactSideRoom!
-        naming.namedMusicWings = NotchNoticeWings(leading: room - 4, trailing: musicWing)
-        suite.expect(naming.surfaceSize.width == plainStrip.width + (room - 4 - musicWing) + 8,
-                     "its pulse stops at the menus on the named side, the side with the least room")
-        naming.namedMusicWings = NotchNoticeWings(leading: musicWing + 120, trailing: musicWing)
+        suite.expect(naming.surfaceShift == 0,
+                     "hover emphasis does not introduce a title-driven shift")
         naming.notice = notice
         suite.expect(naming.surfaceShift == naming.geometry.noticeShift(notice.wings(in: naming.geometry)),
-                     "a notice over the strip keeps its own sides")
+                     "unrelated notices retain their own presentation geometry")
         naming.notice = nil
         naming.expanded = true
         suite.expect(naming.surfaceShift == 0, "the open island stays on the camera's centre")
         naming.expanded = false
         naming.hoverEmphasized = false
-        naming.namedMusicWings = nil
         suite.expect(naming.surfaceSize == plainStrip && naming.surfaceShift == 0,
-                     "taking the name back restores the even strip on the camera's centre")
+                     "the music capsule keeps its normal width after other presentation states end")
         // A song paused from the strip's button stays while the pointer does.
         let pausedSong = NotchPlaybackContext(pid: 42, revision: UUID())
         reader.playback = .init(isPlaying: false, commandContext: pausedSong)
