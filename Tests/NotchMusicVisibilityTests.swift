@@ -492,9 +492,9 @@ enum NotchMusicVisibilityTests {
         let plainStrip = naming.surfaceSize
         suite.expect(naming.compactActivity == .music && naming.surfaceShift == 0,
                      "precondition: the music strip rests beside the camera with even wings")
-        naming.namedMusicWings = nil
-        suite.expect(naming.surfaceSize == plainStrip && naming.surfaceShift == 0,
-                     "a long or short song title never changes the closed music capsule's width or position")
+        naming.namedMusicWings = NotchNoticeWings(leading: 180, trailing: 44)
+        suite.expect(naming.namedMusicWings == nil && naming.surfaceSize == plainStrip && naming.surfaceShift == 0,
+                     "track-title wings are ignored, keeping the normal artwork-and-bars capsule width")
         naming.hoverEmphasized = true
         suite.expect(naming.surfaceShift == 0,
                      "hover emphasis does not introduce a title-driven shift")
