@@ -446,7 +446,12 @@ final class NotchService: ObservableObject {
     /// The bar's height as SwiftUI measured it, until the next turn of the main loop.
     private var measuredCommandBarHeight: CGFloat?
     private var musicTitleWork: DispatchWorkItem?
+    /// Track changes hide the capsule title until the new track has settled.
+    /// The artwork and equalizer remain visible throughout the transition.
+    @Published private(set) var musicTrackTransitioning = false
+    private var musicTransitionWork: DispatchWorkItem?
     private static let musicTitleDuration: TimeInterval = 4
+    private static let musicTransitionSettleDelay: TimeInterval = 0.65
     /// Every other display shows a copy of the closed island, and answers the
     /// pointer on its own display.
     private var mirrors: [CGDirectDisplayID: NotchMirror] = [:]
@@ -3156,6 +3161,7 @@ final class NotchService: ObservableObject {
     /// keeps the song it showed.
     private func scheduleTrackNotice() {
         trackWork?.cancel()
+        beginMusicTitleTransition()
         if heldMusic == nil, let presentedMusic { heldMusic = presentedMusic }
         // With no song on the strip, as after a long gap between songs, the
         // new one waits too, so the notice is still where it first appears.
@@ -3842,10 +3848,11 @@ final class NotchService: ObservableObject {
 
     /// A new song's title shows in the capsule for a few seconds, then the
     /// capsule keeps only the cover and the bars.
+    /// A new song's title shows only after its track transition has settled.
+    /// During the transition every display keeps the same stable artwork/bars
+    /// strip, so no title-driven resize can clip text or shift the capsule.
     private func nameCapsuleSong() {
-        // The song held for the next one's notice is the one that ended; the
-        // next song is named once the notice lets it go.
-        guard heldMusic == nil else { return }
+        guard heldMusic == nil, !musicTrackTransitioning else { return }
         musicTitleWork?.cancel()
         capsuleMusicTitleShown = true
         refreshCapsuleMusic()
@@ -3857,6 +3864,32 @@ final class NotchService: ObservableObject {
         }
         musicTitleWork = work
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.musicTitleDuration, execute: work)
+    }
+
+    /// Begin a transition window immediately when the player reports a track
+    /// change. Keep it open until the playback metadata has settled and a
+    /// short quiet period has elapsed; rapid skips extend the same window.
+    private func beginMusicTitleTransition() {
+        musicTransitionWork?.cancel()
+        musicTitleWork?.cancel()
+        musicTitleWork = nil
+        let titleWasVisible = capsuleMusicTitleShown
+        capsuleMusicTitleShown = false
+        if !musicTrackTransitioning || titleWasVisible {
+            musicTrackTransitioning = true
+            refreshCapsuleMusic()
+        }
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.musicTransitionWork = nil
+            self.musicTrackTransitioning = false
+            self.refreshCapsuleMusic()
+            // If the playback notification arrived before the final metadata,
+            // show the new title only after the transition flag has cleared.
+            self.nameCapsuleSong()
+        }
+        musicTransitionWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.musicTransitionSettleDelay, execute: work)
     }
 
     /// A capsule is as wide as what it shows of the song, here or on another display.

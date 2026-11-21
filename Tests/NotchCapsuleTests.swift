@@ -235,6 +235,12 @@ enum NotchCapsuleTests {
         let longMusic = Layout.musicSurface(title: String(repeating: "Song ", count: 40), geometry: geometry)
         suite.expect(music.width < longMusic.width && longMusic.width == (Layout.Maximum.music + side * 2).rounded(.down),
                      "a song's capsule fits its title up to the widest music strip, which then truncates the title")
+        // During a track change the music strip intentionally measures as an
+        // unnamed cover-and-bars row; the transition never requests title width.
+        let transitionStrip = Layout.musicSurface(title: nil, geometry: geometry)
+        let settledStrip = Layout.musicSurface(title: "A new song title", geometry: geometry)
+        suite.expect(transitionStrip.width < settledStrip.width,
+                     "the transition presentation omits the title and uses the stable cover-and-bars width")
         let cover = Layout.artworkSide(geometry)
         suite.expect(abs(Layout.artworkInset(geometry) + cover / 2 - geometry.stripBodyHeight / 2) < 0.001 && cover >= 12,
                      "the cover is a circle concentric with the capsule's round end, an even gap inside it")

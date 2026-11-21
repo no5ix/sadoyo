@@ -127,3 +127,5 @@ Before changing a subsystem:
 - Read `docs/decisions/` when the change touches an ownership, navigation, permission, or data-flow boundary, and update it when such a rule changes.
 
 This guide is intentionally high-level. The implementation and feature-specific documentation remain authoritative.
+
+For the floating music capsule, a track change suppresses the title for the transition/metadata-settle interval. The artwork and equalizer remain visible, and the capsule uses the unnamed music surface while playback metadata changes. Once the track is settled, the new title may briefly appear as before.
