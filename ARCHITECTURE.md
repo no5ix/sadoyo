@@ -127,3 +127,6 @@ Before changing a subsystem:
 - Read `docs/decisions/` when the change touches an ownership, navigation, permission, or data-flow boundary, and update it when such a rule changes.
 
 This guide is intentionally high-level. The implementation and feature-specific documentation remain authoritative.
+
+
+For named capsule music strips, the title receives only the width remaining between the artwork and playback controls. Capsule/window width changes stay centred on the physical notch anchor and must grow or shrink symmetrically.

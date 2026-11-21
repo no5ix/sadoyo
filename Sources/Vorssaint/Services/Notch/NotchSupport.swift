@@ -1400,14 +1400,31 @@ enum NotchCapsuleLayout {
     /// Beside another activity, the one that stands above the song keeps the
     /// capsule's leading end as its mark, and the song's cover and bars follow
     /// it, so the row reads in the order of their standing.
+    /// Width allocated to a named song between its cover and playback bars.
+    /// This is computed from the final surface width, so the rendered Text and
+    /// the frame used to position the capsule agree even when the title is long.
+    static func musicTitleWidth(surfaceWidth: CGFloat, companion: NotchCompactActivity? = nil,
+                                workingAgents: Int = 1, geometry: NotchGeometry,
+                                language: AppLanguage = .enUS, timerCountsUp: Bool = false) -> CGFloat {
+        let side = side(geometry)
+        let mark = companion.map {
+            timerMarkWidth(companion: $0, workingAgents: workingAgents, downloadPercent: false,
+                           geometry: geometry, language: language, timerCountsUp: timerCountsUp) + markGap($0)
+        } ?? 0
+        let contentWidth = max(0, surfaceWidth - side * 2 - artworkInset(geometry) - endPadding * 2
+                                 - mark - artworkSide(geometry) - barsWidth - endPadding * 2)
+        return contentWidth
+    }
+
     static func musicSurface(title: String?, companion: NotchCompactActivity? = nil,
                              geometry: NotchGeometry, language: AppLanguage = .enUS,
                              timerCountsUp: Bool = false) -> CGSize {
-        let named = title.map { endPadding + width($0, font: titleFont) + endPadding } ?? endPadding
-        let mark = companion == nil ? 0
-            : timerMarkWidth(companion: companion, workingAgents: 1, downloadPercent: false,
-                             geometry: geometry, language: language, timerCountsUp: timerCountsUp) + markGap(companion)
-        let content = mark + artworkSide(geometry) + named + barsWidth
+        let mark = companion.map {
+            timerMarkWidth(companion: $0, workingAgents: 1, downloadPercent: false,
+                           geometry: geometry, language: language, timerCountsUp: timerCountsUp) + markGap($0)
+        } ?? 0
+        let titleWidth = title.map { width($0, font: titleFont) } ?? 0
+        let content = mark + artworkSide(geometry) + endPadding * 2 + titleWidth + barsWidth
         return surface(content: content, leading: artworkInset(geometry), maximum: Maximum.music, geometry: geometry)
     }
 

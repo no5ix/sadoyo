@@ -323,11 +323,21 @@ struct NotchCapsuleMusicStrip: View {
                     .contentShape(Rectangle())
                     .onHover { if live { service.hoverMusicStrip(.cover, entered: $0) } }
                 Group {
-                    if named { Text(title).capsuleTitle().truncationMode(.tail).transition(.opacity) }
-                    else { Color.clear }
+                    if named {
+                        Text(title)
+                            .capsuleTitle()
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .clipped()
+                            .transition(.opacity)
+                    } else {
+                        Color.clear
+                    }
                 }
                 .padding(.horizontal, CapsuleLayout.endPadding)
-                .frame(maxWidth: .infinity)
+                .frame(maxWidth: .infinity, minHeight: 0, alignment: .leading)
+                .layoutPriority(1)
                 ZStack {
                     NotchLiveEqualizerBars(isPlaying: playing && !showsControl,
                                            bars: NotchLayout.compactMusicBarCount,

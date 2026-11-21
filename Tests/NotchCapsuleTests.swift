@@ -235,7 +235,21 @@ enum NotchCapsuleTests {
         let longMusic = Layout.musicSurface(title: String(repeating: "Song ", count: 40), geometry: geometry)
         suite.expect(music.width < longMusic.width && longMusic.width == (Layout.Maximum.music + side * 2).rounded(.down),
                      "a song's capsule fits its title up to the widest music strip, which then truncates the title")
-        let cover = Layout.artworkSide(geometry)
+        let namedSize = Layout.musicSurface(title: String(repeating: "A long song title ", count: 12),
+                                               geometry: geometry)
+        let titleRoom = Layout.musicTitleWidth(surfaceWidth: namedSize.width, geometry: geometry)
+        let maximumTitleRoom = Layout.musicTitleWidth(
+            surfaceWidth: (Layout.Maximum.music + side * 2).rounded(.down), geometry: geometry)
+        suite.expect(titleRoom >= 0 && titleRoom <= maximumTitleRoom
+                     && titleRoom + Layout.artworkSide(geometry) + Layout.barsWidth
+                        + Layout.endPadding * 4 + Layout.artworkInset(geometry)
+                        + side * 2 <= namedSize.width + 1,
+                     "a named music title is allocated only the measured space between the cover and bars")
+        let compactNamed = Layout.musicSurface(title: "A long but readable song title", geometry: geometry)
+        suite.expect(compactNamed.width == compactNamed.width.rounded()
+                     && Layout.musicTitleWidth(surfaceWidth: compactNamed.width, geometry: geometry) >= 0,
+                     "music title width and capsule surface stay on whole points without a negative text frame")
+                let cover = Layout.artworkSide(geometry)
         suite.expect(abs(Layout.artworkInset(geometry) + cover / 2 - geometry.stripBodyHeight / 2) < 0.001 && cover >= 12,
                      "the cover is a circle concentric with the capsule's round end, an even gap inside it")
         let eventAndMusic = Layout.calendarPairSurface(companion: .music, workingAgents: 0, downloadPercent: false,
