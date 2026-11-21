@@ -3156,23 +3156,14 @@ final class NotchService: ObservableObject {
         if notice == nil { refreshPresentation() }
     }
 
-    /// The reading that ends the song names nothing, another player's song or
-    /// the next one paused. Held, the strip leaves as the song it showed, and
-    /// its hiding ends the hold.
+    /// Track changes do not hold the previous song; the live metadata and
+    /// artwork update directly in the existing music strip.
     private func holdEndingTrack() {
-        if heldMusic == nil, let presentedMusic { heldMusic = presentedMusic }
+        heldMusic = nil
     }
 
-    /// The closed island turns to the live song. A song that waited for its
-    /// notice appears now, unless a notice covers it, and the menu room is
-    /// read again for the strip it brings.
     private func releaseTrackHold() {
-        if heldMusic != nil {
-            heldMusic = nil
-            // A strip naming the song it held names the live one.
-            fitNamedMusicStrip()
-        }
-        guard awaitsTrackNotice else { return }
+        heldMusic = nil
         awaitsTrackNotice = false
         syncMenuSpaceMonitoring()
         if notice == nil { refreshPresentation() }
