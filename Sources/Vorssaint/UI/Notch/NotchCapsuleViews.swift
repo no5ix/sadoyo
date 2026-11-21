@@ -99,7 +99,9 @@ struct NotchCapsuleNoticeView: View {
             NotchNotificationAppIcon(app: content.app, size: CapsuleLayout.notificationIconSide(geometry))
             Text(content.compactTitle).capsuleTitle().layoutPriority(1)
             if !content.compactDetail.isEmpty {
-                Text(content.compactDetail).capsuleDetail()
+                // The message is what the person is being told: a row too
+                // narrow for both shortens the sender before the message.
+                Text(content.compactDetail).capsuleDetail().layoutPriority(2)
                     .padding(.leading, CapsuleLayout.groupSpacing - CapsuleLayout.spacing)
             }
         }
@@ -130,7 +132,10 @@ struct NotchCapsuleNoticeView: View {
             Text(notice.title).capsuleTitle().layoutPriority(1)
                 .foregroundStyle(notice.event == .timer ? Color.orange : .white)
             if !notice.detail.isEmpty {
-                Text(notice.detail).capsuleDetail()
+                // The words of a notice are a device, a song, a keyboard
+                // source: the name is the notice, so a short label -
+                // "Connected", "Copied", a source's code - gives way first.
+                Text(notice.detail).capsuleDetail().layoutPriority(2)
                     .truncationMode(notice.event == .accessory ? .middle : .tail)
                     .padding(.leading, CapsuleLayout.groupSpacing - CapsuleLayout.spacing)
             }

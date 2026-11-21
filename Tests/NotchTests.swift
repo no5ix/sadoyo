@@ -1038,10 +1038,11 @@ enum NotchTests {
                     for notice in notices {
                         let wings = notice.wings(in: geometry)
                         func content(_ wing: CGFloat) -> CGFloat { wing - notice.inset(wing: wing) - notice.cameraGap }
-                        suite.expect(width(notice.level == nil ? notice.title : notice.detail) + 18 + 8 <= content(wings.leading),
-                               "power labels and connection status fit beside their icon in \(language)")
-                        suite.expect(notice.level != nil || width(notice.detail) <= content(wings.trailing),
-                               "a device name and a charge percentage fit the opposite wing in \(language)")
+                        suite.expect(width(notice.level == nil ? notice.title : notice.detail) + 18 + 8
+                                     + NotchNotice.textAir <= content(wings.leading),
+                               "power labels and connection status fit beside their icon, with the air SwiftUI's drawing needs, in \(language)")
+                        suite.expect(notice.level != nil || width(notice.detail) + NotchNotice.textAir <= content(wings.trailing),
+                               "a device name and a charge percentage fit the opposite wing, with air, in \(language)")
                         let size = geometry.noticeSize(wings: wings)
                         var shifted = geometry
                         shifted.surfaceShift = geometry.noticeShift(wings)
@@ -1073,15 +1074,16 @@ enum NotchTests {
         }
         let long = NotchNotice(event: .accessory, title: "Connected",
                                detail: String(repeating: "Device ", count: 100), symbol: "headphones")
-        suite.expect(long.preferredWingWidth == 160 && long.accessibilityText.contains(long.detail),
-               "very long device names have bounded visual width and retain their full accessible name")
+        suite.expect(long.preferredWingWidth == NotchNotice.nameWingBudget
+               && long.accessibilityText.contains(long.detail),
+               "a name longer than the bar keeps a bounded visual width and retains its full accessible name")
         // The name takes a wing of its own instead of sharing one with the
-        // icon, so a common name no longer needs shortening.
+        // icon, and the wing is as wide as the name: a device is named whole.
         let trackpad = NotchNotice(event: .accessory, title: "Connected", detail: "Alex’s Magic Trackpad",
                                    symbol: "rectangle.and.hand.point.up.left")
-        suite.expect(trackpad.preferredWingWidth < 160
-               && width(trackpad.detail) + 16 + trackpad.cameraGap <= trackpad.preferredWingWidth,
-               "a device name fits its wing whole, with the gap its text keeps from the camera")
+        suite.expect(trackpad.preferredWingWidth < NotchNotice.nameWingBudget
+               && width(trackpad.detail) + NotchNotice.textAir + 16 + trackpad.cameraGap <= trackpad.preferredWingWidth,
+               "a device name fits its wing whole, with its air and the gap its text keeps from the camera")
         suite.expect(trackpad.readsFromEnds && trackpad.cameraGap > 0
                && !NotchNotice(event: .volume, title: "Volume", detail: "40%", symbol: "speaker", level: 0.4).readsFromEnds
                && NotchNotice(event: .volume, title: "Volume", detail: "40%", symbol: "speaker", level: 0.4).cameraGap == 0
@@ -1524,7 +1526,7 @@ enum NotchTests {
         let long = Layout.namedWings(title: String(repeating: "A very long song title ", count: 12), artist: nil,
                                      geometry: compactMusic, room: .infinity)
         suite.expect(long == NotchNoticeWings(leading: Layout.maximumWing, trailing: wing),
-               "a long title stops at a notice's widest side and ends in an ellipsis")
+               "a title of absurd length stops at the named side's bound, which is set above what a song's name needs")
         suite.expect(Layout.namedWings(title: String(repeating: "A very long song title ", count: 12), artist: nil,
                                        geometry: compactMusic, room: 120.6) == NotchNoticeWings(leading: 120, trailing: wing)
                && Layout.namedWings(title: "Midnight City", artist: "M83", geometry: compactMusic, room: wing) == nil

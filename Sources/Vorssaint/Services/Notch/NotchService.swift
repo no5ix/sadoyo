@@ -49,9 +49,14 @@ struct NotchNotice: Equatable {
             let wing = ceil(Self.levelInset + 18 + 8 + max(leading, measured("100%")))
             return NotchNoticeWings(leading: wing, trailing: wing)
         }
-        // Long accessory names still use bounded truncation.
-        let maximum: CGFloat = event == .accessory && level == nil ? 160 : 240
-        func fitted(_ content: CGFloat) -> CGFloat { min(maximum, max(Self.minimumWing, ceil(content) + 16 + cameraGap)) }
+        // A name is the notice, so its side grows to fit the whole name. The
+        // display, read by `NotchGeometry.noticeWings`, and the menus are what
+        // cut a name short - not a fixed width chosen before the name was read.
+        let budget = namesAThing ? Self.nameWingBudget : Self.phraseWingBudget
+        func fitted(_ content: CGFloat) -> CGFloat {
+            min(budget, max(Self.minimumWing, ceil(content) + NotchNotificationBannerLayout.inset
+                                + Self.textAir + cameraGap))
+        }
         // An empty title leaves the mark alone, without the space after it.
         let mark = fitted(leading > 0 ? leading + 18 + 8 : 18)
         guard level == nil else { return NotchNoticeWings(leading: mark, trailing: mark) }
@@ -63,6 +68,32 @@ struct NotchNotice: Equatable {
 
     /// The narrowest side a text notice keeps: its curved end and some air.
     static let minimumWing: CGFloat = 36
+
+    /// The difference between what AppKit measures and what SwiftUI draws -
+    /// its tracking, its shaping, its rounding. A side measured with none of
+    /// it leaves the last glyph of a name that measured as fitting to be cut,
+    /// so every side keeps this much. A banner's wings already do
+    /// (`NotchNotificationBannerLayout.air`).
+    static let textAir: CGFloat = NotchNotificationBannerLayout.air
+
+    /// The widest a side naming a thing grows: a device, a song, a keyboard
+    /// source, a watched area. The name is the whole notice, so the island
+    /// grows to fit it.
+    static let nameWingBudget: CGFloat = 420
+
+    /// The widest a side carrying a phrase grows: a status, a copied preview,
+    /// a reading. A paragraph is not a name and does not take the bar's room.
+    static let phraseWingBudget: CGFloat = 240
+
+    /// True when the notice's words are the name of a thing - a device, a
+    /// song, an input source, a watched area - and so get a wing that holds
+    /// the whole of them rather than a phrase's bound.
+    private var namesAThing: Bool {
+        switch event {
+        case .accessory, .inputSource, .track, .watch: return true
+        default: return false
+        }
+    }
 
     /// Room a level keeps inside its curved ends, as wide as its wings had
     /// when they were a fixed 80 pt.
@@ -367,6 +398,11 @@ final class NotchService: ObservableObject {
     /// a moment and give back as a new recording.
     private var musicStripHeldMusic: NotchCompactMusicSnapshot?
     private var musicNamingWork: DispatchWorkItem?
+    /// A new song names itself in the closed strip for a few seconds, then the
+    /// strip keeps only its cover and its bars.
+    @Published private(set) var capsuleMusicTitleShown = false
+    private var musicTitleWork: DispatchWorkItem?
+    private static let musicTitleDuration: TimeInterval = 4
     private var musicRequestWork: DispatchWorkItem?
     /// The next refresh fits the strip to its name, or back, without a swing.
     private var musicStripFitsInPlace = false
@@ -1647,10 +1683,12 @@ final class NotchService: ObservableObject {
     /// on the island's display unless `geometry` is another display's.
     private func capsuleStripSize(for activity: NotchCompactActivity, companion: NotchCompactActivity?,
                                   geometry: NotchGeometry? = nil) -> CGSize {
-        // Track changes never name the song in the closed capsule. The
-        // existing music strip keeps its measured artwork-and-bars width.
+        // The closed capsule measures the song's name when it shows it: as a
+        // new song arrives, and - on the island the pointer is on - while the
+        // pointer rests on the cover. A copy on another display never takes the
+        // pointer's request, only the song's own moment.
         let ownDisplay = geometry == nil
-        let named = false
+        let named = capsuleMusicTitleShown || ownDisplay && musicStripNamesSong
         let geometry = geometry ?? self.geometry
         let layout = NotchCapsuleLayout.self
         let language = L10n.shared.language
@@ -1957,6 +1995,8 @@ final class NotchService: ObservableObject {
         trackWork?.cancel(); trackWork = nil
         heldMusic = nil
         awaitsTrackNotice = false
+        musicTitleWork?.cancel(); musicTitleWork = nil
+        capsuleMusicTitleShown = false
         subscriptions.removeAll()
         stopPower()
         NotchMusicService.shared.stop()
@@ -3223,21 +3263,49 @@ final class NotchService: ObservableObject {
              : selectedNotice.event == .watch ? .watch : .controls, on: displayID)
     }
 
-    /// Track changes update the live playback information without presenting
-    /// a temporary notice or holding the previous song in the closed capsule.
+    /// Skipping through songs, or a title that lands before its artist, shows
+    /// one notice for where playback settles, naming the song it reached. Until
+    /// then the compact strip keeps the song it showed.
     private func scheduleTrackNotice() {
         trackWork?.cancel()
-        trackWork = nil
-        heldMusic = nil
-        awaitsTrackNotice = false
+        if heldMusic == nil, let presentedMusic { heldMusic = presentedMusic }
+        // With no song on the strip, as after a long gap between songs, the
+        // new one waits too, so the notice is still where it first appears.
+        if heldMusic == nil { awaitsTrackNotice = true }
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.trackWork = nil
+            // Released once the notice covers the strip, or when none can.
+            defer { self.releaseTrackHold() }
+            // The open island already shows the song, or holds something else
+            // the person is doing.
+            guard !self.expanded, !self.peeking, !self.dragPlaceholder, self.captureControls == nil,
+                  let playback = NotchMusicService.shared.playback, playback.isPlaying,
+                  let title = playback.track.title, !title.isEmpty else { return }
+            self.show(NotchNotice(event: .track, title: title, detail: playback.track.artist ?? "",
+                                  symbol: "music.note"))
+        }
+        trackWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
     }
 
+    /// The reading that ends the song names nothing, another player's song or
+    /// the next one paused. Held, the strip leaves as the song it showed, and
+    /// its hiding ends the hold.
     private func holdEndingTrack() {
-        heldMusic = nil
+        if heldMusic == nil, let presentedMusic { heldMusic = presentedMusic }
     }
 
+    /// The closed island turns to the live song. A song that waited for its
+    /// notice appears now, unless a notice covers it, and the menu room is
+    /// read again for the strip it brings.
     private func releaseTrackHold() {
-        heldMusic = nil
+        if heldMusic != nil {
+            heldMusic = nil
+            // A strip naming the song it held names the live one.
+            fitNamedMusicStrip()
+        }
+        guard awaitsTrackNotice else { return }
         awaitsTrackNotice = false
         syncMenuSpaceMonitoring()
         if notice == nil { refreshPresentation() }
@@ -3445,8 +3513,8 @@ final class NotchService: ObservableObject {
         // what it showed through a reading without one.
         var shown = musicStripSnapshot(for: NotchCompactMusicSnapshot(playback: playback, artwork: artwork,
                                                                       tint: tint, geometry: compactActivityGeometry))
-        shown.namedWing = nil
-        shown.namesSong = false
+        shown.namedWing = namedMusicWings?.leading
+        shown.namesSong = musicStripNamesSong
         presentedMusic = shown
     }
 
@@ -3889,6 +3957,25 @@ final class NotchService: ObservableObject {
         for mirror in mirrors.values { mirror.host.releaseWave() }
     }
 
+    /// A new song's title shows in the closed strip for a few seconds, then the
+    /// strip keeps only the cover and the bars.
+    private func nameCapsuleSong() {
+        // The song held for the next one's notice is the one that ended; the
+        // next song is named once the notice lets it go.
+        guard heldMusic == nil else { return }
+        musicTitleWork?.cancel()
+        capsuleMusicTitleShown = true
+        refreshCapsuleMusic()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.musicTitleWork = nil
+            self.capsuleMusicTitleShown = false
+            self.refreshCapsuleMusic()
+        }
+        musicTitleWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.musicTitleDuration, execute: work)
+    }
+
     /// A capsule is as wide as what it shows of the song, here or on another display.
     private func refreshCapsuleMusic() {
         guard compactActivity == .music,
@@ -3911,11 +3998,24 @@ final class NotchService: ObservableObject {
             && compactActivityGeometry.compactActivityWingWidth > 0
     }
 
-    /// The closed music capsule always keeps the artwork-and-bars layout.
-    var musicStripNamesSong: Bool { false }
+    /// The closed strip names its song: while the pointer rests on its cover,
+    /// and for a few seconds as each new song arrives.
+    var musicStripNamesSong: Bool {
+        (musicStripNamed && musicStripAnswers(.cover)) || capsuleMusicTitleShown
+    }
 
-    /// The closed music capsule has no title-driven wings.
-    var namedMusicWings: NotchNoticeWings? { nil }
+    /// Beside a camera, the sides of a strip naming its song: the words and
+    /// the cover on the camera's left, the bars alone on its right. Nil while
+    /// it shows only the cover and the bars, or already shows the song.
+    var namedMusicWings: NotchNoticeWings? {
+        guard musicStripNamesSong, !geometry.floats else { return nil }
+        // The song the strip shows, which may still be the one a skip left.
+        let live = NotchMusicService.shared.playback
+        let track = (heldMusic ?? musicStripStandIn(for: live))?.playback.track ?? live?.track
+        return NotchMusicStripLayout.namedWings(title: track?.title, artist: track?.artist,
+                                                geometry: compactActivityGeometry,
+                                                room: geometry.compactSideRoom ?? 0)
+    }
 
     /// Whether a reading is the song paused from the strip's button, or one
     /// from its player without a name, which some players send for a moment.
@@ -3940,9 +4040,12 @@ final class NotchService: ObservableObject {
         return musicStripStandIn(for: reading.playback) ?? reading
     }
 
-    /// Kept as a no-op for existing metadata observers; track changes do not
-    /// resize the closed music strip.
-    private func fitNamedMusicStrip() {}
+    /// A strip beside a camera naming its song fits the name it shows now in place.
+    private func fitNamedMusicStrip() {
+        guard musicStripNamesSong, !geometry.floats else { return }
+        musicStripFitsInPlace = true
+        refreshPresentation()
+    }
 
     /// The bars show the play or pause button: the pointer rests on them, the
     /// strip shows the song playing now, and its player takes the command.
@@ -3957,7 +4060,8 @@ final class NotchService: ObservableObject {
     }
 
     /// The strip reports the pointer resting on its cover or its bars, or
-    /// leaving them. Hover keeps the artwork-and-bars layout unchanged.
+    /// leaving them. A rest on the cover names the song after a moment, and
+    /// the island fits the name in place rather than swinging to it.
     func hoverMusicStrip(_ part: NotchMusicStripPart, entered: Bool) {
         guard entered else {
             if musicStripPointer == part { musicStripPointer = nil }
@@ -3971,7 +4075,9 @@ final class NotchService: ObservableObject {
             guard let self else { return }
             self.musicNamingWork = nil
             guard self.inside, self.musicStripPointer == .cover, self.musicStripAnswers(.cover) else { return }
-            self.musicStripNamed = false
+            self.musicStripNamed = true
+            self.musicStripFitsInPlace = true
+            if self.geometry.floats { self.refreshCapsuleMusic() } else { self.refreshPresentation() }
             self.syncHoverExitMonitoring(entered: true, point: NSEvent.mouseLocation)
         }
         musicNamingWork = work
@@ -5412,6 +5518,13 @@ final class NotchService: ObservableObject {
             music.$playback.map { [$0?.track.title, $0?.track.artist] }.removeDuplicates()
                 .receive(on: DispatchQueue.main)
                 .sink { [weak self] _ in self?.fitNamedMusicStrip() }
+                .store(in: &subscriptions)
+            // A strip names each new song for a moment: the song playing, or
+            // the next one once the notice releases the song it held.
+            music.$playback.map { $0?.track.title }.removeDuplicates().map { _ in () }
+                .merge(with: $heldMusic.map { $0?.playback.track.title }.removeDuplicates().map { _ in () })
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self] in self?.nameCapsuleSong() }
                 .store(in: &subscriptions)
             // The strip's button shows what a click asked for until the player
             // says the same, or moves on to another song.

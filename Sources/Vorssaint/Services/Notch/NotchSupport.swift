@@ -978,8 +978,10 @@ enum NotchMusicStripLayout {
     static let endInset = NotchNotificationBannerLayout.inset
     /// Between the words and the cover.
     static let spacing: CGFloat = 8
-    /// The widest a named side grows, as a notice's. A longer title ends in an ellipsis.
-    static let maximumWing: CGFloat = 240
+    /// The widest a named side grows: a bound for a title of absurd length,
+    /// not a name's. The display's edge and the menus beside the island are
+    /// what cut a title short, and `namedWings` reads both.
+    static let maximumWing: CGFloat = 520
     /// How long the pointer rests on the cover before the strip names the song,
     /// so a pass on the way to the menus leaves it alone.
     static let namingDelay: TimeInterval = 0.3
@@ -1294,8 +1296,12 @@ enum NotchCapsuleLayout {
     static let meterHeight: CGFloat = 4
     /// The equalizer's bars, as the music strip draws them.
     static var barsWidth: CGFloat { NotchLayout.compactMusicBarsWidth }
-    /// SwiftUI can draw a line a little wider than AppKit measures it.
-    static let air: CGFloat = 2
+    /// SwiftUI draws a line wider than AppKit measures it - its tracking, its
+    /// shaping, its rounding - by up to a point at these sizes. Every row is
+    /// laid out inside the width measured for it, so a measure with no margin
+    /// cuts the last glyph of a name that measured as fitting. This is the
+    /// margin; a banner's wings use the same (`NotchNotificationBannerLayout.air`).
+    static let air: CGFloat = NotchNotificationBannerLayout.air
     /// Between the pieces of one mark, such as an arrow and its percentage.
     static let markSpacing: CGFloat = 4
     static let calendarDotSide: CGFloat = 6
@@ -1309,14 +1315,18 @@ enum NotchCapsuleLayout {
     static let readingFont = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .semibold)
     static let smallFont = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium)
 
-    /// The widest each kind of strip grows, in points of capsule.
+    /// The widest each kind of strip grows, in points of capsule. These bound
+    /// what a paragraph can ask for - a copied preview, a file's name - and sit
+    /// above what a *name* needs, because a name is what these strips are for:
+    /// the room the display and the menus leave, read by `availableWidth`, is
+    /// what decides how far a name's strip grows.
     enum Maximum {
-        static let notification: CGFloat = 380
-        static let notice: CGFloat = 340
-        static let music: CGFloat = 260
-        static let calendar: CGFloat = 300
-        static let download: CGFloat = 280
-        static let activity: CGFloat = 220
+        static let notification: CGFloat = 520
+        static let notice: CGFloat = 520
+        static let music: CGFloat = 420
+        static let calendar: CGFloat = 420
+        static let download: CGFloat = 420
+        static let activity: CGFloat = 360
     }
 
     static func width(_ text: String, font: NSFont) -> CGFloat {

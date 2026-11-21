@@ -79,13 +79,14 @@ struct NotchMusicStrip: View {
     /// and the island answers that once for every display: the words are the
     /// song's name, so no window's width and no pointer's place decides it.
     private var fillsCameraGap: Bool {
-        // Track titles do not occupy the closed capsule's camera gap.
-        snapshot == nil ? false : Layout.fillsCameraGap(geometry)
+        // The island answers once whether the song is named in the camera's
+        // gap, so every window drawing the strip names it the same way.
+        snapshot == nil ? content.namesSongInGap : Layout.fillsCameraGap(geometry)
     }
     private var showsArtist: Bool { Layout.showsArtist(geometry) }
     /// The left side while the pointer has the song named, nil otherwise. A
     /// strip on its way out keeps the name it had, which leaves with it.
-    private var namedWing: CGFloat? { nil }
+    private var namedWing: CGFloat? { live ? service.namedMusicWings?.leading : snapshot?.namedWing }
     private var showsControl: Bool { live && service.musicStripShowsControl }
     /// A click's request shows at once, before the player says so.
     private var playing: Bool { (live ? service.musicStripRequest : nil) ?? playback?.isPlaying == true }
