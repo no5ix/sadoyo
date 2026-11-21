@@ -270,6 +270,28 @@ final class NotchService: ObservableObject {
     private var showsCapturePreview: Bool {
         expanded && !showingSections && selected == .captures && captureContent != nil
     }
+    /// Whether a copy's window draws the capture preview: the preview is the page
+    /// of the display its capture was taken on, and one page is drawn by one
+    /// window. The island's own pointer answers the preview while no copy draws
+    /// it, which is where a timed preview resting on the closed island keeps
+    /// hearing the island it is attached to.
+    private var capturePreviewOnCopy: Bool {
+        guard let owner = expansion.owner, owner != displayID else { return false }
+        return mirrors[owner] != nil
+    }
+    /// Whether the pointer rests on the window that draws the capture preview.
+    private var capturePreviewPointerInside: Bool {
+        guard let owner = expansion.owner, owner != displayID, let mirror = mirrors[owner] else { return inside }
+        return pointerOverMirror(mirror)
+    }
+    /// Every display with an island window that can draw a page now: the island's
+    /// own, and each copy on the screen.
+    private var islandWindowDisplays: [CGDirectDisplayID] {
+        var ids: [CGDirectDisplayID] = []
+        if let displayID { ids.append(displayID) }
+        ids.append(contentsOf: mirrors.values.filter { $0.model.shown }.map(\.id))
+        return ids
+    }
     /// Up and measuring its display. Settings previews read the island's
     /// size only then.
     private(set) var running = false
@@ -1170,6 +1192,15 @@ final class NotchService: ObservableObject {
     func retireExpansion() {
         guard let owner = expansion.owner, owner != displayID,
               !showsOnAllDisplays || mirrors[owner] == nil else { return }
+        // A capture preview drawn by a window that is gone has no page left to
+        // draw it. Its controller takes the preview back as a floating panel, the
+        // way it does when the island stops routing captures, so the person is
+        // left with the capture rather than with a preview nothing presents.
+        if showsCapturePreview {
+            let fallback = captureFallback
+            clearCapture()
+            fallback?()
+        }
         expansion.closed()
         expanded = false
         // The page is gone, and the choices made for that page go with it. A pin
@@ -1657,6 +1688,10 @@ final class NotchService: ObservableObject {
     }
 
     var presentationWindow: NSPanel? { panel }
+    /// The window that draws a capture preview: the island's own, or the copy of
+    /// the display the capture was taken on. The preview's shortcuts belong to
+    /// the window that draws it, whichever that is.
+    var capturePresentationWindow: NSPanel? { showsCapturePreview ? expansionHost?.panel : panel }
     /// User actions can open the island even when automatic full-screen feedback is hidden.
     var acceptsUserInteraction: Bool {
         running && !suspended && panel != nil
@@ -2226,8 +2261,13 @@ final class NotchService: ObservableObject {
         // to it hears only the pointer reaching the island's place or leaving
         // it: each move told as an entry would hold its dismissal off for as
         // long as the island stays out of sight.
-        if !watchesHiddenHover { captureHover?(entered) }
-        else if inside != wasInside { captureHover?(inside) }
+        // The preview hears the pointer on the window that draws it. A preview a
+        // copy draws is that copy's to hear, and the island's own strip resting
+        // under a pointer on another display is no news to it.
+        if !capturePreviewOnCopy {
+            if !watchesHiddenHover { captureHover?(entered) }
+            else if inside != wasInside { captureHover?(inside) }
+        }
         if captureControls != nil {
             updateCaptureControlsHover(wasInside: wasInside)
             return
@@ -3250,7 +3290,8 @@ final class NotchService: ObservableObject {
     }
 
     func presentCapture(id: UUID, content: AnyView, actions: AnyView? = nil, height: CGFloat,
-                        takeFocus: Bool, closeOnCollapse: Bool, fallback: @escaping () -> Void,
+                        takeFocus: Bool, closeOnCollapse: Bool, on display: CGDirectDisplayID? = nil,
+                        fallback: @escaping () -> Void,
                         close: @escaping () -> Void, dismiss: @escaping () -> Void,
                         hover: @escaping (Bool) -> Void) -> Bool {
         guard acceptsSystemFeedback, NotchSupport.routes(.capture) else { return false }
@@ -3264,9 +3305,13 @@ final class NotchService: ObservableObject {
         captureDismiss = dismiss
         captureHover = hover
         captureClosesOnCollapse = closeOnCollapse
-        open(.captures, pinned: keepOpen,
-             takeFocus: takeFocus, feedback: false, on: displayID)
-        captureHover?(inside)
+        // The island of the display the capture was taken on opens, where that
+        // display has an island to open. Where it has none, the island's own
+        // display draws the preview, as it always has.
+        open(.captures, pinned: keepOpen, takeFocus: takeFocus, feedback: false,
+             on: NotchSupport.capturePageDisplay(requested: display, islandDisplay: displayID,
+                                                 displaysWithIsland: islandWindowDisplays))
+        captureHover?(capturePreviewPointerInside)
         return true
     }
 
@@ -4226,6 +4271,12 @@ final class NotchService: ObservableObject {
         let wasInside = mirror.inside
         mirror.inside = pointerOverMirror(mirror)
         mirror.hover.update(pointerInside: mirror.inside)
+        // A capture preview this copy draws hears this copy's pointer, as the
+        // island's own preview hears the island's: it stays while the pointer
+        // rests on the page, and starts its dismissal as the pointer leaves.
+        if showsCapturePreview, expansion.presents(on: id), mirror.inside != wasInside {
+            captureHover?(mirror.inside)
+        }
         // The island's own rule, asked of this copy. Overlapping reports - the
         // window's tracking area, the pointer's moves followed for every island at
         // once, a second area over the same surface - tell the presence a copy
@@ -5135,10 +5186,16 @@ final class NotchService: ObservableObject {
     }
 
     /// The panel and what hangs from it: a SwiftUI popover opened in the
-    /// island is a child window, so a click in it is not a click away.
+    /// island is a child window, so a click in it is not a click away. The
+    /// window that draws the open page counts beside the island's own, since a
+    /// page opened on another display is drawn by that display's copy.
     private func ownsWindow(_ window: NSWindow?) -> Bool {
-        guard let window, let panel else { return false }
-        return sequence(first: window, next: { $0.parent }).contains { $0 === panel }
+        guard let window else { return false }
+        let owners = [panel, expansionPanel].compactMap { $0 }
+        guard !owners.isEmpty else { return false }
+        return sequence(first: window, next: { $0.parent }).contains { candidate in
+            owners.contains { owner in owner === candidate }
+        }
     }
 
     private func pointerOverChildWindow(_ point: CGPoint) -> Bool {

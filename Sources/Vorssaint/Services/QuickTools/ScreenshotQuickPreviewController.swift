@@ -51,6 +51,11 @@ final class ScreenshotQuickPreviewController {
     private var autoDismissDuration: TimeInterval?
     private var closed = false
     private let presentationID = UUID()
+    /// The display the capture was taken on, read off the captured area. The
+    /// island of that display is the one that opens for the preview, where it
+    /// has an island to open; the island's own display draws it where it has
+    /// none, and where the capture names no display at all.
+    private let displayID: CGDirectDisplayID?
     private var shownInNotch = false
     private var didStartPreview = false
     private var pointerInside = false
@@ -79,6 +84,10 @@ final class ScreenshotQuickPreviewController {
         self.share = share
         self.shareFile = shareFile
         self.onClose = onClose
+        self.displayID = ScreenshotSupport.captureDisplayID(
+            anchor: capture.anchorRect,
+            pointer: NSEvent.mouseLocation,
+            screens: NSScreen.screens.map { (id: $0.notchDisplayID, frame: $0.frame) })
         model.disabledActions = completedActions.intersection([.save, .copy])
     }
 
@@ -116,6 +125,7 @@ final class ScreenshotQuickPreviewController {
             id: presentationID, content: AnyView(content), actions: AnyView(content.toolbar), height: Self.size(showingLink: model.sharedRecord != nil).height,
             takeFocus: presentationPolicy.takesFocus,
             closeOnCollapse: presentationPolicy.closesOnCollapse,
+            on: displayID,
             fallback: { [weak self] in
                 guard let self else { return }
                 self.shownInNotch = false
@@ -128,7 +138,7 @@ final class ScreenshotQuickPreviewController {
             dismiss: { [weak self] in self?.dismissForClickElsewhere() },
             hover: { [weak self] inside in self?.hoverChanged(inside) }) {
             shownInNotch = true
-            if let window = NotchService.shared.presentationWindow { installKeyMonitor(for: window) }
+            if let window = NotchService.shared.capturePresentationWindow { installKeyMonitor(for: window) }
             finishShowing()
             return
         }
@@ -456,11 +466,19 @@ final class ScreenshotQuickPreviewController {
         DispatchQueue.main.asyncAfter(deadline: .now() + dismissDuration, execute: work)
     }
 
+    /// The preview's shortcuts belong to the window that draws the preview. In
+    /// the island that is the window of the display the capture was taken on, and
+    /// the page — preview and all — can be handed to another display's window
+    /// while the preview is open, so the window is asked for at the key press
+    /// rather than kept from the moment the preview appeared. Out of the island
+    /// the preview has one panel of its own, and that is the window asked for.
     private func installKeyMonitor(for panel: NSPanel) {
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self, weak panel] event in
-            guard let self, !self.closed, let panel, panel.isVisible, event.window === panel,
+            guard let self, !self.closed, let panel else { return event }
+            let window = self.shownInNotch ? NotchService.shared.capturePresentationWindow : panel
+            guard let window, window.isVisible, event.window === window,
                   !self.shownInNotch || NotchService.shared.isCaptureVisible(id: self.presentationID),
-                  panel.attachedSheet == nil, !(panel.firstResponder is NSText),
+                  window.attachedSheet == nil, !(window.firstResponder is NSText),
                   !ShortcutCapture.isCapturing else { return event }
             let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
             let key = Int(event.keyCode)

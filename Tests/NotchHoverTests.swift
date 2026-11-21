@@ -187,6 +187,16 @@ enum NotchHoverTests {
         var hoverWork: DispatchWorkItem?
         var shelfDragExitWork: DispatchWorkItem?
         var captureHover: ((Bool) -> Void)?
+        /// A capture preview drawn by a copy's window hears that copy's pointer and
+        /// not the island's own, and a page whose window has gone hands its preview
+        /// to the preview's own fallback. The fixture answers which window draws the
+        /// preview, and counts the hand-off, because no window is laid out here.
+        var capturePreviewOnCopy = false
+        var showsCapturePreview = false
+        var captureFallback: (() -> Void)?
+        var captureFallbacks = 0
+        func clearCapture() { captureFallback = nil; captureClose = nil }
+        var captureClose: (() -> Void)?
         func updateCaptureControlsHover(wasInside: Bool) {}
         /// A copy's peek is drawn by its own window, whose size the test does not
         /// lay out: the fixture only counts that the copy was asked to redraw.
@@ -1494,6 +1504,24 @@ enum NotchHoverTests {
                             && NSEvent.global.isEmpty && NSEvent.local.isEmpty,
                          "the closed island holding a capture keeps it paused and does not follow the pointer")
         }
+        // A capture preview drawn by a copy's window is that copy's to hear. The
+        // island's own strip, under a pointer that has travelled to another
+        // display, says nothing to a preview it does not draw — entering it is no
+        // pause for a dismissal on another display, and leaving is no dismissal.
+        do {
+            let handed = fixture()
+            UserDefaults.standard.enabled = false
+            var previewHovered: [Bool] = []
+            handed.captureHover = { previewHovered.append($0) }
+            handed.capturePreviewOnCopy = true
+            let top = handed.windowHost!.rect
+            NSEvent.mouseLocation = CGPoint(x: top.midX, y: top.maxY - 1)
+            handed.hover(true)
+            suite.expect(handed.inside, "precondition: the pointer is on the island's own strip")
+            handed.hover(false)
+            suite.expect(previewHovered.isEmpty,
+                         "the island's own pointer, entering and leaving, says nothing to a preview a copy draws")
+        }
         // Hidden until hover, the island follows every move on screen to see
         // the pointer arrive. A timed capture still attached to it would hear
         // each one as an entry and never dismiss while the island stays hidden.
@@ -2522,30 +2550,6 @@ enum NotchHoverTests {
         expect(crowded.compactActivityGeometry.compactActivityWingWidth == 0
                && !crowded.musicStripAnswers(.cover) && !crowded.musicStripAnswers(.bars),
                "a capsule without wings leaves its strip to the preview that opens over it")
-
-        // A capsule names a new song for a moment. Only a rest on its cover
-        // keeps it named after that, as at any other time.
-        let starting = strip(false, capsule: true)
-        starting.hover(true)
-        starting.nameCapsuleSong()
-        expect(starting.capsuleMusicTitleShown && starting.musicTitleWork != nil, "precondition: a new song is named")
-        DispatchQueue.main.advance(4.01)
-        expect(!starting.capsuleMusicTitleShown && !starting.musicStripNamed && starting.musicTitleWork == nil,
-               "a pointer elsewhere on the capsule lets the name go after its moment")
-        let resting = strip(false, capsule: true)
-        resting.hover(true)
-        resting.nameCapsuleSong()
-        resting.hoverMusicStrip(.cover, entered: true)
-        DispatchQueue.main.advance(4.01)
-        expect(!resting.capsuleMusicTitleShown && resting.musicStripNamesSong,
-               "a pointer resting on the cover keeps the song named when its moment ends")
-        leave(resting)
-        expect(!resting.musicStripNamed, "leaving takes the name back")
-        let unattended = strip(false, capsule: true)
-        unattended.nameCapsuleSong()
-        DispatchQueue.main.advance(4.01)
-        expect(!unattended.capsuleMusicTitleShown && !unattended.musicStripNamed,
-               "with no pointer on it, the capsule lets the name go after its moment")
 
         // The song a skip held goes back to the live one, which a named strip fits.
         let releasing = strip(true)

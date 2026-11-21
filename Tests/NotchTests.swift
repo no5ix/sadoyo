@@ -3433,6 +3433,30 @@ enum NotchTests {
                              "with every display chosen, the island that responds follows the pointer")
             }
         }
+        // A capture preview opens on the island of the display it was taken on.
+        suite.expect(NotchSupport.capturePageDisplay(requested: 2, islandDisplay: 1,
+                                                     displaysWithIsland: [1, 2, 3]) == 2,
+               "with an island on every display, the capture's own display draws the preview")
+        suite.expect(NotchSupport.capturePageDisplay(requested: 1, islandDisplay: 1,
+                                                     displaysWithIsland: [1, 2, 3]) == 1,
+               "a capture taken on the island's own display opens it there")
+        // The copies are off, that display is in full screen, its copy has gone, or
+        // the island is kept on one display: it has no window to draw the preview,
+        // and the island's own display keeps drawing it.
+        let displaysWithoutTheCapture: [[CGDirectDisplayID]] = [[1], [1, 3], []]
+        for displays in displaysWithoutTheCapture {
+            suite.expect(NotchSupport.capturePageDisplay(requested: 2, islandDisplay: 1,
+                                                         displaysWithIsland: displays) == 1,
+                         "a capture on a display with no island of its own falls to the island's own display")
+        }
+        suite.expect(NotchSupport.capturePageDisplay(requested: nil, islandDisplay: 1,
+                                                     displaysWithIsland: [1, 2, 3]) == 1
+                     && NotchSupport.capturePageDisplay(requested: nil, islandDisplay: nil,
+                                                        displaysWithIsland: [2]) == nil,
+               "a capture that names no display keeps the display the island stands on")
+        suite.expect(NotchSupport.capturePageDisplay(requested: 2, islandDisplay: nil,
+                                                     displaysWithIsland: [3]) == nil,
+               "with no island to draw it anywhere, no display is named")
         // The shape for displays without a notch shows only where the island can rest.
         suite.expect(!NotchSupport.reachesDisplayWithoutNotch(preference: .automatic, builtIn: [true, false],
                                                               notched: [true, false], main: 1),

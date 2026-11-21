@@ -192,8 +192,16 @@ enum NotchPresentationRefreshContract {
         var captureDismiss: (() -> Void)?
         var captureHover: ((Bool) -> Void)?
         var captureClosesOnCollapse = false
+        /// The preview is drawn by the window of the display its capture was taken
+        /// on, so the pointer asked at the opening is that window's, and the set of
+        /// displays with an island to draw on is the island's own plus its copies.
+        /// The fixture answers both, because no window is laid out here.
+        var capturePreviewPointerInside = false
+        var islandWindowDisplays: [CGDirectDisplayID] = [1]
         var routesCaptures = true
         var openedPages: [(module: NotchModule, takeFocus: Bool, wholeDashboard: Bool)] = []
+        /// The display each routed opening was asked for, beside the page it opened.
+        var routedPages: [(module: NotchModule, display: CGDirectDisplayID?)] = []
         func open(_ module: NotchModule? = nil, takeFocus: Bool = true, wholeDashboard: Bool = false,
                   on display: CGDirectDisplayID? = nil) {
             openedPages.append((module ?? .controls, takeFocus, wholeDashboard))
@@ -201,6 +209,7 @@ enum NotchPresentationRefreshContract {
         func open(_ module: NotchModule, pinned: Bool, takeFocus: Bool, feedback: Bool,
                   on display: CGDirectDisplayID? = nil) {
             openedPages.append((module, takeFocus, false))
+            routedPages.append((module, display))
         }
         var pinned = false
         var showingSections = false
@@ -1098,5 +1107,44 @@ enum NotchPresentationRefreshContract {
                      && reduced.departingMusic == nil,
                      "Reduce Motion removes the music strip immediately")
         NSWorkspace.shared.accessibilityDisplayShouldReduceMotion = false
+
+        // A capture preview is opened on the island of the display the capture was
+        // taken on, where that display has an island to draw it, and on the
+        // island's own display where it has none. The preview is the page of one
+        // window, so the pointer asked at the opening is that window's.
+        let external = Service()
+        external.islandWindowDisplays = [1, 2, 3]
+        external.capturePreviewPointerInside = true
+        var externalHover: [Bool] = []
+        _ = external.presentCapture(id: UUID(), content: true, height: 40, takeFocus: false,
+                                    closeOnCollapse: true, on: 3,
+                                    fallback: {}, close: {}, dismiss: {},
+                                    hover: { externalHover.append($0) })
+        suite.expect(external.routedPages.last?.module == .captures
+                     && external.routedPages.last?.display == 3 && externalHover == [true],
+                     "a capture taken on a display with its own island opens that island, and hears that display's pointer")
+        let alone = Service()
+        alone.islandWindowDisplays = [1]
+        _ = alone.presentCapture(id: UUID(), content: true, height: 40, takeFocus: false,
+                                 closeOnCollapse: true, on: 3,
+                                 fallback: {}, close: {}, dismiss: {}, hover: { _ in })
+        suite.expect(alone.routedPages.last?.module == .captures && alone.routedPages.last?.display == 1,
+                     "a capture on a display with no island of its own is drawn by the island's own display")
+        let unnamed = Service()
+        unnamed.islandWindowDisplays = [1, 2]
+        _ = unnamed.presentCapture(id: UUID(), content: true, height: 40, takeFocus: false,
+                                   closeOnCollapse: true, fallback: {}, close: {}, dismiss: {}, hover: { _ in })
+        suite.expect(unnamed.routedPages.last?.module == .captures && unnamed.routedPages.last?.display == 1,
+                     "a capture that names no display keeps the island's own display")
+        let pointerOutside = Service()
+        pointerOutside.islandWindowDisplays = [1, 2]
+        pointerOutside.capturePreviewPointerInside = false
+        var restingHover: [Bool] = []
+        _ = pointerOutside.presentCapture(id: UUID(), content: true, height: 40, takeFocus: true,
+                                          closeOnCollapse: false, on: 2,
+                                          fallback: {}, close: {}, dismiss: {},
+                                          hover: { restingHover.append($0) })
+        suite.expect(pointerOutside.routedPages.last?.display == 2 && restingHover == [false],
+                     "a capture opened where the pointer is not asks that window's pointer, which is outside")
     }
 }

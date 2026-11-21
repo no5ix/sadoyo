@@ -134,6 +134,27 @@ enum NotchCaptureKeyboardTests {
                                    charactersIgnoringModifiers: "w")
         suite.expect(Event.handler?(unrelatedClose) != nil && !preview.closed,
                      "Command W leaves unrelated windows alone")
+        // The preview's shortcuts belong to the window that draws it. With the
+        // island on every display, a capture taken on an external display is drawn
+        // by that display's copy, and the page — preview and all — can be handed to
+        // another display's window while the preview stays open, so the window is
+        // asked for at the key press, not kept from the moment the preview appeared.
+        preview.shownInNotch = true
+        notch.expanded = true
+        notch.selected = .captures
+        let copy = Contract.NSPanel()
+        notch.captureWindow = copy
+        preview.actions = []
+        _ = Event.handler?(Event(window: copy, keyCode: UInt16(kVK_ANSI_S), modifierFlags: .command))
+        suite.expect(preview.actions == [.save],
+                     "the copy of the display that draws the preview answers its shortcuts")
+        preview.actions = []
+        _ = Event.handler?(Event(window: panel, keyCode: UInt16(kVK_ANSI_S), modifierFlags: .command))
+        suite.expect(preview.actions.isEmpty,
+                     "and the window that no longer draws the preview leaves its shortcuts alone")
+        notch.captureWindow = nil
+        preview.shownInNotch = false
+        preview.actions = []
         for (character, key, closes) in [("w", kVK_ANSI_W, true), ("W", kVK_ANSI_W, true),
                                          ("w", kVK_ANSI_Z, true), ("z", kVK_ANSI_W, false),
                                          ("é", kVK_ANSI_W, false), ("ц", kVK_ANSI_W, true),

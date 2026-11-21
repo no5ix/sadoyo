@@ -911,6 +911,58 @@ enum ScreenshotFeatureTests {
                 fallback: .zero) == stackedScreens[1].visibleFrame,
                    "an even split across stacked displays goes to the lower one when its top row holds the pointer")
         }
+        // The display a finished capture belongs to, as the island reads it: the
+        // island of that display is the one that opens for the preview.
+        let captureScreens: [(id: CGDirectDisplayID, frame: CGRect)] = [
+            (id: 7, frame: CGRect(x: -1920, y: 0, width: 1920, height: 1080)),
+            (id: 3, frame: CGRect(x: 0, y: 0, width: 1440, height: 900)),
+            (id: 12, frame: CGRect(x: 1440, y: 300, width: 1280, height: 1024)),
+        ]
+        suite.expect(ScreenshotSupport.captureDisplayID(anchor: CGRect(x: -900, y: 200, width: 500, height: 400),
+                                                        pointer: CGPoint(x: -500, y: 300),
+                                                        screens: captureScreens) == 7,
+                   "a capture names the display it was taken on in a three-display layout")
+        suite.expect(ScreenshotSupport.captureDisplayID(anchor: CGRect(x: 1300, y: 500, width: 500, height: 500),
+                                                        pointer: CGPoint(x: 1700, y: 650),
+                                                        screens: captureScreens) == 12,
+                   "a capture crossing displays names the display holding most of it")
+        suite.expect(ScreenshotSupport.captureDisplayID(anchor: captureScreens[2].frame,
+                                                        pointer: CGPoint(x: 2000, y: 800),
+                                                        screens: captureScreens) == 12,
+                   "a full screen capture names the display it filled")
+        suite.expect(ScreenshotSupport.captureDisplayID(anchor: CGRect(x: 5000, y: 5000, width: 400, height: 300),
+                                                        pointer: CGPoint(x: 700, y: 500),
+                                                        screens: captureScreens) == nil,
+                   "a capture on no display on the desk names no display, so nothing is guessed")
+        let stackedCaptureScreens: [(id: CGDirectDisplayID, frame: CGRect)] = [
+            (id: 5, frame: CGRect(x: 0, y: 900, width: 1440, height: 900)),
+            (id: 6, frame: CGRect(x: 0, y: 0, width: 1440, height: 900)),
+        ]
+        for screens in [stackedCaptureScreens, Array(stackedCaptureScreens.reversed())] {
+            suite.expect(ScreenshotSupport.captureDisplayID(anchor: CGRect(x: 100, y: 800, width: 400, height: 200),
+                                                            pointer: CGPoint(x: 300, y: 950),
+                                                            screens: screens) == 5,
+                       "a capture split evenly between stacked displays names the display under the pointer")
+            suite.expect(ScreenshotSupport.captureDisplayID(anchor: CGRect(x: 100, y: 800, width: 400, height: 200),
+                                                            pointer: CGPoint(x: 300, y: 850),
+                                                            screens: screens) == 6,
+                       "the same capture names the lower display when the pointer rests there")
+        }
+        // A picture from the clipboard, and a picture opened from the shelf, carry
+        // an anchor that names no area: they name no display, and the island keeps
+        // the display it already has.
+        for anchor in [CGRect.zero, CGRect(x: -500, y: 200, width: 0, height: 400),
+                       CGRect(x: 0, y: 0, width: CGFloat.nan, height: 100),
+                       CGRect(x: CGFloat.greatestFiniteMagnitude, y: 0, width: 10, height: 10)] {
+            suite.expect(ScreenshotSupport.captureDisplayID(anchor: anchor,
+                                                            pointer: CGPoint(x: 700, y: 500),
+                                                            screens: captureScreens) == nil,
+                       "an anchor that names no area names no display")
+        }
+        suite.expect(ScreenshotSupport.captureDisplayID(anchor: CGRect(x: 100, y: 100, width: 200, height: 200),
+                                                        pointer: CGPoint(x: 200, y: 200),
+                                                        screens: [(id: 0, frame: CGRect(x: 0, y: 0, width: 1440, height: 900))]) == nil,
+                   "a display with no identifier is never named")
         suite.expect(ScreenshotSupport.QuickPreviewPosition.allCases.map(\.rawValue)
                 == ["", "topLeft", "topRight", "bottomLeft", "bottomRight"]
                 && ScreenshotSupport.QuickPreviewPosition(rawValue: "bogus") == nil,
@@ -4154,8 +4206,10 @@ enum ScreenshotFeatureTests {
         suite.expect(Defaults.registeredDefaults[DefaultsKey.radialMenuShortcut] as? String
                 == "control+option+command:49",
                "the default radial menu shortcut is control option command space")
-        suite.expect(Defaults.registeredDefaults[DefaultsKey.radialMenuAtPointer] as? Bool == true,
-               "the radial menu opens at the pointer by default")
+        // The wheel always opens at the pointer, so no preference is registered
+        // for the choice any more.
+        suite.expect(Defaults.registeredDefaults["radialMenuAtPointer"] == nil,
+               "the radial menu opens at the pointer with nothing to choose")
         suite.expect(Defaults.registeredDefaults[DefaultsKey.radialMenuMouseButton] as? String == "off",
                "the side button trigger ships off")
         suite.expect(Defaults.registeredDefaults[DefaultsKey.radialMenuActivationMode] as? String == "pressOrHold",

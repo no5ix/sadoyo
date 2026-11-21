@@ -1003,6 +1003,35 @@ enum ScreenshotSupport {
         return screens.first { NSMouseInRect(pointer, $0.frame, false) }?.visibleFrame ?? fallback
     }
 
+    /// The display a finished capture was taken on, read the way the preview's
+    /// own placement reads it: the screen holding the captured area, and the
+    /// screen holding the most of it when a region crosses displays. A region
+    /// that ties between two screens goes to the one the pointer is on. An
+    /// anchor that names no area — a picture taken from the clipboard, a picture
+    /// opened from the shelf — names no display, and the caller keeps the
+    /// display it already had rather than guessing one.
+    static func captureDisplayID(anchor: CGRect,
+                                 pointer: CGPoint,
+                                 screens: [(id: CGDirectDisplayID, frame: CGRect)]) -> CGDirectDisplayID? {
+        guard anchor.width > 0, anchor.height > 0,
+              anchor.origin.x.isFinite, anchor.origin.y.isFinite,
+              anchor.width.isFinite, anchor.height.isFinite else { return nil }
+        var selected: (id: CGDirectDisplayID, frame: CGRect, area: CGFloat)?
+        for screen in screens where screen.id != 0
+            && screen.frame.origin.x.isFinite && screen.frame.origin.y.isFinite
+            && screen.frame.width.isFinite && screen.frame.height.isFinite {
+            let overlap = anchor.intersection(screen.frame)
+            let area = overlap.isNull ? 0 : max(0, overlap.width) * max(0, overlap.height)
+            let winsTie = area == (selected?.area ?? 0) && area > 0
+                && NSMouseInRect(pointer, screen.frame, false)
+                && !(selected.map { NSMouseInRect(pointer, $0.frame, false) } ?? false)
+            if area > (selected?.area ?? 0) || winsTie {
+                selected = (screen.id, screen.frame, area)
+            }
+        }
+        return selected?.id
+    }
+
     /// Places the capture preview beside the selection in automatic mode, or
     /// in the selected display corner, and clamps it to the visible frame.
     static func quickPreviewFrame(size: CGSize,

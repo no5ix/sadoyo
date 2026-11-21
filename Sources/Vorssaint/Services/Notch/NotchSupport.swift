@@ -2632,6 +2632,23 @@ enum NotchSupport {
                                       hasLid: hasLid) else { return false }
         return !notched[index]
     }
+
+    /// The display that draws a capture preview.
+    ///
+    /// A capture names the display it was taken on, and that display answers
+    /// where it has an island to draw the preview: with the island on every
+    /// display, each display has one, so the island under the capture opens and
+    /// the other displays keep their closed strips. Nothing was asked for where
+    /// no display was named — a picture from the clipboard, a picture opened
+    /// from the shelf — and a named display with no island of its own cannot
+    /// draw anything: it is in full screen, its copy is off, the island is kept
+    /// on one display. Those fall to the island's own display, which is where
+    /// the island lives, so the preview is never left undrawn.
+    static func capturePageDisplay(requested: CGDirectDisplayID?, islandDisplay: CGDirectDisplayID?,
+                                   displaysWithIsland: [CGDirectDisplayID]) -> CGDirectDisplayID? {
+        if let requested, displaysWithIsland.contains(requested) { return requested }
+        return islandDisplay
+    }
 }
 
 /// A hidden menu bar retains only a measurement from the same display and mode.

@@ -167,6 +167,23 @@ enum NotchMirrorContract {
         var outlineEnabled = false, hidesInFullscreen = false
         let openTitle = "Open"
         var opened = 0, collapses = 0, countdownOpenings = 0
+        /// A capture preview is a page like any other: the copy of the display that
+        /// draws it hears its own pointer, and a preview whose window has gone
+        /// hands itself to the preview's own fallback rather than vanishing. The
+        /// fixture answers which state the preview is in and takes the hand-off;
+        /// no preview view is drawn here.
+        var showsCapturePreview = false
+        var captureHover: ((Bool) -> Void)?
+        var captureFallback: (() -> Void)?
+        func clearCapture() { captureFallback = nil; captureHover = nil }
+        /// A copy's level notice is the island's own reading, routed by the shared
+        /// `NotchLevelHUDRouting` rule that `levelNoticeContracts` contracts. This
+        /// fixture draws no level HUD, so a copy carries none, and its surface is
+        /// the strip the display measures.
+        func mirroredLevelNotice(on displayID: CGDirectDisplayID) -> NotchNotice? { nil }
+        func mirrorLevelNoticeSurfaceSize(_ notice: NotchNotice, geometry: NotchGeometry) -> CGSize {
+            geometry.restingSize(showsContent: false)
+        }
         var moves: [CGDirectDisplayID] = []
         var made: [Host] = []
 
@@ -480,6 +497,7 @@ enum NotchMirrorContract {
                                       activity: .music, expanded: true),
                      "a copy is only redrawn when what it shows changes, and the page it draws is such a change")
         ownershipContracts(suite)
+        capturePreviewDisplayContracts(suite)
         pointerExitContracts(suite)
         hoverCollapseChecks(suite)
         hoverLifecycleContracts(suite)
@@ -618,6 +636,56 @@ enum NotchMirrorContract {
                          && service.mirrors[2]?.model.expanded == false
                          && service.mirrors[3]?.model.expanded == true,
                      "a page opened on a second copy closes the first, and no two copies draw a page")
+    }
+
+    /// The capture preview is the page of the display its capture was taken on:
+    /// the copy of that display draws it, hears its own pointer for the preview,
+    /// and hands the preview to its own fallback when the display's window goes
+    /// away. A preview is never drawn twice, and never left undrawn.
+    private static func capturePreviewDisplayContracts(_ suite: TestSuite) {
+        let builtIn = NSScreen(1, CGRect(x: 0, y: 0, width: 1470, height: 956), notched: true)
+        let external = NSScreen(2, CGRect(x: 1470, y: -86, width: 1920, height: 1080))
+        NSScreen.screens = [builtIn, external]
+        NSScreen.screensHaveSeparateSpaces = false
+        defer {
+            NSScreen.screens = []
+            NSScreen.screensHaveSeparateSpaces = true
+        }
+
+        let service = Service()
+        service.syncMirrors()
+        let copy = service.mirrors[2]!
+        copy.over = true
+        copy.host.setHoverHandler { [weak service] entered in service?.mirrorHover(2, entered: entered) }
+        var heard: [Bool] = []
+        service.captureHover = { heard.append($0) }
+        copy.host.hoverHandler?(true)
+        suite.expect(heard.isEmpty, "a copy that draws no capture preview says nothing to one")
+
+        service.expand(on: 2)
+        service.showsCapturePreview = true
+        service.keepsWorkingSurface = true
+        service.syncMirrors()
+        suite.expect(copy.model.expanded && service.presentsExpansion(on: 2) && service.expansion.owner == 2,
+                     "precondition: the copy of the display the capture was taken on draws the preview's page")
+        copy.over = false
+        copy.host.hoverHandler?(false)
+        suite.expect(heard == [false], "the copy that draws the preview hears its own pointer leaving, which starts the preview's dismissal")
+        copy.over = true
+        copy.host.hoverHandler?(true)
+        suite.expect(heard == [false, true],
+                     "and its pointer coming back to the page, which is what keeps the preview from dismissing")
+
+        // The display is unplugged while the preview is open. The page retires
+        // with the window that drew it, and the preview goes to its own fallback —
+        // a floating panel, not a page that nothing draws any more.
+        var fellBack = 0
+        service.captureFallback = { fellBack += 1 }
+        NSScreen.screens = [builtIn]
+        service.syncMirrors()
+        service.retireExpansion()
+        suite.expect(fellBack == 1 && service.expansion.owner == nil && !service.expanded,
+                     "a capture preview whose display has gone hands itself to its fallback, with its page closed")
     }
 
     /// A copy's pointer, and what its leaving closes: every page it carries,

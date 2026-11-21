@@ -41,3 +41,4 @@ Decisions must reflect an explicit design choice, not a guess about the code. Up
 - 0006. A page the pointer opened stays the pointer's page
 - 0007. Per-application input source memory is a pure machine over bundle identity
 - 0008. Every expanded page collapses on pointer exit
+- 0009. A capture preview opens on the display it was taken on
