@@ -1926,7 +1926,6 @@ final class NotchService: ObservableObject {
         removeHoverExitMonitors()
         removePointerMonitors()
         releaseMonitor()
-        musicTitleWork?.cancel(); musicTitleWork = nil
         closeMirrors()
         windowHost?.close()
         windowHost = nil
