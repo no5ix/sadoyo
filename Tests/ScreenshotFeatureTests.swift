@@ -1472,6 +1472,18 @@ enum ScreenshotFeatureTests {
         // out in a fixture, so it is named here from the source that owns it.
         suite.expect(quickPreviewSource.contains("static let previewWidth: CGFloat = 350"),
             "the preview's measure stays the number the island's page and the fixtures are planned around")
+        // The island's top is shared with a camera, so the preview's row keeps
+        // the actions the island's sides have room for and hands the rest to a
+        // menu. The row is chosen by the island's measure, and its menu is
+        // named in the words the tool already uses for more tools.
+        suite.expect(quickPreviewSource.contains("if embedded, island.capturePreviewTrailingActions != nil {"),
+            "where the island draws a camera the preview hands it the row its sides have room for")
+        suite.expect(quickPreviewSource.contains("return Array(slots.suffix(kept))"),
+            "the row keeps the actions at its end, where the capture is given somewhere to go")
+        suite.expect(quickPreviewSource.contains("ForEach(overflowSlots) { slot in"),
+            "what a side has no room for rides in the row's menu, so the row spends no action")
+        suite.expect(quickPreviewSource.contains(".accessibilityLabel(strings.moreTools)"),
+            "the row's menu is named, in the words the tool already uses for more tools")
         let quickPreviewCode = quickPreviewSource.components(separatedBy: "\n")
             .filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//") }
             .joined(separator: "\n")

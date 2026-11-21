@@ -1957,6 +1957,15 @@ def main():
           + declaration(preview, "private struct ScreenshotQuickPreviewView:").replace("private struct", "struct", 1)
           + declaration(preview, "private struct ScreenshotPreviewActionStyle:").replace("private struct", "struct", 1)
           + declaration("Sources/Vorssaint/UI/Notch/NotchComponents.swift", "struct NotchButtonStyle:")
+          # The island answers how many of the preview's actions its top row keeps
+          # beside a camera, and nothing for a top without one. Written as the
+          # fixture's answer; the island's own measure is tested in the mirror
+          # suite, and the preview's shape checks read this dependency out of the
+          # source that owns it.
+          + "final class NotchService: ObservableObject {\n"
+          + "static let shared = NotchService()\n"
+          + "var capturePreviewTrailingActions: Int?\n"
+          + "}\n"
           + "enum ScreenshotQuickPreviewController {\n"
           # The preview's own measure, which the island's preview page is planned
           # around. Written here as the fixture's number, kept honest by the

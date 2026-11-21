@@ -557,6 +557,9 @@ private struct ScreenshotQuickPreviewView: View {
     let strings: ScreenshotFeatureStrings
     @ObservedObject var model: ScreenshotQuickPreviewModel
     @ObservedObject private var featureRuntime = FeatureRuntime.shared
+    /// The island answers how much of this row its top keeps beside a camera,
+    /// and for the display whose island draws the page.
+    @ObservedObject private var island = NotchService.shared
     let perform: (ScreenshotQuickPreviewController.Action) -> Void
     let dragItem: () -> NSItemProvider
     let share: (ScreenshotShareDuration) -> Void
@@ -583,18 +586,125 @@ private struct ScreenshotQuickPreviewView: View {
         else { preview }
     }
 
-    private var actionBar: some View {
-        HStack(spacing: embedded ? 2 : 5) {
-            Button {
-                perform(.discard)
-            } label: {
-                Image(systemName: "trash")
-                    .frame(width: embedded ? 28 : 22, height: embedded ? 28 : 18)
+    /// The row of actions the preview hands the island's header, and the
+    /// floating panel. Where the island draws a camera the row wraps it, and a
+    /// side keeps only what fits at the island's 28-point targets: the actions
+    /// that give the capture somewhere to go stay in the row, and the rest ride
+    /// in the row's own menu. Where the island draws no camera the row is the
+    /// whole of its top, and every action shows, as it always did.
+    @ViewBuilder private var actionBar: some View {
+        if embedded, island.capturePreviewTrailingActions != nil {
+            islandRow
+        } else {
+            fullRow
+        }
+    }
+
+    /// The row beside a camera: its menu first, then the actions it keeps, in
+    /// the order the full row shows them, so the editor still ends the row.
+    private var islandRow: some View {
+        HStack(spacing: 2) {
+            if !overflowSlots.isEmpty {
+                rowOverflowMenu
             }
-            .modifier(ScreenshotPreviewActionStyle(embedded: embedded))
-            .controlSize(.small)
-            .screenshotSafeHelp("\(strings.discardConfirm)  (⌫)")
-            .accessibilityLabel(strings.discardConfirm)
+            ForEach(keptSlots) { slot in
+                islandButton(slot)
+            }
+        }
+    }
+
+    /// The preview's actions, in the order the island's row shows them.
+    private enum Slot: Int, Identifiable {
+        case discard, qr, text, save, copy, share, link, pin, edit
+        var id: Int { rawValue }
+    }
+
+    /// The actions this preview has to show: a code only appears once a capture
+    /// is read, Copy text only while the feature is on, and the share link only
+    /// before a capture has one.
+    private var rowSlots: [Slot] {
+        var slots: [Slot] = [.discard]
+        if model.qr != nil { slots.append(.qr) }
+        let readsText = featureRuntime.isAvailable(.screenOCR)
+        if readsText { slots.append(.text) }
+        slots.append(contentsOf: [.save, .copy, .share])
+        if sharingEnabled, model.sharedRecord == nil { slots.append(.link) }
+        slots.append(contentsOf: [.pin, .edit])
+        return slots
+    }
+
+    /// The actions the row keeps beside a camera, counted from its end: the
+    /// share, the pin, the editor. All of them where the island keeps the whole
+    /// top for the row, and of the actions the row has, never more.
+    private var keptSlots: [Slot] {
+        let slots = rowSlots
+        guard let kept = island.capturePreviewTrailingActions, kept > 0, kept < slots.count else { return slots }
+        return Array(slots.suffix(kept))
+    }
+
+    /// What the row's menu holds: the actions the side has no room for, in the
+    /// order the row would have shown them, so the deleting is the first thing
+    /// the menu offers.
+    private var overflowSlots: [Slot] {
+        let slots = rowSlots
+        return Array(slots.prefix(slots.count - keptSlots.count))
+    }
+
+    /// The row's menu, so a row that shares the island's top with a camera
+    /// costs no action: each one is named, and the keyboard reaches every one
+    /// of them whether it is in the row or in the menu.
+    private var rowOverflowMenu: some View {
+        Menu {
+            ForEach(overflowSlots) { slot in
+                menuItem(slot)
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+                .frame(width: 28, height: 28)
+                .accessibilityLabel(strings.moreTools)
+        }
+        .modifier(ScreenshotPreviewActionStyle(embedded: true))
+        .controlSize(.small)
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .screenshotSafeHelp(strings.moreTools)
+        .accessibilityLabel(strings.moreTools)
+    }
+
+    @ViewBuilder private func islandButton(_ slot: Slot) -> some View {
+        switch slot {
+        case .discard: discardControl
+        case .qr: qrControl
+        case .text: textControl
+        case .save: saveControl
+        case .copy: copyControl
+        case .share: shareControl
+        case .link: shareMenu
+        case .pin: pinControl
+        case .edit: editControl
+        }
+    }
+
+    @ViewBuilder private func menuItem(_ slot: Slot) -> some View {
+        switch slot {
+        case .discard: Button(strings.discardConfirm) { perform(.discard) }
+        case .qr: Button(L10n.shared.s.qrResultTitle) { showQR() }
+        case .text: Button(strings.copyTextButton) { copyText() }
+        case .save: Button(strings.saveButton) { perform(.save) }
+            .disabled(model.disabledActions.contains(.save))
+        case .copy: Button(strings.copyButton) { perform(.copy) }
+            .disabled(model.disabledActions.contains(.copy))
+        case .share: Button(strings.shareButton) { systemShare() }
+        case .link: Menu(strings.shareSectionTitle) { shareDurations }
+        case .pin: Button(strings.pinButton) { perform(.pin) }
+        case .edit: Button(strings.editButton) { perform(.edit) }
+        }
+    }
+
+    private var fullRow: some View {
+        HStack(spacing: embedded ? 2 : 5) {
+            discardControl
             if model.qr != nil {
                 qrControl
                     .transition(.scale.combined(with: .opacity))
@@ -603,52 +713,85 @@ private struct ScreenshotQuickPreviewView: View {
             if embedded, featureRuntime.isAvailable(.screenOCR) {
                 textControl
             }
-            actionButton(symbol: "square.and.arrow.down",
-                         title: strings.saveButton,
-                         shortcut: "⌘S",
-                         disabled: model.disabledActions.contains(.save)) {
-                perform(.save)
-            }
-            actionButton(symbol: "doc.on.doc",
-                         title: strings.copyButton,
-                         shortcut: "⌘C",
-                         disabled: model.disabledActions.contains(.copy)) {
-                perform(.copy)
-            }
+            saveControl
+            copyControl
             if embedded {
-                Button(action: systemShare) {
-                    Image(systemName: "square.and.arrow.up").frame(width: 28, height: 28)
-                }
-                .modifier(ScreenshotPreviewActionStyle(embedded: true))
-                .controlSize(.small)
-                .background(ShelfSharePickerAnchor(anchor: shareAnchor))
-                .screenshotSafeHelp(strings.shareButton)
-                .accessibilityLabel(strings.shareButton)
+                shareControl
             }
             if sharingEnabled, model.sharedRecord == nil {
                 shareMenu
             }
             if !embedded { Spacer(minLength: 4) }
             if embedded {
-                Button {
-                    perform(.pin)
-                } label: {
-                    Image(systemName: "pin").frame(width: 28, height: 28)
-                }
-                .modifier(ScreenshotPreviewActionStyle(embedded: true))
-                .controlSize(.small)
-                .screenshotSafeHelp(strings.pinButton)
-                .accessibilityLabel(strings.pinButton)
+                pinControl
             }
-            Button { perform(.edit) } label: {
-                if embedded { Image(systemName: "pencil").frame(width: 28, height: 28) }
-                else { Text(strings.editButton) }
-            }
-            .accessibilityLabel(strings.editButton)
-            .modifier(ScreenshotPreviewActionStyle(embedded: embedded, prominent: true))
-            .controlSize(.small)
-            .screenshotSafeHelp("\(strings.editButton)  (⏎)")
+            editControl
         }
+    }
+
+    private var discardControl: some View {
+        Button {
+            perform(.discard)
+        } label: {
+            Image(systemName: "trash")
+                .frame(width: embedded ? 28 : 22, height: embedded ? 28 : 18)
+        }
+        .modifier(ScreenshotPreviewActionStyle(embedded: embedded))
+        .controlSize(.small)
+        .screenshotSafeHelp("\(strings.discardConfirm)  (⌫)")
+        .accessibilityLabel(strings.discardConfirm)
+    }
+
+    private var saveControl: some View {
+        actionButton(symbol: "square.and.arrow.down",
+                     title: strings.saveButton,
+                     shortcut: "⌘S",
+                     disabled: model.disabledActions.contains(.save)) {
+            perform(.save)
+        }
+    }
+
+    private var copyControl: some View {
+        actionButton(symbol: "doc.on.doc",
+                     title: strings.copyButton,
+                     shortcut: "⌘C",
+                     disabled: model.disabledActions.contains(.copy)) {
+            perform(.copy)
+        }
+    }
+
+    private var shareControl: some View {
+        Button(action: systemShare) {
+            Image(systemName: "square.and.arrow.up").frame(width: 28, height: 28)
+        }
+        .modifier(ScreenshotPreviewActionStyle(embedded: true))
+        .controlSize(.small)
+        .background(ShelfSharePickerAnchor(anchor: shareAnchor))
+        .screenshotSafeHelp(strings.shareButton)
+        .accessibilityLabel(strings.shareButton)
+    }
+
+    private var pinControl: some View {
+        Button {
+            perform(.pin)
+        } label: {
+            Image(systemName: "pin").frame(width: 28, height: 28)
+        }
+        .modifier(ScreenshotPreviewActionStyle(embedded: true))
+        .controlSize(.small)
+        .screenshotSafeHelp(strings.pinButton)
+        .accessibilityLabel(strings.pinButton)
+    }
+
+    private var editControl: some View {
+        Button { perform(.edit) } label: {
+            if embedded { Image(systemName: "pencil").frame(width: 28, height: 28) }
+            else { Text(strings.editButton) }
+        }
+        .accessibilityLabel(strings.editButton)
+        .modifier(ScreenshotPreviewActionStyle(embedded: embedded, prominent: true))
+        .controlSize(.small)
+        .screenshotSafeHelp("\(strings.editButton)  (⏎)")
     }
 
     private var thumbnailDismissButton: some View {

@@ -43,3 +43,4 @@ Decisions must reflect an explicit design choice, not a guess about the code. Up
 - 0008. Every expanded page collapses on pointer exit
 - 0009. A capture preview opens on the display it was taken on
 - 0010. The island that shows a capture preview is in the picture
+- 0011. A capture preview's row sits at the top of the island, beside a camera where there is one

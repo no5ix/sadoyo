@@ -519,6 +519,27 @@ enum NotchLayout {
         return action + 6 + titleWidth + 12 + actions
     }
 
+    /// The room four 28-point targets and the row's spacing take: the narrowest
+    /// side a preview's row is planned for beside a camera, its three actions
+    /// that give the capture somewhere to go - share, pin, edit - and its menu
+    /// for the rest.
+    static let capturePreviewBandSideRoom: CGFloat = 4 * 28 + 3 * 6
+    /// A preview's row that wraps a camera: the camera and its clearance, and
+    /// each side keeping what it shows - the page's way back and its name on
+    /// one, the actions and their menu on the other. Planned for the most a
+    /// side can show, so the page's name is never spent on an action.
+    static func capturePreviewBandWidth(cameraWidth: CGFloat, titleWidth: CGFloat) -> CGFloat {
+        let side = max(capturePreviewBandSideRoom, NotchBand.sectionsButtonRoom + titleWidth)
+        return cameraWidth + NotchBand.cameraClearance * 2 + side * 2
+    }
+    /// How many of the preview's actions a side of the row keeps, each in a
+    /// 28-point slot 6 from the next; what is left over rides in the row's
+    /// menu. Counted from the end of the row, where the capture is given
+    /// somewhere to go, so the menu holds the deleting and the reading.
+    static func capturePreviewTrailingActions(side: CGFloat) -> Int {
+        max(0, Int((side + 6) / (28 + 6)))
+    }
+
     /// The island as a preset presents it on a display whose camera leaves
     /// the usual clearance; custom keeps the chosen height.
     static func nominalHeight(_ layout: NotchSize, custom: CGFloat) -> CGFloat {

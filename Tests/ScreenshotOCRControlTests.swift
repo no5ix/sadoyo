@@ -124,5 +124,44 @@ enum ScreenshotOCRControlTests {
                              "\(language.rawValue) embedded=\(embedded): only the island toolbar makes room for the OCR button")
             }
         }
+
+        // The island's row beside a camera keeps the actions at its end, where
+        // the capture is given somewhere to go, and hands the deleting and the
+        // reading to a menu. Across a top with no camera, every action shows,
+        // as it always did, and no menu is needed. The island's answer is the
+        // fixture's; its own measure is tested in the mirror suite.
+        let islandStrings = FeatureStrings.screenshot(.enUS)
+        let islandModel = ScreenshotQuickPreviewModel()
+        FeatureRuntime.shared.available = true
+        defer { FeatureRuntime.shared.available = false }
+        let islandView = ScreenshotQuickPreviewView(
+            image: image, strings: islandStrings, model: islandModel, perform: { _ in },
+            dragItem: { NSItemProvider() }, share: { _ in }, systemShare: {},
+            shareAnchor: ShelfSharePickerAnchor.Anchor(), copySharedLink: {},
+            deleteSharedLink: {}, showQR: {}, copyText: {},
+            dismiss: {}, hoverChanged: { _ in }, showsDismissButton: true, embedded: true)
+        defer { NotchService.shared.capturePreviewTrailingActions = nil }
+        func islandRow(keeping: Int?) -> NSHostingView<AnyView> {
+            NotchService.shared.capturePreviewTrailingActions = keeping
+            let host = NSHostingView(rootView: AnyView(islandView.toolbar.defaultAppStorage(defaults)))
+            settle(host)
+            return host
+        }
+        let cameraRow = islandRow(keeping: 3)
+        suite.expect(buttons(cameraRow, label: islandStrings.editButton).count == 1
+            && buttons(cameraRow, label: islandStrings.pinButton).count == 1,
+            "the row beside a camera keeps the editor and the pin")
+        suite.expect(buttons(cameraRow, label: islandStrings.discardConfirm).isEmpty
+            && buttons(cameraRow, label: islandStrings.copyTextButton).isEmpty,
+            "the row beside a camera hands the deleting and the reading to its menu")
+        let wholeTop = islandRow(keeping: nil)
+        suite.expect(buttons(wholeTop, label: islandStrings.discardConfirm).count == 1
+            && buttons(wholeTop, label: islandStrings.copyTextButton).count == 1,
+            "the row across a top with no camera shows every action")
+        // The menu is a menu, not a button, so the row beside a camera is told
+        // apart by the room it takes: it keeps less of the row than the whole
+        // top does, and the whole top needs no menu at all.
+        suite.expect(cameraRow.fittingSize.width < wholeTop.fittingSize.width,
+            "the row beside a camera is narrower than the row across a whole top")
     }
 }

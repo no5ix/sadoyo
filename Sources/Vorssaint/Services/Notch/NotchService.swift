@@ -1225,6 +1225,19 @@ final class NotchService: ObservableObject {
         return mirror.model.geometry
     }
 
+    /// How many of a capture preview's actions the island's top row keeps beside
+    /// its camera, the rest riding in the row's own menu. Nil where the island
+    /// draws no camera and the row has the whole of its top to itself. Counted
+    /// in the island's 28-point slots, so a narrow side keeps fewer actions and
+    /// its menu takes the rest, and a page handed to another display's island is
+    /// counted for that display.
+    var capturePreviewTrailingActions: Int? {
+        let measured = presentationGeometry
+        let band = NotchBand(geometry: measured, contentWidth: measured.contentWidth)
+        guard band.besideCamera else { return nil }
+        return NotchLayout.capturePreviewTrailingActions(side: band.side)
+    }
+
     var expandedSize: CGSize {
         let geometry = expandedGeometry
         if showingSections {
@@ -1391,22 +1404,30 @@ final class NotchService: ObservableObject {
     var expandedGeometry: NotchGeometry {
         var result = presentationGeometry
         // Capture editing has a full toolbar whose actions must stay reachable.
+        // A preview's row is planned to sit at the top of the island: beside a
+        // camera where the island draws one, and across the whole top where it
+        // draws none, so the same row of actions reads the same on both.
+        let showsCapturePreviewPage = selected == .captures && captureContent != nil
+            && !showingSections && !showingAppPanel && selectedMetric == nil
         result.requiresFullWidthHeader = selected == .captures && captureActions != nil
             && !showingSections && !showingAppPanel && selectedMetric == nil
+            && (!result.isNotched || !showsCapturePreviewPage)
         // A capture preview is a picture of a fixed measure, so its page is as wide
         // as that picture and its row of actions, on every display that draws it -
         // the island's own and each copy alike - and not as wide as the display's
         // page width, which on a wide display leaves the actions at the far corners
         // of a panel with a small picture in the middle of it.
-        if selected == .captures, captureContent != nil, !showingSections, !showingAppPanel, selectedMetric == nil {
+        if showsCapturePreviewPage {
             result.capturePreviewPageWidth = ScreenshotQuickPreviewController.previewWidth
                 + NotchLayout.horizontalInset * 2
-            // The row of actions the preview hands the header, with the page's
-            // way back and its name beside them. The page is at least as wide
-            // as its row, so the page's name keeps its letters on a display
-            // that draws a camera, as it does on an island that draws none.
-            result.capturePreviewRowWidth = NotchLayout.capturePreviewRowWidth(
-                titleWidth: NotchCaptureControlsLayout.titleWidth(selected.title(L10n.shared.language)))
+            // The row the preview hands the header, measured for the form the
+            // header takes: a row that wraps the camera, its way back and the
+            // page's name on one side and the actions and their menu on the
+            // other, and a row across the whole top where there is no camera.
+            let titleWidth = NotchCaptureControlsLayout.titleWidth(selected.title(L10n.shared.language))
+            result.capturePreviewRowWidth = result.isNotched
+                ? NotchLayout.capturePreviewBandWidth(cameraWidth: result.cameraWidth, titleWidth: titleWidth)
+                : NotchLayout.capturePreviewRowWidth(titleWidth: titleWidth)
         }
         result.pageTop = expandedPageTop
         if result.pageTop == .wrapsCamera { result.pageTrailingControls = playerToggleCount }
