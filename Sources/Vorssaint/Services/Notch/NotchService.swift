@@ -3366,8 +3366,8 @@ final class NotchService: ObservableObject {
         // what it showed through a reading without one.
         var shown = musicStripSnapshot(for: NotchCompactMusicSnapshot(playback: playback, artwork: artwork,
                                                                       tint: tint, geometry: compactActivityGeometry))
-        shown.namedWing = namedMusicWings?.leading
-        shown.namesSong = musicStripNamesSong
+        shown.namedWing = nil
+        shown.namesSong = false
         presentedMusic = shown
     }
 
@@ -3845,8 +3845,7 @@ final class NotchService: ObservableObject {
         // The song the strip shows, which may still be the one a skip left.
         let live = NotchMusicService.shared.playback
         let track = (heldMusic ?? musicStripStandIn(for: live))?.playback.track ?? live?.track
-        return NotchMusicStripLayout.namedWings(title: track?.title, artist: track?.artist, geometry: compactActivityGeometry,
-                                                room: geometry.compactSideRoom ?? 0)
+        return nil
     }
 
     /// Whether a reading is the song paused from the strip's button, or one
