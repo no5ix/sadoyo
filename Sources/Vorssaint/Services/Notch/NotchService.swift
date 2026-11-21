@@ -1580,9 +1580,10 @@ final class NotchService: ObservableObject {
     /// on the island's display unless `geometry` is another display's.
     private func capsuleStripSize(for activity: NotchCompactActivity, companion: NotchCompactActivity?,
                                   geometry: NotchGeometry? = nil) -> CGSize {
-        // Only the island's own capsule is under the pointer. Its copies name a song as it starts.
+        // Track changes never name the song in the closed capsule. The
+        // existing music strip keeps its measured artwork-and-bars width.
         let ownDisplay = geometry == nil
-        let named = ownDisplay && musicStripNamesSong
+        let named = false
         let geometry = geometry ?? self.geometry
         let layout = NotchCapsuleLayout.self
         let language = L10n.shared.language
