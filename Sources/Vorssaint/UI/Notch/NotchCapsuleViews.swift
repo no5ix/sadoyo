@@ -297,7 +297,7 @@ struct NotchCapsuleMusicStrip: View {
         // cover and bars say enough. Beside another activity the name makes
         // room: two names cannot share one end of a row.
         let named = companion == nil
-            && (service.capsuleMusicTitleShown || (live ? service.musicStripNamesSong : snapshot?.namesSong == true))
+            && (live ? service.musicStripNamesSong : snapshot?.namesSong == true)
         let rowSize = size ?? CapsuleLayout.musicSurface(title: named ? title : nil,
                                                         companion: companion, geometry: geometry,
                                                         language: l10n.language,
