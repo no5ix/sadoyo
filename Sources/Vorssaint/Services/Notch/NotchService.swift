@@ -3151,30 +3151,14 @@ final class NotchService: ObservableObject {
              : selectedNotice.event == .watch ? .watch : .controls, on: displayID)
     }
 
-    /// Skipping through songs, or a title that lands before its artist, shows
-    /// one notice for where playback settles. Until then the compact strip
-    /// keeps the song it showed.
+    /// Track changes update the existing strip in place; they do not
+    /// create a temporary notice or hold the previous song's presentation.
     private func scheduleTrackNotice() {
         trackWork?.cancel()
-        if heldMusic == nil, let presentedMusic { heldMusic = presentedMusic }
-        // With no song on the strip, as after a long gap between songs, the
-        // new one waits too, so the notice is still where it first appears.
-        if heldMusic == nil { awaitsTrackNotice = true }
-        let work = DispatchWorkItem { [weak self] in
-            guard let self else { return }
-            self.trackWork = nil
-            // Released once the notice covers the strip, or when none can.
-            defer { self.releaseTrackHold() }
-            // The open island already shows the song, or holds something else
-            // the person is doing.
-            guard !self.expanded, !self.peeking, !self.dragPlaceholder, self.captureControls == nil,
-                  let playback = NotchMusicService.shared.playback, playback.isPlaying,
-                  let title = playback.track.title, !title.isEmpty else { return }
-            self.show(NotchNotice(event: .track, title: title, detail: playback.track.artist ?? "",
-                                  symbol: "music.note"))
-        }
-        trackWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
+        trackWork = nil
+        heldMusic = nil
+        awaitsTrackNotice = false
+        if notice == nil { refreshPresentation() }
     }
 
     /// The reading that ends the song names nothing, another player's song or
@@ -3840,23 +3824,13 @@ final class NotchService: ObservableObject {
         for mirror in mirrors.values { mirror.host.releaseWave() }
     }
 
-    /// A new song's title shows in the capsule for a few seconds, then the
-    /// capsule keeps only the cover and the bars.
+    /// Track metadata never changes the closed capsule's geometry.
     private func nameCapsuleSong() {
-        // The song held for the next one's notice is the one that ended; the
-        // next song is named once the notice lets it go.
-        guard heldMusic == nil else { return }
         musicTitleWork?.cancel()
-        capsuleMusicTitleShown = true
+        musicTitleWork = nil
+        guard capsuleMusicTitleShown else { return }
+        capsuleMusicTitleShown = false
         refreshCapsuleMusic()
-        let work = DispatchWorkItem { [weak self] in
-            guard let self else { return }
-            self.musicTitleWork = nil
-            self.capsuleMusicTitleShown = false
-            self.refreshCapsuleMusic()
-        }
-        musicTitleWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.musicTitleDuration, execute: work)
     }
 
     /// A capsule is as wide as what it shows of the song, here or on another display.
@@ -5399,12 +5373,11 @@ final class NotchService: ObservableObject {
                 .removeDuplicates().dropFirst().filter { $0 }.receive(on: DispatchQueue.main)
                 .sink { [weak self] _ in self?.mascotHearsMusic() }
                 .store(in: &subscriptions)
-            // A capsule names each new song for a moment: the song playing,
-            // or the next one once the notice releases the song it held.
-            music.$playback.map { $0?.track.title }.removeDuplicates().map { _ in () }
-                .merge(with: $heldMusic.map { $0?.playback.track.title }.removeDuplicates().map { _ in () })
+            // Song metadata updates redraw the existing strip; they never
+            // trigger a temporary title presentation or width recalculation.
+            music.$playback.map { $0?.track.title }.removeDuplicates()
                 .receive(on: DispatchQueue.main)
-                .sink { [weak self] in self?.nameCapsuleSong() }
+                .sink { [weak self] _ in self?.nameCapsuleSong() }
                 .store(in: &subscriptions)
         }
         if NotchSupport.routes(.track) {
