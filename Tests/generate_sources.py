@@ -1501,6 +1501,7 @@ def main():
           + "    typealias NotchMirror = Mirror\n\n"
           + "".join(declaration(notch, prefix).replace("    private ", "    ", 1) for prefix in [
               "    private func syncMirrors()", "    private func mirrorSurface(", "    private func mirrorSideRoom(",
+              "    private func mirroredNotice(", "    private func mirrorNoticeSurfaceSize(",
               "    private func closeMirrors()", "    private func updateFullscreenDisplays()",
               "    func presentsExpansion(on", "    func retireExpansion()",
               "    func mirrorHover(", "    private func scheduleMirrorOpen(",
@@ -1511,6 +1512,10 @@ def main():
               "    private func carriesPage(", "    private var mirrorHoverExpands:",
               "    private func rearmMirrorHoverOpen(", "    private func mirrorWillPress(",
               "    private func mirrorWasClicked(", "    func expand(on"])
+          # A copy with no notch sizes its notice as a capsule, measured by the
+          # island's own capsule layout. This fixture contracts the mirrors, not the
+          # capsule's measuring, so the copy takes a fixed capsule.
+          .replace("return capsuleNoticeSurface(notice, geometry: geometry)", "return CGSize(width: 120, height: 32)")
           .replace("NotchSupport.hidesUntilHover()", "hidesUntilHover")
           .replace("NotchSupport.hiddenShowsActivity()", "hiddenShowsActivity")
           .replace("NotchSupport.coversMenus()", "coversMenus")
@@ -1580,10 +1585,10 @@ def main():
           + declaration(notch, "    private func switchCompactSelection(").replace("private func", "func", 1)
           + declaration(notch, "    func refreshPresentation(")
               # The fixture's notice is a flag, not a reading. Which display draws
-              # the island's own level HUD, and which leaves it to the open page, is
-              # contracted by NotchMirrorContract.levelNoticeContracts over the
+              # the island's own notice, and which leaves it to the open page, is
+              # contracted by NotchMirrorContract.noticeMirroringContracts over the
               # production routing, so here a notice is a notice.
-              .replace("NotchLevelHUDRouting.shows($0.event, on: displayID ?? 0, expandedDisplayID: expansion.owner)", "_ in true")
+              .replace("NotchNoticeRouting.shows($0.event, on: displayID ?? 0, expandedDisplayID: expansion.owner)", "_ in true")
               .replace("NotchSupport.coversMenus()", "UserDefaults.standard.coversMenus")
           + declaration(notch, "    private func applyMenuSpace(").replace("private func", "func", 1)
           + declaration(notch, "    func presentCapture(")

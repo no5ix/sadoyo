@@ -33,7 +33,7 @@ struct NotchMirrorView: View {
             // here - a strip, a card, a secondary-click menu - opens here.
             .environment(\.notchPageDisplay, mirror.displayID)
             .tint(.white)
-            .accessibilityHidden(!(mirror.expanded || mirror.peeking || mirror.levelNotice != nil))
+            .accessibilityHidden(!(mirror.expanded || mirror.peeking || mirror.notice != nil))
     }
 
     @ViewBuilder private var content: some View {
@@ -55,7 +55,7 @@ struct NotchMirrorView: View {
         } else {
             let geometry = mirror.geometry
             let size = mirror.size
-            if let notice = mirror.levelNotice {
+            if let notice = mirror.notice {
                 if geometry.floats {
                     NotchCapsuleNoticeView(notice: notice, geometry: geometry, size: size)
                 } else {

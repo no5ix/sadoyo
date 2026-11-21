@@ -1184,8 +1184,10 @@ final class NotchMirrorModel: ObservableObject {
     /// belongs to the island's display; a copy's peek belongs to the copy whose
     /// pointer waited out the delay, and one copy's peek is not another's.
     @Published private(set) var peeking = false
-    /// A volume/brightness reading copied to this display while another island owns the page.
-    @Published private(set) var levelNotice: NotchNotice?
+    /// The notice this copy shows over its strip. A notice is the island's and
+    /// every island reads it, each in its own style; the copy drawing the open
+    /// page does not, as its page already carries the reading.
+    @Published private(set) var notice: NotchNotice?
     var shown = false
     /// The outline last drawn around it, and whether a timer's color tinted it.
     var outline: Bool?
@@ -1200,9 +1202,9 @@ final class NotchMirrorModel: ObservableObject {
 
     /// Whether anything it draws changed, so a copy is only resized when it did.
     func update(geometry: NotchGeometry, strip: NotchGeometry, size: CGSize, activity: NotchCompactActivity?,
-                expanded: Bool, peeking: Bool = false) -> Bool {
+                expanded: Bool, peeking: Bool = false, notice: NotchNotice? = nil) -> Bool {
         guard self.geometry != geometry || self.strip != strip || self.size != size || self.activity != activity
-                || self.expanded != expanded || self.peeking != peeking else {
+                || self.expanded != expanded || self.peeking != peeking || self.notice != notice else {
             return false
         }
         self.geometry = geometry
@@ -1211,6 +1213,7 @@ final class NotchMirrorModel: ObservableObject {
         self.activity = activity
         self.expanded = expanded
         self.peeking = peeking
+        self.notice = notice
         return true
     }
 
@@ -1220,11 +1223,6 @@ final class NotchMirrorModel: ObservableObject {
     func beginPeek() { peeking = true }
 
     func endPeek() { peeking = false }
-
-    func setLevelNotice(_ notice: NotchNotice?) {
-        guard levelNotice != notice else { return }
-        levelNotice = notice
-    }
 }
 
 /// A choice outlives the gaps in what was chosen, such as a song changing
@@ -2008,11 +2006,17 @@ enum NotchQuickAccessLayout {
 
 /// Routes Sadoyo's own volume/brightness feedback to every island except the one
 /// whose expanded page already presents that reading in its header.
-enum NotchLevelHUDRouting {
+enum NotchNoticeRouting {
+    /// A notice is raised on the island and read on every island: a volume key
+    /// pressed anywhere, a device connected anywhere, a song that starts
+    /// anywhere, a keyboard source chosen anywhere. Each copy draws it in the
+    /// style of its own display - a capsule where the display has no notch, the
+    /// strip around the camera where it has one. The one display that does not
+    /// get a second notice is the one whose island is open: its page already
+    /// draws the reading in its own header.
     static func shows(_ event: NotchEvent, on displayID: CGDirectDisplayID,
                       expandedDisplayID: CGDirectDisplayID?) -> Bool {
-        guard event == .volume || event == .brightness else { return false }
-        return expandedDisplayID != displayID
+        expandedDisplayID != displayID
     }
 }
 

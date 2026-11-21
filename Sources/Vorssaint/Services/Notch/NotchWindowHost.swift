@@ -293,7 +293,8 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
             && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         let previousGutter = quickAccessConfiguration == nil ? 0 : NotchQuickAccessLayout.gutter
         let previousBottom = quickAccessBottomInset(for: targetSize, geometry: currentGeometry)
-        let previousFrame = currentGeometry.frame(for: CGSize(width: targetSize.width + previousGutter * 2, height: targetSize.height + previousBottom))
+        let previousFrame = currentGeometry.frame(for: panelSize(targetSize, geometry: currentGeometry,
+                                                                  gutter: previousGutter, bottom: previousBottom))
         let withdrawing = !revealing && quickAccessConfiguration != nil && quickAccess == nil
         if revealing { quickAccessContainer?.motion.setVisible(false, animated: false) }
         quickAccessConfiguration = quickAccessContainer == nil ? nil : quickAccess
@@ -302,7 +303,7 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
         if withdrawing { quickAccessContainer?.motion.setVisible(false, animated: canAnimate) }
         let gutter = quickAccessConfiguration == nil ? 0 : NotchQuickAccessLayout.gutter
         let bottom = quickAccessBottomInset(for: size, geometry: geometry)
-        let frame = geometry.frame(for: CGSize(width: size.width + gutter * 2, height: size.height + bottom))
+        let frame = geometry.frame(for: panelSize(size, geometry: geometry, gutter: gutter, bottom: bottom))
         let changesFrame = revealing || relocationHidden || (hideWhenSettled && !canAnimate) || size != targetSize
             || frame != previousFrame || (!isAnimating && panel.frame != appliedFrame)
         targetUsesGlass = usesGlass
@@ -497,8 +498,20 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
         runSettledActions()
     }
 
+    /// The panel's size for a surface of `size`. A notice whose words are
+    /// longer than its label is drawn, with the island's silhouette, away from
+    /// the display's centre, so the island hangs that far past a window as wide
+    /// as the surface alone and the words are cut at the window's edge. The
+    /// window reaches as far as the island does; a surface that does not shift
+    /// keeps a window as wide as itself.
+    private func panelSize(_ size: CGSize, geometry: NotchGeometry, gutter: CGFloat, bottom: CGFloat) -> CGSize {
+        let shift = abs(geometry.surfaceShift) * 2
+        return CGSize(width: size.width + gutter * 2 + shift, height: size.height + bottom)
+    }
+
     private func reservedFrame(mainSize: CGSize, gutter: CGFloat, bottom: CGFloat) -> CGRect {
-        pixelAligned(currentGeometry.frame(for: CGSize(width: mainSize.width + gutter * 2, height: mainSize.height + bottom)))
+        pixelAligned(currentGeometry.frame(for: panelSize(mainSize, geometry: currentGeometry,
+                                                          gutter: gutter, bottom: bottom)))
     }
 
     /// Frames snap to the display's pixels here, not later inside AppKit, so

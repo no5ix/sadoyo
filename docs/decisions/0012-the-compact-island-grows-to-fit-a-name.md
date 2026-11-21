@@ -38,6 +38,22 @@
     leading wing (`NotchMusicStripLayout.namedWings`) with the island. Naming
     is skipped when the menus leave no room, which is the pre-existing
     graceful path.
+- Every notice is the island's, and every island reads it. Before this change
+  only volume and brightness reached a display's copy of the island
+  (`NotchLevelHUDRouting`), so a song, a connected device, a clipboard copy or a
+  keyboard source appeared on one display and nowhere else. `NotchNoticeRouting`
+  carries the notice to every copy; each copy draws it in the style of its own
+  display (`NotchCapsuleNoticeView` where there is no notch, `NotchNoticeView`
+  around the camera where there is one). The one display that does not show it is
+  the one drawing the open page, whose header already carries the reading.
+- A notice's wings are lopsided by design - the island grows more on the words'
+  side - and the notice, its silhouette and its window are drawn at half that
+  difference away from the display's centre. A window as wide as the surface
+  alone cut the words at its edge: on a notched display, a device name, a
+  keyboard source's name, a song's artist. `NotchWindowHost.panelSize` lets the
+  window reach as far as the island does, the island's own surface size is
+  computed for any notice (not only for the two level readings), and a copy's
+  geometry carries the notice's shift as the island's own does.
 - Consequences: the island is wider for a long name than it was; on a display
   with menus crowded, a long name is the thing that gives way, and the music
   strip falls back to cover and bars. Truncation remains for text longer than
@@ -48,11 +64,15 @@
   (they measure content, not padding).
 - Related code: `Sources/Vorssaint/Services/Notch/NotchService.swift`
   (`NotchNotice.preferredWings`, `musicStripNamesSong`, `namedMusicWings`,
-  `scheduleTrackNotice`, `nameCapsuleSong`, `capsuleStripSize`),
-  `Sources/Vorssaint/Services/Notch/NotchSupport.swift`
-  (`NotchCapsuleLayout.air`, `Maximum`, `NotchMusicStripLayout.maximumWing`),
+  `scheduleTrackNotice`, `nameCapsuleSong`, `capsuleStripSize`, `mirroredNotice`,
+  `surfaceSize`), `Sources/Vorssaint/Services/Notch/NotchSupport.swift`
+  (`NotchCapsuleLayout.air`, `Maximum`, `NotchMusicStripLayout.maximumWing`,
+  `NotchNoticeRouting`, `NotchMirrorModel.notice`),
+  `Sources/Vorssaint/Services/Notch/NotchWindowHost.swift` (`panelSize`),
+  `Sources/Vorssaint/UI/Notch/NotchMirrorView.swift`,
   `Sources/Vorssaint/UI/Notch/NotchNoticeView.swift`,
   `Sources/Vorssaint/UI/Notch/NotchCapsuleViews.swift`,
   `Sources/Vorssaint/UI/Notch/NotchMusicStrip.swift`.
   Tests: `Tests/NotchTests.swift` (`noticeLayoutContracts`, music naming),
-  `Tests/NotchCapsuleTests.swift`.
+  `Tests/NotchCapsuleTests.swift`, `Tests/NotchMirrorTests.swift`
+  (`noticeMirroringContracts`).

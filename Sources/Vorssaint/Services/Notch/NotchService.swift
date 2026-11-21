@@ -1537,7 +1537,7 @@ final class NotchService: ObservableObject {
         if expanded, presentsExpansion(on: displayID) { return showingCommandBar ? commandBarSurfaceSize : expandedSize }
         if dragPlaceholder { return CGSize(width: geometry.peek.width, height: geometry.safeContentTop + 66) }
         if let notice,
-           NotchLevelHUDRouting.shows(notice.event, on: displayID ?? 0, expandedDisplayID: expansion.owner) {
+           NotchNoticeRouting.shows(notice.event, on: displayID ?? 0, expandedDisplayID: expansion.owner) {
             guard noticeExpanded else { return geometry.noticeSize(wings: notice.wings(in: geometry)) }
             return geometry.notificationPreviewSize(
                 contentHeight: notice.previewContentHeight(width: geometry.notificationPreviewContentWidth))
@@ -1653,17 +1653,21 @@ final class NotchService: ObservableObject {
                               maximum: layout.Maximum.notification, geometry: targetGeometry)
     }
 
-    /// A collapsed mirror carries the same level feedback as the island's own
-    /// window. The expanded owner is the only display that does not get a second
-    /// notice: its page already draws this reading in the integrated header.
-    private func mirroredLevelNotice(on displayID: CGDirectDisplayID) -> NotchNotice? {
+    /// A notice belongs to the island, and every island reads it: a volume key
+    /// pressed, a device connected, a song started, a keyboard source chosen on
+    /// this Mac is read on all of them. The one display that does not get a
+    /// second copy of it is the one whose island is open: its page draws the
+    /// reading in its own header. Each copy draws the notice in the style of its
+    /// own display - a capsule where the display has no notch, the strip around
+    /// the camera where it has one.
+    private func mirroredNotice(on displayID: CGDirectDisplayID) -> NotchNotice? {
         guard let notice,
-              NotchLevelHUDRouting.shows(notice.event, on: displayID, expandedDisplayID: expansion.owner)
+              NotchNoticeRouting.shows(notice.event, on: displayID, expandedDisplayID: expansion.owner)
         else { return nil }
         return notice
     }
 
-    private func mirrorLevelNoticeSurfaceSize(_ notice: NotchNotice, geometry: NotchGeometry) -> CGSize {
+    private func mirrorNoticeSurfaceSize(_ notice: NotchNotice, geometry: NotchGeometry) -> CGSize {
         if geometry.floats {
             return capsuleNoticeSurface(notice, geometry: geometry)
         }
@@ -3577,14 +3581,14 @@ final class NotchService: ObservableObject {
             removeScreenEdgeClickMonitors()
             return
         }
-        // The expanded owner's page already presents the level reading in its
-        // integrated controls. Keep the shared notice for collapsed displays, but
-        // do not let it create a second standalone HUD on the page's display.
-        let showsOwnLevelNotice = notice.map {
-            NotchLevelHUDRouting.shows($0.event, on: displayID ?? 0, expandedDisplayID: expansion.owner)
+        // The display drawing the open page presents the reading in its own
+        // header. Keep the notice for every collapsed island, and do not let it
+        // stand twice on the page's display.
+        let showsOwnNotice = notice.map {
+            NotchNoticeRouting.shows($0.event, on: displayID ?? 0, expandedDisplayID: expansion.owner)
         } ?? false
         let open = (expanded && presentsExpansion(on: displayID)) || peeking
-            || (notice != nil && showsOwnLevelNotice)
+            || (notice != nil && showsOwnNotice)
             || dragPlaceholder || captureControls != nil
         guard open || (!hiddenAtRestInFullscreen && (geometry.isNotched || geometry.compactSideRoom != nil)) else {
             finishMusicDeparture()
@@ -4269,9 +4273,18 @@ final class NotchService: ObservableObject {
                 ? (base, expandedSize)
                 : peeking ? (base, base.peek)
                 : mirrorSurface(on: base, activity: activity)
-            let levelNotice = presents ? nil : mirroredLevelNotice(on: id)
-            let size = levelNotice.map { mirrorLevelNoticeSurfaceSize($0, geometry: base) } ?? restingSize
-            let mirror = mirrors[id] ?? makeMirror(id: id, geometry: base, size: size)
+            let mirrored = presents ? nil : mirroredNotice(on: id)
+            // A notice whose words are longer than its label sits off the
+            // camera's centre, its island grown more on the words' side. The
+            // copy's window and drawing have to follow, as the island's own do:
+            // centred on the camera, the copy's text runs past the island's end
+            // and is cut there.
+            var surface = base
+            let size = mirrored.map { mirrorNoticeSurfaceSize($0, geometry: surface) } ?? restingSize
+            if let mirrored, !surface.floats {
+                surface.surfaceShift = surface.noticeShift(mirrored.wings(in: surface))
+            }
+            let mirror = mirrors[id] ?? makeMirror(id: id, geometry: surface, size: size)
             mirrors[id] = mirror
             if mirror.model.outline != outline || mirror.model.timerOutline != (activity == .timer) {
                 mirror.model.outline = outline
@@ -4282,16 +4295,15 @@ final class NotchService: ObservableObject {
             if mirror.host.panel.sharingType != sharing { mirror.host.panel.sharingType = sharing }
             let revealing = !mirror.model.shown
             let previous = mirror.model.activity
-            let changed = mirror.model.update(geometry: base, strip: strip, size: size, activity: activity,
-                                              expanded: presents, peeking: peeking)
-            mirror.model.setLevelNotice(levelNotice)
+            let changed = mirror.model.update(geometry: surface, strip: strip, size: size, activity: activity,
+                                              expanded: presents, peeking: peeking, notice: mirrored)
             let grewUnderPointer = mirror.lastSize != size
             mirror.lastSize = size
             mirror.host.panel.acceptsKeyFocus = presents
             guard changed || revealing || grewUnderPointer else { continue }
             mirror.model.shown = true
             // Shown at once where the island just left, so the two trade places.
-            mirror.host.present(size: size, geometry: presents ? expandedGeometry : base, animated: !revealing,
+            mirror.host.present(size: size, geometry: presents ? expandedGeometry : surface, animated: !revealing,
                                 transitionContent: !revealing && previous != activity ? .replace : .none)
             // The copy's door: its whole strip at rest, and the open page's header
             // where this display carries the dashboard, as the island's own is. A
