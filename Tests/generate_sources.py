@@ -30,7 +30,13 @@ def declaration(path, prefix, scope=None):
         raise ValueError(f"Expected one declaration {prefix!r} in {path}")
     start = starts[0]
     indent = prefix[:len(prefix) - len(prefix.lstrip())]
-    end = next(i for i in range(start + 1, len(lines)) if lines[i].rstrip() == indent + "}")
+    # A body written on the declaration's own line ends there. Reading on would
+    # swallow the declarations that follow, which the compiler then sees twice.
+    first = lines[start].rstrip()
+    if first.endswith("}") and first.count("{") >= 1 and first.count("{") == first.count("}"):
+        end = start
+    else:
+        end = next(i for i in range(start + 1, len(lines)) if lines[i].rstrip() == indent + "}")
     body = "".join(lines[start:end + 1])
     return f'#sourceLocation(file: {json.dumps(path)}, line: {start + 1})\n{body}\n#sourceLocation()\n'
 
@@ -1388,7 +1394,7 @@ def main():
               "    private func holdEndingTrack(", "    func musicStripAnswers(", "    func hoverMusicStrip(",
               "    private func endMusicStripHover(", "    var musicStripShowsControl:",
               "    private var musicStripCanToggle:", "    func activateMusicStrip(", "    private func endMusicStripRequest(",
-              "    var musicStripNamesSong:", "    private func fitNamedMusicStrip(", "    private func nameCapsuleSong(",
+              "    var musicStripNamesSong:", "    private func fitNamedMusicStrip(",
               "    private func endMusicStripSong(", "    private func musicStripHolds(",
               "    func musicStripStandIn("])
           .replace("NotchSupport.routes(notice.event)", "routesNotices")
@@ -1573,6 +1579,11 @@ def main():
           + declaration(notch, "    private func rememberPresentedMusic(").replace("private func", "func", 1)
           + declaration(notch, "    private func switchCompactSelection(").replace("private func", "func", 1)
           + declaration(notch, "    func refreshPresentation(")
+              # The fixture's notice is a flag, not a reading. Which display draws
+              # the island's own level HUD, and which leaves it to the open page, is
+              # contracted by NotchMirrorContract.levelNoticeContracts over the
+              # production routing, so here a notice is a notice.
+              .replace("NotchLevelHUDRouting.shows($0.event, on: displayID ?? 0, expandedDisplayID: expansion.owner)", "_ in true")
               .replace("NotchSupport.coversMenus()", "UserDefaults.standard.coversMenus")
           + declaration(notch, "    private func applyMenuSpace(").replace("private func", "func", 1)
           + declaration(notch, "    func presentCapture(")
@@ -2068,6 +2079,10 @@ def main():
     write("NotchCaptureKeyboard.swift", "import Foundation\nimport Carbon.HIToolbox\n\nextension NotchCaptureKeyboardContract {\n"
           + "final class NotchService {\nstatic var shared = NotchService()\n"
           + "var presentationWindow: NSPanel? = NSPanel()\nvar acceptsSystemFeedback = true\n"
+          # The window that draws the capture preview: the island's own, or the copy
+          # of the display the capture was taken on. The fixture answers a copy by
+          # naming it; with none named, the island's own window draws the preview.
+          + "var captureWindow: NSPanel?\nvar capturePresentationWindow: NSPanel? { captureWindow ?? presentationWindow }\n"
           + "var expanded = true\nvar selected = NotchModule.captures\nvar showingAppPanel = false\n"
           + "var showingSections = false\nvar showingCommandBar = false\nvar selectedMetric: Int?\nvar captureControls: Int?\n"
           + "var captureID: UUID?\nvar captureContent: Bool? = true\n"

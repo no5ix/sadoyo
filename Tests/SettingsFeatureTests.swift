@@ -324,11 +324,12 @@ enum SettingsFeatureTests {
                "scratchpad preferences travel with the settings backup, its text does not")
         suite.expect(backupKeys.contains(DefaultsKey.radialMenuEnabled)
                 && backupKeys.contains(DefaultsKey.radialMenuShortcut)
-                && backupKeys.contains(DefaultsKey.radialMenuAtPointer)
                 && backupKeys.contains(DefaultsKey.radialMenuMouseButton)
                 && backupKeys.contains(DefaultsKey.radialMenuActivationMode)
                 && backupKeys.contains(DefaultsKey.radialMenuItems)
-                && backupKeys.contains(DefaultsKey.panelControlRadialMenu),
+                && backupKeys.contains(DefaultsKey.panelControlRadialMenu)
+                // The wheel opens at the pointer always, so its old choice is gone.
+                && !backupKeys.contains("radialMenuAtPointer"),
                "the radial menu wheel and choices travel with the settings backup")
         suite.expect(backupKeys.contains(DefaultsKey.mouseButtonShortcutsEnabled)
                 && backupKeys.contains(DefaultsKey.mouseButtonShortcuts)
