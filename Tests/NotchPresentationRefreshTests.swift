@@ -534,10 +534,41 @@ enum NotchPresentationRefreshContract {
         toolbar.captureContent = true
         toolbar.captureContentHeight = 150
         toolbar.refreshPresentation(animated: false)
-        suite.expect(toolbar.expandedGeometry.headerCameraGap == 0
-                     && toolbar.expandedGeometry.headerTopInset == 42
-                     && toolbar.windowHost?.activationRect.height == 42,
-                     "a capture toolbar keeps a full row below the camera without losing actions to the cutout")
+        suite.expect(toolbar.expandedGeometry.headerCameraGap == 210
+                     && toolbar.expandedGeometry.headerTopInset == 0
+                     && toolbar.windowHost?.activationRect.height == 32,
+                     "a preview's row keeps its actions beside the camera, at the top of the island")
+        // The dashboard lies under every page, so the way back from a preview keeps
+        // the preview open behind the page. The page a person is looking at is the
+        // page the island is sized for, and its row keeps its place beside the
+        // camera: the preview's picture and its row size the page they are drawn on.
+        toolbar.dashboardRequested = true
+        suite.expect(toolbar.showsDashboard
+                     && toolbar.expandedGeometry.capturePreviewPageWidth == nil
+                     && toolbar.expandedGeometry.headerCameraGap == 210,
+                     "the page a preview is behind keeps its own top row and asks its own width")
+        // The measure is shown on a display that draws no camera, where a preview's
+        // row is the whole of the island's top and so is planned short of the
+        // preset's page width in every language.
+        let copy = Service()
+        copy.geometry = NotchGeometry(screen: CGRect(x: 0, y: 0, width: 1920, height: 1080),
+                                      safeAreaTop: 0, cameraWidth: 0, layout: .spacious)
+        copy.selected = .captures
+        copy.captureContent = true
+        copy.captureActions = true
+        copy.captureContentHeight = 150
+        let plain = Service()
+        plain.geometry = copy.geometry
+        plain.dashboardRequested = true
+        let pageWidth = plain.expandedGeometry.expandedWidth
+        let previewWidth = copy.expandedGeometry.expandedWidth
+        suite.expect(copy.expandedGeometry.capturePreviewPageWidth != nil && previewWidth < pageWidth,
+                     "a preview's page is as wide as its row of actions, and the page width is the preset's")
+        copy.dashboardRequested = true
+        suite.expect(copy.showsDashboard
+                     && copy.expandedGeometry.capturePreviewRowWidth == 0
+                     && copy.expandedGeometry.expandedWidth == pageWidth,
+                     "the page a preview is behind is as wide as the same page with no preview open")
         toolbar.showingSections = true
         suite.expect(toolbar.expandedGeometry.headerCameraGap == 210,
                      "leaving capture editing puts the top row back beside the camera")

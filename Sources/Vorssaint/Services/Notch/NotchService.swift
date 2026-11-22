@@ -1443,11 +1443,16 @@ final class NotchService: ObservableObject {
         // A preview's row is planned to sit at the top of the island: beside a
         // camera where the island draws one, and across the whole top where it
         // draws none, so the same row of actions reads the same on both.
-        let showsCapturePreviewPage = selected == .captures && captureContent != nil
+        let capturePageIsOpen = selected == .captures && captureContent != nil
             && !showingSections && !showingAppPanel && selectedMetric == nil
         result.requiresFullWidthHeader = selected == .captures && captureActions != nil
             && !showingSections && !showingAppPanel && selectedMetric == nil
-            && (!result.isNotched || !showsCapturePreviewPage)
+            && (!result.isNotched || !capturePageIsOpen)
+        // The preview is the page a person is looking at only while the island draws
+        // it. The dashboard lies under every page, so the way back from a preview
+        // leaves the preview open behind that page without drawing it: the island is
+        // sized for the page on screen, and the preview's picture is not on screen.
+        let showsCapturePreviewPage = capturePageIsOpen && !showsDashboard
         // A capture preview is a picture of a fixed measure, so its page is as wide
         // as that picture and its row of actions, on every display that draws it -
         // the island's own and each copy alike - and not as wide as the display's

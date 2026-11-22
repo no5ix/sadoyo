@@ -714,7 +714,7 @@ enum NotchMirrorContract {
             "a page width set by hand stays the limit for a preview's row")
         let service = (try? String(contentsOfFile: "Sources/Vorssaint/Services/Notch/NotchService.swift",
                                    encoding: .utf8)) ?? ""
-        suite.expect(service.contains("&& (!result.isNotched || !showsCapturePreviewPage)"),
+        suite.expect(service.contains("&& (!result.isNotched || !capturePageIsOpen)"),
             "a preview's row wraps a camera where the island draws one, and spans the top where it draws none")
         suite.expect(service.contains("NotchLayout.capturePreviewBandWidth(cameraWidth: result.cameraWidth, titleWidth: titleWidth)"),
             "a page whose row wraps a camera is planned from the camera and both of the row's sides")
